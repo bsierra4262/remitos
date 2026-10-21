@@ -162,15 +162,12 @@ openssl req -new -key intellihelp.key \
   el certificado queda habilitado para solicitar CAE.</p>
 
   <div class="paso-tit"><span class="n">5</span><h2>Cargar las credenciales en el sistema</h2></div>
-  <p>Se hace una sola vez por ambiente. El certificado y la clave privada se envían por HTTPS al
-  servidor, que verifica que la clave corresponda al certificado y los guarda <b>cifrados</b>. No quedan
-  guardados en el navegador ni vuelven a mostrarse.</p>
+  <p>Lo hace un usuario <b>administrador</b>, una sola vez por ambiente. El certificado y la clave
+  privada se envían por HTTPS al servidor, que verifica que la clave corresponda al certificado y los
+  guarda <b>cifrados</b>. No quedan guardados en el navegador ni vuelven a mostrarse.</p>
 
-  <div class="sub"><span class="n">1</span><p>En el <b>Panel de la API</b>
-    (<b>intellihelp.tech/remitos/panel.html</b>), pestaña <b>Claves</b>, crear una clave para la
-    aplicación con los permisos <b>«leer»</b> y <b>«crear»</b>. Se muestra una sola vez: copiarla.</p></div>
-  <div class="sub"><span class="n">2</span><p>En la aplicación, entrar en <b>Configuración → Conexión con
-    ARCA</b> y completar:</p></div>
+  <div class="sub"><span class="n">1</span><p>Ingresar a la aplicación con un usuario administrador y
+    entrar en <b>Configuración → Conexión con ARCA</b>. Completar:</p></div>
   <div class="sangria">
     <table>
       <thead><tr><th>Campo</th><th>Qué se carga</th></tr></thead>
@@ -178,19 +175,20 @@ openssl req -new -key intellihelp.key \
         <tr><td>Ambiente</td><td>Homologación para las pruebas; Producción para operar</td></tr>
         <tr><td>CUIT del emisor</td><td>30-71140975-7</td></tr>
         <tr><td>Punto de venta</td><td>El que se dio de alta como <i>Web Services</i> en ARCA</td></tr>
-        <tr><td>Clave de acceso</td><td>La clave creada en el paso anterior</td></tr>
+        <tr><td>Punto de venta de remitos</td><td>El de los remitos con C.A.I. (ver paso 7)</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="sub"><span class="n">3</span><p>Presionar <b>Guardar</b>.</p></div>
-  <div class="sub"><span class="n">4</span><p>En la tarjeta <b>Certificado digital</b>, presionar
+  <div class="sub"><span class="n">2</span><p>Presionar <b>Guardar</b>. Estos datos son compartidos: los
+    usa todo el equipo.</p></div>
+  <div class="sub"><span class="n">3</span><p>En la tarjeta <b>Certificado digital</b>, presionar
     <b>Cargar certificado</b>, elegir el archivo <code>intellihelp.crt</code> y el archivo
-    <code>intellihelp.key</code>, ingresar la <b>clave maestra</b> de la API (no se guarda) y presionar
+    <code>intellihelp.key</code>, confirmar con <b>tu contraseña</b> y presionar
     <b>Validar y guardar</b>. Si la clave privada no corresponde al certificado, está vencido o es de
     otro CUIT, el sistema lo indica y no lo guarda.</p></div>
-  <div class="sub"><span class="n">5</span><p>Presionar <b>Probar conexión</b>: el sistema verifica los
+  <div class="sub"><span class="n">4</span><p>Presionar <b>Probar conexión</b>: el sistema verifica los
     servidores de ARCA y obtiene el acceso con el certificado cargado.</p></div>
-  <div class="sub"><span class="n">6</span><p>Activar el interruptor <b>Emisión electrónica</b>. Si falta
+  <div class="sub"><span class="n">5</span><p>Activar el interruptor <b>Emisión electrónica</b>. Si falta
     algún dato, el sistema indica cuál y no permite activarlo.</p></div>
 
   <div class="aviso verde">
@@ -246,15 +244,12 @@ openssl req -new -key intellihelp.key \
   en más <b>los remitos se autorizan solos</b>: número correlativo, C.A.I. y vencimiento salen
   automáticamente en cada uno.</p>
 
-  <div class="sub"><span class="n">1</span><p>Entrar al <b>Panel de la API</b>
-    (<b>intellihelp.tech/remitos/panel.html</b>) con la clave maestra.</p></div>
-  <div class="sub"><span class="n">2</span><p>Si la aplicación todavía no tiene su clave de acceso,
-    crearla como se indica en el paso 5 (permisos «leer» y «crear») y cargarla en
-    <b>Configuración → Conexión con ARCA</b>.</p></div>
-  <div class="sub"><span class="n">3</span><p>En el Panel, pestaña <b>C.A.I.</b>, cargar el talonario:
+  <div class="sub"><span class="n">1</span><p>Con un usuario administrador, abrir el <b>Panel de la API</b>
+    desde el menú de la aplicación. Se abre directamente con tu sesión.</p></div>
+  <div class="sub"><span class="n">2</span><p>En la pestaña <b>C.A.I.</b>, cargar el talonario:
     <b>punto de venta</b>, <b>número desde/hasta</b> (el rango que autorizó ARCA), el <b>C.A.I.</b>
     de 14 dígitos y su <b>vencimiento</b>.</p></div>
-  <div class="sub"><span class="n">4</span><p>Listo. Al cargar un remito, el botón <b>Autorizar</b>
+  <div class="sub"><span class="n">3</span><p>Listo. Al cargar un remito, el botón <b>Autorizar</b>
     le pone el próximo número, el C.A.I. y el vencimiento, y lo marca como <b>AUTORIZADO</b>.
     El sistema avisa cuando quedan pocos números o el C.A.I. está por vencer.</p></div>
 

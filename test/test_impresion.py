@@ -59,10 +59,7 @@ def guardar_en_prueba():
             pg.click("#tbCompTest"); pg.wait_for_timeout(420)
             pg.evaluate("() => guardarComprobante()")
             pg.wait_for_timeout(800)
-            r = pg.evaluate("""() => {
-                const l = JSON.parse(localStorage.getItem('remitos_comprobantes') || '[]');
-                return l.length ? l[0].cliente.razonSocial : null;
-            }""")
+            r = pg.evaluate("() => datos.comprobantes.length ? datos.comprobantes[0].cliente.razonSocial : null")
             return r == "CLIENTE REAL SRL", f"guardado={r!r}"
         finally:
             b.close()
@@ -80,7 +77,7 @@ def guardado_pendiente():
             pg.wait_for_timeout(80)                      # menos que los 400 ms del autoguardado
             pg.evaluate("() => imprimirTestRemito()")
             pg.wait_for_timeout(800)
-            r = pg.evaluate("""() => { const d = JSON.parse(localStorage.getItem('remitos_draft') || '{}');
+            r = pg.evaluate("""() => { const d = JSON.parse(localStorage.getItem(LS.draft) || '{}');
                 return d.cliente ? d.cliente.razonSocial : null; }""")
             return r == "MI REMITO REAL SA", f"borrador={r!r}"
         finally:
@@ -106,7 +103,7 @@ def tecleo_no_se_pierde():
 
 @caso("Los comprobantes siempre salen con ORIGINAL y DUPLICADO")
 def siempre_duplicado():
-    """Error corregido: los comprobantes heredaban fiscal.copias, el selector del REMITO; puesto
+    """Error corregido: los comprobantes heredaban los ejemplares del REMITO; puesto
     en «Sólo Original» desaparecía el duplicado de facturas, recibos y notas."""
     with sync_playwright() as pw:
         b, pg, errs = abrir(pw)
@@ -114,7 +111,7 @@ def siempre_duplicado():
             fallas = []
             for vista in ["factura", "recibo", "nota"]:
                 ir_a(pg, vista)
-                pg.evaluate("() => { fiscal.copias = 1; buildCompCopies(); }")  # peor caso
+                pg.evaluate("() => { calib.copias = 1; buildCompCopies(); }")  # peor caso
                 pg.wait_for_timeout(500)
                 r = pg.eval_on_selector_all(
                     "#compPrintCopies .copy-page",

@@ -1,14 +1,15 @@
 """Pruebas de la interfaz: comportamiento de la aplicación en el navegador.
 
-Cada caso reproduce un error corregido para que no vuelva a aparecer. Trabajan
-sobre localStorage; los que usan la API crean y borran sus propios datos.
+Cada caso reproduce un error corregido para que no vuelva a aparecer. Crean y
+borran sus propios datos en el entorno de pruebas.
 """
 import os
 import tempfile
+import uuid
 
 from playwright.sync_api import sync_playwright
 
-from base import abrir, caso, clave_maestra, es_local, ir_a, modo_documento, pedir
+from base import ADMIN_CLAVE, abrir, caso, clave_maestra, es_local, ir_a, limpiar_datos, modo_documento, pedir
 
 
 def _con_pagina(fn, ancho=1440, alto=900):
@@ -24,9 +25,8 @@ def _con_pagina(fn, ancho=1440, alto=900):
 def reabrir_conserva_fecha():
     def prueba(pg, _):
         ir_a(pg, "remito")
-        pg.evaluate("""() => { doc.fecha = '05/03/2026'; doc.cliente.razonSocial = 'CLIENTE FECHA';
-                               formFromDoc(); guardar({ silencioso: true }); }""")
-        rid = pg.evaluate("() => doc.id")
+        rid = pg.evaluate("""async () => { nuevo(); doc.fecha = '05/03/2026'; doc.cliente.razonSocial = 'CLIENTE FECHA';
+                               formFromDoc(); await guardar({ silencioso: true }); return doc.id; }""")
         pg.evaluate("() => nuevo()")
         ir_a(pg, "inicio")
         pg.click(f".doc-row[data-id='{rid}'] [data-open]")
@@ -56,20 +56,21 @@ def foco_no_pisa_fecha():
 def ctrl_s_por_vista():
     def prueba(pg, _):
         ir_a(pg, "factura")
-        antes_rem = pg.evaluate("() => load(LS.docs, []).length")
+        antes_rem = pg.evaluate("() => datos.remitosTotal")
+        antes_comp = pg.evaluate("() => datos.comprobantesTotal")
         pg.fill("[data-cpath='cliente.razonSocial']", "CLIENTE FACTURA")
         pg.keyboard.press("Control+s")
-        pg.wait_for_timeout(600)
-        comps = pg.evaluate("() => load(LS.comp, []).length")
-        rem = pg.evaluate("() => load(LS.docs, []).length")
-        return comps == 1 and rem == antes_rem, f"comprobantes={comps} remitos {antes_rem}->{rem}"
+        pg.wait_for_timeout(1200)
+        comps = pg.evaluate("() => datos.comprobantesTotal")
+        rem = pg.evaluate("() => datos.remitosTotal")
+        return comps == antes_comp + 1 and rem == antes_rem, f"comprobantes {antes_comp}->{comps} remitos {antes_rem}->{rem}"
     return _con_pagina(prueba)
 
 
 @caso("Después de un remito autorizado el número sigue la correlación")
 def numero_tras_autorizado():
     def prueba(pg, _):
-        n = pg.evaluate("""() => { save(LS.docs, [{ id: 'a1', numero: '00001-00000041', cliente: {}, items: [] }]);
+        n = pg.evaluate("""() => { datos.remitos = [{ id: 'a1', numero: '00001-00000041', cliente: {}, items: [] }];
                                    return nextRemitoNumero(); }""")
         return n == "00000042", f"siguiente={n}"
     return _con_pagina(prueba)
@@ -114,17 +115,18 @@ def cae_por_comprobante():
     return _con_pagina(prueba)
 
 
-@caso("Una copia de seguridad inválida no borra los datos")
+@caso("Una copia de seguridad inválida no cambia los datos")
 def importar_invalido():
     def prueba(pg, _):
-        pg.evaluate("() => save(LS.docs, [{ id: 'x1', numero: '1', cliente: { razonSocial: 'A' }, items: [] }])")
+        antes = pg.evaluate("() => datos.remitosTotal")
         ruta = os.path.join(tempfile.gettempdir(), "copia-invalida.json")
         with open(ruta, "w", encoding="utf-8") as f:
             f.write('{"docs": "no es una lista"}')
         pg.set_input_files("#importFile", ruta)
-        pg.wait_for_timeout(500)
-        n = pg.evaluate("() => load(LS.docs, []).length")
-        return n == 1, f"remitos tras importar={n}"
+        pg.wait_for_timeout(800)
+        despues = pg.evaluate("() => datos.remitosTotal")
+        aviso = pg.inner_text("#toast")
+        return despues == antes and "formato" in aviso, f"remitos {antes}->{despues} aviso={aviso!r}"
     return _con_pagina(prueba)
 
 
@@ -150,59 +152,60 @@ def carga_certificado_interfaz():
     rc, rk = os.path.join(carpeta, "prueba.crt"), os.path.join(carpeta, "prueba.key")
     open(rc, "w").write(cert)
     open(rk, "w").write(clave)
-    s, d = pedir("/claves.php", "POST", clave_maestra(), {"nombre": "PRUEBA INTERFAZ", "permisos": ["leer", "crear"]})
-    llave, kid = d.get("clave"), d.get("id")
 
     def prueba(pg, errores):
         ir_a(pg, "config")
         pg.click(".cfg-tab[data-tab=api]")
         pg.fill("#apiCuit", "20-12345678-6")
         pg.fill("#apiPv", "1")
-        pg.fill("#apiPanelKey", llave)
         pg.click("#apiSave")
-        pg.wait_for_timeout(700)
+        pg.wait_for_timeout(800)
         pg.click("#certUpload")
         pg.set_input_files("#certFile", rc)
         pg.set_input_files("#keyFile", rk)
-        pg.fill("#certMaster", clave_maestra())
+        pg.fill("#certConfirm", "contraseña-equivocada")
+        pg.click("#certSend")
+        pg.wait_for_timeout(1200)
+        rechazo = pg.inner_text("#certFormAlert")
+        pg.fill("#certConfirm", ADMIN_CLAVE)
         pg.click("#certSend")
         pg.wait_for_timeout(1500)
         estado = pg.inner_text("#certStatus")
         en_memoria = pg.evaluate("() => JSON.stringify(localStorage)")
-        campos_vacios = pg.evaluate("() => !document.querySelector('#certMaster').value && !document.querySelector('#certFile').value")
-        ok = "20-12345678-6" in estado and "BEGIN" not in en_memoria and campos_vacios and not errores
-        return ok, f"estado={estado[:80]!r} campos_vacios={campos_vacios} errores={errores}"
+        campos_vacios = pg.evaluate("() => !document.querySelector('#certConfirm').value && !document.querySelector('#certFile').value")
+        # El 403 de la contraseña equivocada es esperado; cualquier otro error, no.
+        inesperados = [e for e in errores if "status of 403" not in e]
+        ok = ("contraseña" in rechazo.lower() and "20-12345678-6" in estado and "BEGIN" not in en_memoria
+              and campos_vacios and not inesperados)
+        return ok, f"rechazo={rechazo[:60]!r} estado={estado[:60]!r} campos_vacios={campos_vacios} errores={inesperados}"
     try:
         return _con_pagina(prueba)
     finally:
         pedir("/arca.php?ambiente=homologacion", "DELETE", clave_maestra())
-        pedir(f"/claves.php?id={kid}", "DELETE", clave_maestra())
+        pedir("/ajustes.php", "POST", clave_maestra(), {"seccion": "emisor", "valores": {"ambiente": "homologacion", "cuit": "", "ptoVenta": "", "emision": False}})
 
 
-@caso("El respaldo en el servidor no duplica un remito guardado dos veces")
-def respaldo_sin_duplicar():
-    s, d = pedir("/claves.php", "POST", clave_maestra(), {"nombre": "PRUEBA RESPALDO", "permisos": ["leer", "crear", "borrar"]})
-    llave, kid = d.get("clave"), d.get("id")
+@caso("Guardar dos veces el mismo remito lo actualiza en el servidor, sin duplicarlo")
+def guardar_sin_duplicar():
+    nombre = f"GUARDADO DOBLE {uuid.uuid4().hex[:8].upper()}"
 
     def prueba(pg, _):
-        pg.evaluate("(k) => { apiCfg.panelKey = k; save(LS.api, apiCfg); }", llave)
         ir_a(pg, "remito")
-        pg.fill("[data-path='cliente.razonSocial']", "RESPALDO DOBLE S.A.")
+        pg.evaluate("() => nuevo()")
+        pg.fill("[data-path='cliente.razonSocial']", nombre)
         pg.click("#btnGuardar")
         pg.wait_for_timeout(1200)
+        numero = pg.evaluate("() => doc.numero")
         pg.fill("[data-path='cliente.localidad']", "CABA")
         pg.click("#btnGuardar")
         pg.wait_for_timeout(1200)
-        _, lista = pedir("/remitos.php", clave=llave)
-        propios = [x for x in lista.get("items", []) if x.get("cliente") == "RESPALDO DOBLE S.A."]
+        _, lista = pedir("/remitos.php?por_pagina=200", clave=clave_maestra())
+        propios = [x for x in lista.get("remitos", []) if x["cliente"]["razonSocial"] == nombre]
         for x in propios:
-            pedir(f"/remitos.php?id={x['id']}", "DELETE", llave)
-        cola = pg.evaluate("() => load(LS.outbox, []).length")
-        return len(propios) == 1 and cola == 0, f"en servidor={len(propios)} pendientes={cola}"
-    try:
-        return _con_pagina(prueba)
-    finally:
-        pedir(f"/claves.php?id={kid}", "DELETE", clave_maestra())
+            pedir(f"/remitos.php?id={x['id']}", "DELETE", clave_maestra())
+        ok = len(propios) == 1 and propios[0]["cliente"]["localidad"] == "CABA" and propios[0]["numero"] == numero
+        return ok, f"en servidor={len(propios)} numero={numero}"
+    return _con_pagina(prueba)
 
 
 @caso("Los paneles laterales cerrados no se ven ni proyectan sombra")

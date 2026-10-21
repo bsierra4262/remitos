@@ -21,6 +21,8 @@ require __DIR__ . '/lib/http.php';
 require __DIR__ . '/lib/db.php';
 require __DIR__ . '/lib/crypto.php';
 require __DIR__ . '/lib/audit.php';
+require __DIR__ . '/lib/session.php';
+require __DIR__ . '/lib/users.php';
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/arca.php';
 

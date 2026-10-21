@@ -1,10 +1,9 @@
-"""Pruebas de Inicio: sin ejemplo, paginación de recientes y recuperación de borrador.
-
-Todo local (localStorage): no toca el servidor.
+"""Pruebas de Inicio: limpieza de versiones anteriores, paginación de recientes y
+recuperación del borrador en curso.
 """
 from playwright.sync_api import sync_playwright
 
-from base import abrir, caso, ir_a
+from base import abrir, caso, clave_maestra, ir_a, limpiar_datos, pedir
 
 
 @caso("La app no siembra ningún remito de ejemplo, y limpia el viejo")
@@ -13,9 +12,8 @@ def sin_ejemplo():
         b, pg, errs = abrir(pw)
         try:
             # sembrar un ejemplo viejo como el de versiones anteriores
-            pg.evaluate("""() => {
-                save(LS.docs, [{ id:'ejemplo', cliente:{razonSocial:'VIEJO',cuit:'1'}, items:[], updated:Date.now() }]);
-            }""")
+            pg.evaluate("""() => localStorage.setItem('remitos_docs', JSON.stringify(
+                [{ id:'ejemplo', cliente:{razonSocial:'VIEJO',cuit:'1'}, items:[], updated:Date.now() }]))""")
             pg.reload(wait_until="networkidle")
             pg.wait_for_timeout(900)
             quedan = pg.evaluate("() => JSON.parse(localStorage.getItem('remitos_docs')||'[]')"
@@ -27,16 +25,13 @@ def sin_ejemplo():
 
 @caso("Documentos recientes se paginan cuando hay muchos")
 def recientes_paginados():
+    limpiar_datos()
+    for i in range(1, 12):
+        pedir("/remitos.php", "POST", clave_maestra(),
+              {"cliente": {"razonSocial": f"Cliente {i}"}, "items": [{"descripcion": "x"}]})
     with sync_playwright() as pw:
         b, pg, errs = abrir(pw)
         try:
-            pg.evaluate("""() => {
-                const docs = [];
-                for (let i = 1; i <= 11; i++)
-                    docs.push({ id:'r'+i, cliente:{razonSocial:'Cliente '+i, cuit:'30-000000'+i},
-                                items:[{descripcion:'x'}], updated: Date.now() - i*1000 });
-                save(LS.docs, docs);
-            }""")
             ir_a(pg, "inicio", 700)
             r = pg.evaluate("""() => ({
                 filas: document.querySelectorAll('#inicioRecent .doc-row').length,
@@ -117,7 +112,7 @@ def retomar_coherente():
                 return False, "caso 3: tras guardar y recargar no quedó en blanco"
 
             # 4) abrir el guardado, cambiar sin re-guardar, reload → restaura el cambio
-            pg.evaluate("() => { const d = JSON.parse(localStorage.getItem('remitos_docs'))[0]; openDoc(d.id); }")
+            pg.evaluate("() => openDoc(datos.remitos[0].id)")
             pg.wait_for_timeout(400)
             pg.evaluate("() => { doc.cliente.otrosDatos = 'CAMBIO PENDIENTE'; touch(); }")
             pg.wait_for_timeout(700)
@@ -132,16 +127,12 @@ def retomar_coherente():
 
 @caso("El chip de modo refleja también la conexión (unificado)")
 def indicador_conexion():
-    """El chip 'Modo local' pasa a 'Sin conexión' en rojo cuando no hay internet:
-    un solo indicador para modo + conexión, no dos."""
+    """El chip de numeración pasa a 'Sin conexión' en rojo cuando no hay internet:
+    un solo indicador para modo y conexión, no dos."""
     with sync_playwright() as pw:
-        b = pw.chromium.launch()
-        ctx = b.new_context(viewport={"width": 1400, "height": 950})
-        pg = ctx.new_page()
+        b, pg, errs = abrir(pw)
+        ctx = pg.context
         try:
-            import base as _b
-            pg.goto(_b.url_app(), wait_until="networkidle", timeout=60000)
-            pg.wait_for_timeout(1200)
             # ya no debe existir el chip separado
             separado = pg.query_selector("#connChip") is not None
             on_txt = pg.eval_on_selector("#modeChipT", "e => e.textContent")
@@ -154,8 +145,8 @@ def indicador_conexion():
             pg.evaluate("() => window.dispatchEvent(new Event('online'))")
             pg.wait_for_timeout(300)
             back_txt = pg.eval_on_selector("#modeChipT", "e => e.textContent")
-            ok = (not separado and "local" in on_txt.lower() and off_cls
-                  and off_txt.lower() == "sin conexión" and "local" in back_txt.lower())
+            ok = (not separado and "numeración" in on_txt.lower() and off_cls
+                  and off_txt.lower() == "sin conexión" and "numeración" in back_txt.lower())
             return ok, f"sep={separado} on={on_txt!r} off={off_txt!r}({off_cls}) back={back_txt!r}"
         finally:
             b.close()

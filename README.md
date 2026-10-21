@@ -24,7 +24,8 @@
 - El **remito** se imprime **sobre el talonario pre-impreso**, con cada dato calibrado al milímetro, o como **documento completo** en papel en blanco o PDF, con original y duplicado.
 - Se **autoriza** con el **C.A.I.** del talonario vigente: número correlativo, código y vencimiento se asignan solos.
 - Las **facturas, recibos y notas** toman su numeración de **ARCA** (último autorizado + 1) a través de los web services.
-- Funciona **sin conexión**: todo se guarda en el equipo y se respalda en el servidor cuando vuelve la red.
+- **Datos compartidos**: clientes, remitos, comprobantes y ajustes viven en el servidor; todo el equipo trabaja sobre la misma información, con **usuarios y roles**.
+- Si se corta la conexión, el documento en curso se sigue guardando en el equipo y se sube solo al volver la red.
 - Otros sistemas pueden **crear remitos por API** y recibir un enlace que los abre listos para imprimir.
 
 ## Índice
@@ -43,9 +44,13 @@
 
 > Las capturas usan datos ficticios de demostración.
 
+### Ingreso
+
+<p align="center"><img src="docs/screenshots/ingreso.png" alt="Ingreso" width="100%"></p>
+
 ### Inicio
 
-Accesos rápidos, totales y documentos recientes con su estado: autorizado, guardado o borrador sin guardar.
+Accesos rápidos, totales y documentos recientes con su estado (autorizado, guardado o borrador sin guardar) y quién los modificó por última vez.
 
 <p align="center"><img src="docs/screenshots/inicio.png" alt="Inicio" width="100%"></p>
 
@@ -85,6 +90,15 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
   <tr>
     <td width="50%"><b>Datos del emisor y certificado</b><br><img src="docs/screenshots/conexion-arca.png" alt="Conexión con ARCA"></td>
     <td width="50%"><b>Carga segura del certificado</b><br><img src="docs/screenshots/carga-certificado.png" alt="Carga del certificado"></td>
+  </tr>
+</table>
+
+### Usuarios
+
+<table>
+  <tr>
+    <td width="50%"><b>Usuarios y roles</b><br><img src="docs/screenshots/usuarios.png" alt="Usuarios"></td>
+    <td width="50%"><b>Alta con contraseña temporal</b><br><img src="docs/screenshots/usuario-nuevo.png" alt="Nuevo usuario"></td>
   </tr>
 </table>
 
@@ -128,10 +142,17 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 - CAE y vencimiento por comprobante.
 
 ### Datos y operación
-- **Agenda de clientes** con búsqueda e importación desde **CSV o Excel** (detección de encabezados en español, con o sin acentos).
+- **Agenda de clientes compartida** con búsqueda e importación desde **CSV o Excel** (detección de encabezados en español, con o sin acentos; actualiza por CUIT sin duplicar).
+- **Numeración asignada por el servidor**: dos personas guardando a la vez nunca reciben el mismo número.
 - **Copia de seguridad** completa en un archivo, con validación al importar.
-- **Sin conexión**: el borrador se guarda mientras se escribe y se recupera tras un corte; los remitos guardados se respaldan en el servidor al volver la red, sin duplicarse.
+- **Borrador protegido**: el documento en curso se guarda en el equipo mientras se escribe; ante un corte, queda pendiente y se sube solo al volver la red.
 - Atajos **Ctrl+S** y **Ctrl+P** según el documento en pantalla.
+
+### Usuarios y acceso
+- Ingreso con **correo y contraseña**; contraseña temporal en el alta, con cambio obligatorio en el primer ingreso.
+- Roles **operador** (documentos y clientes) y **administrador** (además usuarios, ajustes, certificado de ARCA, talonarios y panel).
+- «Mi cuenta» para cambiar la contraseña; el administrador genera contraseñas temporales y activa o desactiva usuarios.
+- La calibración de impresión queda en cada equipo, porque depende de su impresora.
 
 ### Panel de la API
 - Estado de los remitos y pendientes de facturar.
@@ -150,13 +171,13 @@ flowchart LR
     C -- No --> F[Remito guardado]
     E --> G[Impresión<br>original y duplicado]
     F --> G
-    E --> H[(Respaldo en el servidor)]
+    E --> H[(Servidor:<br>visible para todo el equipo)]
     F --> H
 ```
 
 | Estado | Significado |
 |---|---|
-| Borrador | En edición; se guarda solo en el equipo y se recupera tras un corte |
+| Borrador | En edición; se guarda en el equipo de quien lo carga y se recupera tras un corte |
 | Guardado | Guardado con número correlativo |
 | Autorizado | Con número del talonario, C.A.I. y vencimiento; lleva el sello AUTORIZADO |
 
@@ -182,18 +203,25 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin dependencias, 
 │   ├── css/                 # Estilos de la aplicación y del panel
 │   ├── js/
 │   │   ├── config.js        # Papel, posición de cada campo, calibración de fábrica, datos del emisor
-│   │   ├── app.js           # Edición, vista previa, impresión, agenda, respaldo y ARCA
+│   │   ├── app.js           # Edición, vista previa, impresión, agenda y configuración
+│   │   ├── servidor.js      # API, sesión, ingreso, usuarios y datos compartidos
 │   │   └── panel.js         # Panel de la API
 │   ├── api/
 │   │   ├── bootstrap.php    # Arranque común y manejo de errores
-│   │   ├── lib/             # http · db (migraciones) · auth · audit · crypto · arca
-│   │   ├── remitos.php      # Alta, lectura, listado y baja de remitos
+│   │   ├── lib/             # http · db (migraciones) · session · users · auth · audit · crypto · arca
+│   │   ├── sesion.php       # Ingreso, salida y cambio de contraseña
+│   │   ├── usuarios.php     # Administración de usuarios
+│   │   ├── clientes.php     # Agenda de clientes
+│   │   ├── remitos.php      # Remitos (numeración asignada por el servidor)
+│   │   ├── comprobantes.php # Facturas, recibos y notas
+│   │   ├── ajustes.php      # Datos del emisor y punto de venta
 │   │   ├── talonarios.php   # C.A.I. y autorización de remitos
 │   │   ├── arca.php         # Credenciales y conexión con ARCA
 │   │   ├── proximo.php      # Próximo número según ARCA
 │   │   ├── estado.php       # Seguimiento sin datos confidenciales
 │   │   ├── claves.php       # Claves de servicio y auditoría
 │   │   ├── evento.php       # Eventos de la aplicación
+│   │   ├── cli/usuario.php  # Alta de usuarios por línea de comandos
 │   │   └── config.sample.php
 │   ├── docs/                # Instructivo de alta en ARCA (HTML y PDF)
 │   └── assets/              # Logos
@@ -205,17 +233,24 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin dependencias, 
 | Capa | Tecnología |
 |---|---|
 | Interfaz | HTML + CSS propio + JavaScript sin dependencias; SheetJS se carga solo al importar Excel |
-| Almacenamiento local | `localStorage` (documentos, agenda, calibración y cola de respaldo) |
+| Datos | En el servidor; en el equipo solo la calibración de la impresora y el borrador en curso |
 | Servidor | PHP 8.2+ (PDO, OpenSSL, cURL, DOM) |
 | Base de datos | MariaDB 10.6+ / MySQL 8, esquema versionado con migraciones idempotentes |
 | Integraciones | ARCA WSAA y WSFEv1 (SOAP) |
-| Calidad | PSR-12 (PHP-CS-Fixer), Prettier, 72 casos de prueba automatizados |
+| Calidad | PSR-12 (PHP-CS-Fixer), Prettier, 84 casos de prueba automatizados |
 | Identidad | Tipografía Saira · paleta `#663399` · `#9f88b1` · `#fff6ff` · `#fffade` · colores planos |
 
 ## Seguridad
 
+**Usuarios y sesión**
+- Contraseñas con `password_hash` (bcrypt) y política de complejidad; contraseña temporal con cambio obligatorio.
+- Cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, limitada a la ruta de la aplicación; identificador regenerado al ingresar y al cambiar la contraseña.
+- **Token CSRF** obligatorio en toda escritura; vencimiento por inactividad (8 h) y absoluto (12 h).
+- **Bloqueo de la cuenta** tras 5 intentos fallidos y límite de ingresos fallidos por IP; el mensaje de error no revela si el correo existe y el tiempo de respuesta es el mismo.
+- El usuario se relee en cada petición: desactivarlo o cambiarle el rol rige en el acto. Siempre queda al menos un administrador.
+
 **Credenciales de ARCA**
-- El certificado y la clave privada **nunca se guardan en el navegador**: se envían una sola vez, por **HTTPS obligatorio** y con la **clave maestra**, al servidor.
+- El certificado y la clave privada **nunca se guardan en el navegador**: los carga un administrador, que reconfirma su contraseña, y se envían una sola vez al servidor por **HTTPS obligatorio**.
 - El servidor valida que sean PEM correctos, que la clave (RSA de 2048 bits o más) corresponda al certificado, que esté vigente y que el CUIT coincida.
 - Se almacenan **cifrados con AES-256-GCM**. La clave de cifrado vive solo en `config.php` (fuera del repositorio y de la base) y se deriva una subclave por propósito con **HKDF-SHA256**. Cada valor queda ligado a su ambiente y su campo como dato autenticado: un valor copiado a otra fila no se descifra.
 - Los tickets de WSAA también se guardan cifrados. La firma se hace en el servidor: los archivos temporales solo contienen el pedido y la firma, con permisos `0600`, y se eliminan siempre.
@@ -232,7 +267,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin dependencias, 
 **Aplicación**
 - **Content-Security-Policy** sin scripts inline ni de terceros, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS y redirección a HTTPS.
 - Escape de todo dato mostrado en pantalla.
-- La clave del panel se conserva solo durante la sesión de la pestaña (`sessionStorage`).
+- El panel de la API se abre con la sesión de un administrador; una clave de API solo se conserva mientras la pestaña está abierta (`sessionStorage`).
 
 ## Instalación y despliegue
 
@@ -252,13 +287,15 @@ cp app/api/config.sample.php app/api/config.php
 php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"                                   # app_key
 php -r "\$k='ith_'.bin2hex(random_bytes(24)); echo \$k, PHP_EOL, hash('sha256',\$k), PHP_EOL;"   # clave maestra y su hash
 
-# 3. Las tablas se crean y migran solas en la primera petición a la API.
+# 3. Primer administrador (las tablas se crean y migran solas):
+php app/api/cli/usuario.php "Nombre Apellido" correo@intellihelp.tech admin
+#    imprime una contraseña temporal que se cambia en el primer ingreso
 ```
 
 Después:
-1. Ingresar al panel (`/remitos/panel.html`) con la clave maestra y crear una clave para la aplicación con permisos `leer` y `crear`.
-2. En la aplicación, **Configuración → Conexión con ARCA**: CUIT, punto de venta y la clave de la aplicación.
-3. Cargar el certificado de ARCA y el talonario de C.A.I. según el instructivo.
+1. Ingresar a la aplicación con el administrador y crear los usuarios del equipo en **Configuración → Usuarios**.
+2. En **Configuración → Conexión con ARCA**: CUIT, puntos de venta y el certificado.
+3. Cargar el talonario de C.A.I. desde el **Panel de la API** según el instructivo.
 
 Los recursos se referencian con `?v=NNN`: al publicar cambios en CSS o JS se incrementa la versión en `index.html` y `panel.html`.
 
@@ -269,7 +306,7 @@ pip install playwright pymupdf cryptography && playwright install chromium
 python test/correr.py
 ```
 
-**72 casos** automatizados sobre la aplicación en el navegador y la API: impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I., autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos. Por defecto corren contra un entorno local (`php -S` y una base de pruebas); ver [`test/LEEME.md`](test/LEEME.md).
+**84 casos** automatizados sobre la aplicación en el navegador y la API: impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I., usuarios, sesión y roles, datos compartidos, numeración concurrente, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos. Por defecto corren contra un entorno local (`php -S` y una base de pruebas); ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 

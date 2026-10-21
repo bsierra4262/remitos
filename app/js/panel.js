@@ -4,8 +4,9 @@
  * Panel de administración de la API: estado de los documentos, talonarios de
  * C.A.I., claves de servicio y auditoría.
  *
- * La clave se conserva en sessionStorage: se pierde al cerrar la pestaña y no
- * queda guardada en el equipo.
+ * Se ingresa con la sesión de un administrador de la aplicación o con una clave
+ * de la API. La clave se conserva en sessionStorage: se pierde al cerrar la
+ * pestaña y no queda guardada en el equipo.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -28,6 +29,7 @@
       .replace(/"/g, '&quot;');
 
   let clave = '',
+    csrf = '', // sesión de un administrador de la aplicación (sin clave de API)
     esMaestra = false,
     tab = 'estado',
     ultimaNueva = null;
@@ -51,10 +53,16 @@
 
   async function api(ruta, opts = {}) {
     const escritura = opts.method && opts.method !== 'GET';
-    const headers = Object.assign({ 'X-API-Key': clave }, opts.body ? { 'Content-Type': 'application/json' } : {});
+    const headers = Object.assign(
+      clave ? { 'X-API-Key': clave } : escritura ? { 'X-CSRF-Token': csrf } : {},
+      opts.body ? { 'Content-Type': 'application/json' } : {}
+    );
     let res, d;
     try {
-      res = await fetch(ruta, Object.assign({ cache: 'no-store', credentials: 'omit' }, opts, { headers }));
+      res = await fetch(
+        ruta,
+        Object.assign({ cache: 'no-store', credentials: clave ? 'omit' : 'same-origin' }, opts, { headers })
+      );
     } catch (e) {
       return { status: 0, d: { ok: false, error: 'Sin conexión con el servidor' } };
     }
@@ -240,9 +248,11 @@
     { k: '', et: 'Todo' },
     { k: 'remito', et: 'Remitos' },
     { k: 'comprobante', et: 'Comprobantes' },
+    { k: 'cliente', et: 'Clientes' },
     { k: 'cai', et: 'C.A.I.' },
     { k: 'arca', et: 'ARCA' },
     { k: 'clave', et: 'Claves' },
+    { k: 'usuario', et: 'Usuarios' },
     { k: 'acceso', et: 'Accesos' },
     { k: 'error', et: 'Errores' },
   ];
@@ -252,6 +262,8 @@
     cai: '#8a6d00',
     arca: '#3d1f5c',
     clave: '#9f88b1',
+    usuario: '#522980',
+    cliente: '#663399',
     acceso: '#6b6f7b',
     error: '#c0392b',
     sistema: '#6b6f7b',
@@ -486,6 +498,10 @@
     if (e) e.preventDefault();
     clave = $('#apiKey').value.trim();
     if (!clave) return avisar('Ingresá la clave de la API');
+    await abrirPanel();
+  }
+  /* Valida la credencial (clave de API o sesión de administrador) y muestra el panel. */
+  async function abrirPanel() {
     const [est, adm] = await Promise.all([api('api/estado.php'), api('api/claves.php?accion=listar')]);
     if (!est.d || !est.d.ok) {
       clave = '';
@@ -495,7 +511,8 @@
     esMaestra = !!(adm.d && adm.d.ok);
     $('#modoBadge').textContent = esMaestra ? 'Administración' : 'Consulta';
     $('#apiKey').value = '';
-    sessionStorage.setItem(SK, clave);
+    if (clave) sessionStorage.setItem(SK, clave);
+    $('#btnSalir').hidden = !clave; // con la sesión de la aplicación se sale desde la aplicación
     mostrarSesion(true);
     ultimoRender[tab] = null;
     pintar();
@@ -526,5 +543,16 @@
   if (guardada) {
     $('#apiKey').value = guardada;
     entrar();
+  } else {
+    // Un administrador que ya ingresó a la aplicación entra directo con su sesión.
+    fetch('api/sesion.php', { cache: 'no-store', credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(j => {
+        if (j && j.usuario && j.usuario.rol === 'admin' && !j.usuario.debe_cambiar) {
+          csrf = j.csrf;
+          abrirPanel();
+        }
+      })
+      .catch(() => {});
   }
 })();

@@ -103,57 +103,82 @@ def talonario_activo_emitido():
         _borrar_talonario(tid)
 
 
-@caso("El remito se autoriza solo: número + C.A.I. + sello")
+def _punto_de_venta_remitos(pv):
+    pedir("/ajustes.php", "POST", clave_maestra(), {"seccion": "remito", "valores": {"ptoVenta": str(pv), "copias": 2}})
+
+
+@caso("El remito se autoriza solo: número + C.A.I. + sello, guardado en el servidor")
 def remito_autoriza_solo():
     m = clave_maestra()
-    if not m:
-        return False, "sin clave maestra"
-    s, d = pedir("/claves.php", "POST", m, {"nombre": "TEST APP", "permisos": ["leer", "crear"]})
-    panel_key, kid = d.get("clave"), d.get("id")
     s, d = _talonario(desde=1, hasta=50, pv=94)
     tid = d.get("id")
+    _punto_de_venta_remitos(94)
     try:
         with sync_playwright() as pw:
             b, pg, errs = abrir(pw)
             try:
-                pg.evaluate("""(k) => { apiCfg.panelKey = k; apiCfg.ptoVenta = '94';
-                    save(LS.api, apiCfg); fiscal.ptoVenta = '00094'; saveFiscal(); }""", panel_key)
                 ir_a(pg, "remito")
-                pg.evaluate("() => { doc.fecha = '21/07/2026'; formFromDoc(); renderPreview(); }")
+                pg.evaluate("() => { nuevo(); doc.cliente.razonSocial = 'CLIENTE AUTORIZADO'; doc.fecha = '21/07/2026'; formFromDoc(); renderPreview(); }")
                 pg.click("#btnAutorizar")
                 pg.wait_for_timeout(2500)
-                est = pg.evaluate("() => ({estado: doc.estado, numero: doc.numero, cai: fiscal.cai})")
+                est = pg.evaluate("() => ({estado: doc.estado, numero: doc.numero, cai: doc.cai, id: doc.id})")
                 modo_documento(pg, "full")
                 sello = pg.evaluate("""() => [...document.querySelectorAll('#template div')]
                     .some(e => e.textContent.trim() === 'AUTORIZADO')""")
                 cai_ok = pg.evaluate("""() => [...document.querySelectorAll('#template div')]
                     .some(e => e.textContent.includes('75041234567890'))""")
-                # el número no debe salir duplicado
                 nro = pg.evaluate("""() => { const e = [...document.querySelectorAll('#template div')]
                     .find(x => x.textContent.includes('00000001')); return e ? e.textContent.trim() : ''; }""")
                 doble = nro.count("00094") > 1
+                # quedó así en el servidor, no solo en pantalla
+                _, srv = pedir(f"/remitos.php?id={est['id']}", clave=m)
+                guardado = srv.get("remito", {})
+                en_servidor = guardado.get("estado") == "autorizado" and guardado.get("numero") == "00094-00000001"
                 ok = (est["estado"] == "autorizado" and est["numero"] == "00094-00000001"
-                      and est["cai"] == "75041234567890" and sello and cai_ok and not doble)
-                return ok, f"estado={est} sello={sello} cai={cai_ok} nro={nro!r} doble={doble}"
+                      and est["cai"] == "75041234567890" and sello and cai_ok and not doble and en_servidor)
+                return ok, f"estado={est} sello={sello} cai={cai_ok} nro={nro!r} doble={doble} servidor={en_servidor}"
             finally:
                 b.close()
     finally:
-        pedir(f"/claves.php?id={kid}", "DELETE", m)
+        _punto_de_venta_remitos(1)
         _borrar_talonario(tid)
 
 
-@caso("Sin clave del panel, Autorizar avisa en vez de romper")
-def autorizar_sin_clave():
-    with sync_playwright() as pw:
-        b, pg, errs = abrir(pw)
-        try:
-            pg.evaluate("() => { apiCfg.panelKey = ''; save(LS.api, apiCfg); }")
-            ir_a(pg, "remito")
-            pg.click("#btnAutorizar")
-            pg.wait_for_timeout(900)
-            aviso = pg.evaluate("""() => { const t = document.querySelector('.toast');
-                return t ? t.textContent : ''; }""")
-            sigue = pg.evaluate("() => doc.estado")
-            return "clave de acceso" in aviso and sigue != "autorizado", f"aviso={aviso!r} estado={sigue}"
-        finally:
-            b.close()
+@caso("Un remito autorizado no se puede volver a autorizar, editar su número ni eliminar")
+def autorizado_protegido():
+    m = clave_maestra()
+    s, d = _talonario(desde=1, hasta=5, pv=96)
+    tid = d.get("id")
+    try:
+        _, r = pedir("/remitos.php", "POST", m, {"cliente": {"razonSocial": "PROTEGIDO"}})
+        rid = r["id"]
+        s1, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 96, "tipo": 91, "remito_id": rid})
+        s2, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 96, "tipo": 91, "remito_id": rid})
+        _, e = pedir("/remitos.php", "POST", m, {"id": rid, "numero": "99999999", "cai": "1", "cliente": {"razonSocial": "EDITADO"}})
+        s3, _ = pedir(f"/remitos.php?id={rid}", "DELETE", m)
+        rem = e.get("remito", {})
+        ok = s1 == 200 and s2 == 409 and rem.get("numero") == "00096-00000001" and rem.get("cliente", {}).get("razonSocial") == "EDITADO" and s3 == 409
+        return ok, f"autorizar={s1} reautorizar={s2} numero={rem.get('numero')} borrar={s3}"
+    finally:
+        _borrar_talonario(tid)
+
+
+@caso("Sin talonario vigente, Autorizar avisa y el remito queda como estaba")
+def autorizar_sin_talonario():
+    _punto_de_venta_remitos(95)
+    try:
+        with sync_playwright() as pw:
+            b, pg, errs = abrir(pw)
+            try:
+                ir_a(pg, "remito")
+                pg.evaluate("() => { nuevo(); doc.cliente.razonSocial = 'SIN TALONARIO'; formFromDoc(); }")
+                pg.click("#btnAutorizar")
+                pg.wait_for_timeout(1500)
+                aviso = pg.evaluate("""() => { const t = document.querySelector('.toast');
+                    return t ? t.textContent : ''; }""")
+                sigue = pg.evaluate("() => doc.estado")
+                return "talonario" in aviso.lower() and sigue != "autorizado", f"aviso={aviso!r} estado={sigue}"
+            finally:
+                b.close()
+    finally:
+        _punto_de_venta_remitos(1)

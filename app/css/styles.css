@@ -175,6 +175,9 @@ a {
     background 0.15s,
     color 0.15s;
 }
+.nav-item {
+  text-decoration: none;
+}
 .nav-item svg {
   width: 20px;
   height: 20px;
@@ -1721,6 +1724,189 @@ body[data-view='clientes'] .only-doc {
   margin-top: 1px;
 }
 
+/* ---------- Acceso ---------- */
+body.sin-sesion .app,
+body.sin-sesion .toast:not(.show) {
+  visibility: hidden;
+}
+.acceso {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  background: #fff;
+}
+.acceso-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  padding: 48px 64px;
+  background: var(--primary);
+  color: #fff;
+}
+.acceso-hero img {
+  width: 92px;
+  height: auto;
+  margin-bottom: 18px;
+}
+.acceso-hero h1 {
+  margin: 0;
+  font-size: 46px;
+  line-height: 1.06;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.acceso-hero h1 span {
+  color: var(--cream);
+}
+.acceso-hero p {
+  margin: 0;
+  max-width: 460px;
+  font-size: 16.5px;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+.acceso-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 24px;
+}
+.acceso-form {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.acceso-form h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.acceso-form .muted {
+  margin: -10px 0 4px;
+}
+.acceso-aviso {
+  width: 100%;
+  max-width: 380px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-50);
+  border: 1px solid var(--danger-line);
+  color: #9b2c20;
+  font-size: 14px;
+}
+.muted {
+  color: var(--muted);
+}
+
+/* ---------- Usuario en la navegación ---------- */
+.nav-user {
+  padding: 2px 0 0;
+  gap: 4px;
+}
+.nav-cuenta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-cuenta:hover,
+.navbar .nav-salir:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.navbar .nav-salir {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ---------- Usuarios ---------- */
+.user-list {
+  display: flex;
+  flex-direction: column;
+}
+.user-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line-2);
+}
+.user-row:last-child {
+  border-bottom: 0;
+}
+.temporal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--cream-line);
+  border-radius: 12px;
+  background: var(--cream);
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.temporal code {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--cream-line);
+  border-radius: 8px;
+  background: #fff;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+.usr-acciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
+}
+.cuenta-datos {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+.cuenta-datos strong {
+  font-size: 16px;
+}
+.cuenta-datos span:not(.cal-mode) {
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.sub-tit {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+body:not(.es-admin) .solo-admin,
+body.es-admin .solo-operador {
+  display: none !important;
+}
+
 /* ---------- Clientes ---------- */
 .clientes-bar {
   display: flex;
@@ -2472,6 +2658,31 @@ body[data-view='clientes'] .only-doc {
   }
 }
 @media (max-width: 760px) {
+  .acceso {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    overflow-y: auto;
+  }
+  .acceso-hero {
+    padding: 28px 24px;
+  }
+  .acceso-hero img {
+    width: 64px;
+    margin-bottom: 4px;
+  }
+  .acceso-hero h1 {
+    font-size: 30px;
+  }
+  .acceso-hero p {
+    display: none;
+  }
+  .user-row {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+  .user-row .doc-meta,
+  .user-row .doc-state {
+    display: none;
+  }
   .view-remito.active,
   .view-comprobante.active {
     flex-direction: column;

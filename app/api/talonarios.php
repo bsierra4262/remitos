@@ -139,10 +139,29 @@ if ($method === 'POST') {
             $date = date('Y-m-d');
         }
         $confirm = !empty($body['confirmar']);
+        $remitoId = (string) ($body['remito_id'] ?? '');
+        if ($remitoId !== '' && !preg_match('/^[0-9a-f]{16}$/', $remitoId)) {
+            api_error(400, 'Identificador de remito inválido');
+        }
 
-        // Bloqueo de fila: dos pedidos simultáneos nunca reciben el mismo número.
+        // Bloqueo de filas: dos pedidos simultáneos nunca reciben el mismo número, y el
+        // número queda escrito en el remito dentro de la misma transacción.
         $pdo->beginTransaction();
         try {
+            $remito = null;
+            if ($remitoId !== '') {
+                $st = $pdo->prepare('SELECT * FROM remitos WHERE id = ? FOR UPDATE');
+                $st->execute([$remitoId]);
+                $remito = $st->fetch() ?: null;
+                if ($remito === null) {
+                    $pdo->rollBack();
+                    api_error(404, 'Remito no encontrado. Guardalo antes de autorizarlo.');
+                }
+                if (($remito['estado'] ?? '') === 'autorizado') {
+                    $pdo->rollBack();
+                    api_error(409, 'Este remito ya está autorizado con el Nº ' . $remito['numero']);
+                }
+            }
             $t = talonario_vigente($pdo, $pointOfSale, $type, true);
             if ($t === null) {
                 $pdo->rollBack();
@@ -160,6 +179,21 @@ if ($method === 'POST') {
             $number = (int) $t['proximo_numero'];
             $pdo->prepare('UPDATE cai_talonarios SET proximo_numero = proximo_numero + 1 WHERE id = ?')
                 ->execute([$t['id']]);
+            if ($remito !== null) {
+                $doc = json_decode((string) $remito['data'], true) ?: [];
+                $doc['numero'] = fmt_numero($pointOfSale, $number);
+                $doc['estado'] = 'autorizado';
+                $doc['cai'] = $t['cai'];
+                $doc['caiVto'] = date('d/m/Y', (int) strtotime($t['cai_vencimiento']));
+                $doc['updated'] = (int) round(microtime(true) * 1000);
+                $pdo->prepare(
+                    "UPDATE remitos SET numero = ?, numero_int = ?, punto_venta = ?, estado = 'autorizado', data = ?,
+                            updated = ?, actualizado_por = ? WHERE id = ?"
+                )->execute([
+                    $doc['numero'], $number, $pointOfSale, json_encode($doc, JSON_UNESCAPED_UNICODE),
+                    $doc['updated'], $auth['nombre'], $remitoId,
+                ]);
+            }
             $pdo->commit();
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -182,6 +216,7 @@ if ($method === 'POST') {
             'cai' => $t['cai'],
             'cai_vencimiento' => $t['cai_vencimiento'],
             'restantes' => max(0, (int) $t['numero_hasta'] - $number),
+            'remito_id' => $remitoId !== '' ? $remitoId : null,
         ]);
     }
 

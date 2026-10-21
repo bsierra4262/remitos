@@ -28,7 +28,7 @@ function api_headers(string $methods = 'GET, OPTIONS'): void
     header('Referrer-Policy: no-referrer');
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: ' . $methods);
-    header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
+    header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-CSRF-Token');
     header('Access-Control-Max-Age: 600');
 
     if (api_method() === 'OPTIONS') {

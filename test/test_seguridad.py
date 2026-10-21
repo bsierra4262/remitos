@@ -134,7 +134,7 @@ def remito_respaldo_sin_duplicar():
     cuerpo["cliente"]["razonSocial"] = "CLIENTE DE PRUEBA EDITADO"
     s2, d2 = pedir("/remitos.php", "POST", m, cuerpo)
     try:
-        s3, d3 = pedir(f"/remitos.php?id={d1.get('id')}")
+        s3, d3 = pedir(f"/remitos.php?id={d1.get('id')}", clave=m)
         nombre = d3.get("remito", {}).get("cliente", {}).get("razonSocial")
         ok = s1 == 201 and s2 == 200 and d1.get("id") == d2.get("id") and nombre == "CLIENTE DE PRUEBA EDITADO"
         return ok, f"alta={s1} reenvío={s2} mismo_id={d1.get('id') == d2.get('id')} cliente={nombre!r}"
@@ -151,7 +151,7 @@ def remito_sanitiza():
         "fecha": "no es fecha", "admin": True,
     })
     try:
-        _, r = pedir(f"/remitos.php?id={d.get('id')}")
+        _, r = pedir(f"/remitos.php?id={d.get('id')}", clave=m)
         rem = r.get("remito", {})
         ok = (len(rem["cliente"]["razonSocial"]) == 160 and "<script>" not in rem["cliente"]
               and len(rem["items"]) == 60 and rem["recibi"]["tipoDoc"] == "" and "admin" not in rem
@@ -161,7 +161,7 @@ def remito_sanitiza():
         pedir(f"/remitos.php?id={d.get('id')}", "DELETE", m)
 
 
-@caso("Remitos: borrar exige el permiso «borrar» y un id válido")
+@caso("Remitos: borrar exige el permiso «borrar», leer exige credencial y el id se valida")
 def remito_borrar_permiso():
     m = clave_maestra()
     llave, kid = _clave_servicio(["leer", "crear"])
@@ -169,8 +169,10 @@ def remito_borrar_permiso():
     try:
         s1, _ = pedir(f"/remitos.php?id={d.get('id')}", "DELETE", llave)
         s2, _ = pedir("/remitos.php?id=../../etc", "DELETE", m)
-        s3, _ = pedir("/remitos.php?id=" + urllib.parse.quote("' OR 1=1 --"))
-        return s1 == 403 and s2 == 400 and s3 == 404, f"sin_permiso={s1} id_malo={s2} lectura_inyeccion={s3}"
+        s3, _ = pedir("/remitos.php?id=" + urllib.parse.quote("' OR 1=1 --"), clave=m)
+        s4, _ = pedir(f"/remitos.php?id={d.get('id')}")
+        return (s1 == 403 and s2 == 400 and s3 == 404 and s4 == 401,
+                f"sin_permiso={s1} id_malo={s2} lectura_inyeccion={s3} lectura_sin_credencial={s4}")
     finally:
         pedir(f"/remitos.php?id={d.get('id')}", "DELETE", m)
         pedir(f"/claves.php?id={kid}", "DELETE", m)

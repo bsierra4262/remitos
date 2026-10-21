@@ -94,13 +94,21 @@ function auth_check(PDO $pdo, array $config, string $permission): array
 /**
  * Autentica la petición o la corta con el error correspondiente.
  *
- * Los rechazos se auditan (son eventos de seguridad) y, si una misma IP acumula
- * demasiados en poco tiempo, se bloquea temporalmente.
+ * Acepta dos credenciales:
+ *  - Cabecera X-API-Key (integraciones y panel): clave maestra o de servicio.
+ *  - Sesión de usuario (la aplicación): permisos según el rol y token CSRF en
+ *    toda escritura.
  *
- * @return array{ok: bool, maestra: bool, nombre: string, permisos: string[], id?: int}
+ * Los rechazos de claves se auditan y, si una misma IP acumula demasiados en poco
+ * tiempo, se bloquea temporalmente.
+ *
+ * @return array{ok: bool, maestra: bool, nombre: string, permisos: string[], id?: int, usuario?: array}
  */
 function auth_require(PDO $pdo, array $config, string $permission, string $resource): array
 {
+    if ((string) ($_SERVER['HTTP_X_API_KEY'] ?? '') === '') {
+        return auth_require_session($pdo, $permission, $resource);
+    }
     if (auth_is_throttled($pdo)) {
         api_error(429, 'Demasiados intentos rechazados. Volvé a intentar en unos minutos.');
     }
@@ -120,6 +128,46 @@ function auth_require(PDO $pdo, array $config, string $permission, string $resou
     return $auth;
 }
 
+/**
+ * Autentica con la sesión de usuario.
+ *
+ * @return array{ok: bool, maestra: bool, nombre: string, permisos: string[], id: int, usuario: array}
+ */
+function auth_require_session(PDO $pdo, string $permission, string $resource): array
+{
+    $user = session_user($pdo);
+    if ($user === null) {
+        api_error(401, 'La sesión no está iniciada o venció. Ingresá de nuevo.', ['sesion' => false]);
+    }
+    if ($user['debe_cambiar']) {
+        api_error(403, 'Antes de continuar tenés que cambiar la contraseña temporal.', ['cambiar_clave' => true]);
+    }
+    if (!in_array(api_method(), ['GET', 'HEAD'], true) && !session_csrf_valid()) {
+        api_error(403, 'El token de seguridad de la sesión no es válido. Recargá la página.', ['csrf' => false]);
+    }
+    $permissions = USER_ROLES[$user['rol']];
+    if (!in_array($permission, $permissions, true)) {
+        audit_event($pdo, 'Acceso rechazado (' . $permission . ')', [
+            'categoria' => 'acceso',
+            'nivel' => 'error',
+            'clave' => $user['nombre'],
+            'detalle' => 'El rol «' . $user['rol'] . '» no tiene permiso',
+            'recurso' => $resource,
+            'estado' => 403,
+        ]);
+        api_error(403, 'Tu usuario no tiene permiso para esta operación');
+    }
+
+    return [
+        'ok' => true,
+        'maestra' => false,
+        'id' => $user['id'],
+        'nombre' => $user['nombre'],
+        'permisos' => $permissions,
+        'usuario' => $user,
+    ];
+}
+
 /** ¿La IP actual superó el máximo de intentos rechazados en la ventana? */
 function auth_is_throttled(PDO $pdo): bool
 {
@@ -129,7 +177,7 @@ function auth_is_throttled(PDO $pdo): bool
     }
     $st = $pdo->prepare(
         "SELECT COUNT(*) FROM api_log
-          WHERE ip = ? AND categoria = 'acceso' AND nivel = 'error'
+          WHERE ip = ? AND categoria = 'acceso' AND nivel = 'error' AND COALESCE(recurso, '') <> 'sesion'
             AND fecha > NOW() - INTERVAL " . AUTH_WINDOW_MINUTES . ' MINUTE'
     );
     $st->execute([$ip]);

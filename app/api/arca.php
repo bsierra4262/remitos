@@ -9,11 +9,15 @@
  *   POST   arca.php {accion: 'cargar', ambiente, cuit?, certificado, clave, frase?}
  *                                                         (admin) Valida y guarda cifrado.
  *   POST   arca.php {accion: 'probar', ambiente}          (crear) Verifica servidores y acceso.
- *   DELETE arca.php?ambiente=…                            (admin) Elimina las credenciales.
+ *   POST   arca.php {accion: 'quitar', ambiente, confirmacion?}  (admin) Elimina las credenciales.
+ *   DELETE arca.php?ambiente=…                            (admin) Ídem, con clave de API.
+ *
+ * Con sesión de usuario, cargar o quitar el certificado exige reconfirmar la
+ * contraseña en «confirmacion».
  *
  * Las respuestas nunca incluyen el certificado ni la clave: solo sus datos
- * públicos (titular, CUIT, vigencia y huella SHA-256). La carga exige la clave
- * maestra y una conexión HTTPS.
+ * públicos (titular, CUIT, vigencia y huella SHA-256). La carga exige rol de
+ * administrador (o la clave maestra) y una conexión HTTPS.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -24,6 +28,25 @@ declare(strict_types=1);
 $config = require __DIR__ . '/bootstrap.php';
 api_headers('GET, POST, DELETE, OPTIONS');
 $pdo = api_db($config);
+
+/**
+ * Con sesión de usuario, las operaciones sobre el certificado piden reconfirmar la
+ * contraseña (la clave maestra ya es una credencial de alto privilegio).
+ */
+function arca_confirm_identity(PDO $pdo, array $auth, mixed $password): void
+{
+    if (!isset($auth['usuario'])) {
+        return;
+    }
+    $st = $pdo->prepare('SELECT clave_hash FROM usuarios WHERE id = ?');
+    $st->execute([$auth['usuario']['id']]);
+    if (!is_string($password) || !password_verify($password, (string) $st->fetchColumn())) {
+        audit_event($pdo, 'Confirmación de identidad rechazada (certificado de ARCA)', [
+            'categoria' => 'arca', 'nivel' => 'error', 'clave' => $auth['nombre'], 'estado' => 403,
+        ]);
+        api_error(403, 'La contraseña de confirmación no es correcta');
+    }
+}
 
 /** Ambiente pedido o error 400. */
 function arca_environment_param(mixed $value): string
@@ -46,13 +69,15 @@ if ($method === 'GET') {
     api_respond(200, ['ok' => true, 'ambientes' => $status]);
 }
 
-if ($method === 'POST') {
-    $body = api_body();
+$body = $method === 'POST' ? api_body() : [];
+
+if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
     $action = (string) ($body['accion'] ?? '');
 
     if ($action === 'cargar') {
         api_require_https();
         $auth = auth_require($pdo, $config, 'admin', 'arca');
+        arca_confirm_identity($pdo, $auth, $body['confirmacion'] ?? null);
         $environment = arca_environment_param($body['ambiente'] ?? null);
 
         try {
@@ -119,9 +144,10 @@ if ($method === 'POST') {
     api_error(400, 'Acción desconocida');
 }
 
-if ($method === 'DELETE') {
+if ($method === 'DELETE' || ($method === 'POST' && ($body['accion'] ?? '') === 'quitar')) {
     $auth = auth_require($pdo, $config, 'admin', 'arca');
-    $environment = arca_environment_param($_GET['ambiente'] ?? null);
+    arca_confirm_identity($pdo, $auth, $body['confirmacion'] ?? null);
+    $environment = arca_environment_param($method === 'DELETE' ? ($_GET['ambiente'] ?? null) : ($body['ambiente'] ?? null));
     if (!arca_delete_credentials($pdo, $environment)) {
         api_error(404, 'No hay credenciales cargadas para ' . ARCA_ENVIRONMENT_NAMES[$environment]);
     }

@@ -27,13 +27,15 @@ python test/correr.py -v         # con el detalle de cada caso
 
 Requisitos: `playwright` (con `playwright install chromium`), `pymupdf` y `cryptography`.
 
-## Otro entorno
+Las pruebas de interfaz ingresan con un administrador de pruebas (`admin.pruebas@intellihelp.test`) que se crea solo con la clave maestra del entorno.
+
+## Otro entorno de pruebas
 
 ```bash
-REMITOS_URL=https://intellihelp.tech/remitos REMITOS_MASTER_KEY=… python test/correr.py
+REMITOS_URL=https://pruebas.ejemplo/remitos REMITOS_MASTER_KEY=… python test/correr.py all
 ```
 
-Contra un entorno que no sea el local solo corren los módulos que no escriben en la base; los de API se ejecutan pidiéndolos por nombre o con `all`. Crean y borran sus propios datos.
+Las pruebas crean usuarios y documentos y los borran al terminar: no se corren contra producción.
 
 ## Módulos
 
@@ -46,6 +48,7 @@ Contra un entorno que no sea el local solo corren los módulos que no escriben e
 | `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, copias de seguridad, certificado, respaldo, celular |
 | `test_api.py` | Autenticación, permisos y ciclo de vida de las claves, auditoría |
 | `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA), validación de datos, cabeceras, archivos internos |
+| `test_sesion.py` | Ingreso, bloqueo por intentos, cookie y CSRF, roles, datos compartidos entre usuarios, numeración concurrente, traspaso de datos de versiones anteriores |
 | `test_cai.py` | Talonarios, numeración correlativa, C.A.I. vencido y autorización desde la aplicación |
 
 ## Agregar un caso

@@ -4,9 +4,9 @@
     python test/correr.py api cai      -> solo los módulos que contengan esos nombres
     python test/correr.py -v           -> muestra el detalle de cada caso
 
-Por defecto apunta al entorno local (ver test/LEEME.md). Contra otro entorno
-(REMITOS_URL) solo corren los módulos que no escriben en la base, salvo que se
-pidan por nombre o con «all».
+Por defecto apunta al entorno local (ver test/LEEME.md). Las pruebas crean y
+borran datos: contra otro entorno (REMITOS_URL) hay que pedir los módulos por
+nombre o con «all».
 """
 import importlib
 import os
@@ -26,11 +26,9 @@ except Exception:
 
 import base  # noqa: E402
 
-# Los módulos de API escriben en la base del entorno bajo prueba (crean y borran
-# datos). En el entorno local corren siempre; contra otro entorno, solo a pedido.
-MODULOS_LOCALES = ["test_impresion", "test_formulario", "test_documentos", "test_inicio", "test_interfaz"]
-MODULOS_API = ["test_api", "test_seguridad", "test_cai"]
-MODULOS = MODULOS_LOCALES + MODULOS_API
+MODULOS_INTERFAZ = ["test_impresion", "test_formulario", "test_documentos", "test_inicio", "test_interfaz"]
+MODULOS_API = ["test_api", "test_seguridad", "test_sesion", "test_cai"]
+MODULOS = MODULOS_INTERFAZ + MODULOS_API
 
 VERDE, ROJO, GRIS, AMAR, FIN = "\033[32m", "\033[31m", "\033[90m", "\033[33m", "\033[0m"
 if os.name == "nt" and not os.environ.get("WT_SESSION"):
@@ -45,19 +43,18 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     verboso = "-v" in sys.argv or "--verbose" in sys.argv
     todo = "--todo" in sys.argv or "all" in args
+    # Todas las pruebas crean y borran datos: fuera del entorno local se piden explícitamente.
+    if not base.es_local() and not todo and not args:
+        print(f"{AMAR}Las pruebas escriben datos: contra {base.SITIO} indicá los módulos o «all».{FIN}")
+        return 2
     if args and not todo:
         modulos = [m for m in MODULOS if any(a in m for a in args)]      # pedidos por nombre
-    elif todo:
-        modulos = MODULOS                                                # incluye API/C.A.I.
-    elif base.es_local():
-        modulos = MODULOS                                                # entorno local: todo
     else:
-        modulos = MODULOS_LOCALES                                        # entorno remoto: sin escribir
+        modulos = MODULOS
 
     print(f"\n{GRIS}Probando {base.url_app()}{FIN}")
-    if any(m in MODULOS_API for m in modulos):
-        destino = "la base local de pruebas" if base.es_local() else "la base del entorno remoto"
-        print(f"{AMAR}⚠ Incluye pruebas que escriben en {destino} (crean y borran datos de prueba){FIN}")
+    destino = "la base local de pruebas" if base.es_local() else "la base del entorno " + base.SITIO
+    print(f"{AMAR}⚠ Las pruebas crean y borran datos en {destino}{FIN}")
     print()
 
     total = fallados = 0

@@ -16,7 +16,7 @@
 declare(strict_types=1);
 
 /** Versión del esquema que espera este código. */
-const API_SCHEMA_VERSION = 1;
+const API_SCHEMA_VERSION = 2;
 
 /** Zona horaria de la sesión de base de datos (Argentina, UTC−3 todo el año). */
 const API_DB_TIMEZONE = '-03:00';
@@ -66,6 +66,7 @@ function api_migrate(PDO $pdo): void
         $current = api_schema_version($pdo);
         $migrations = [
             1 => 'api_migration_1',
+            2 => 'api_migration_2',
         ];
         foreach ($migrations as $version => $migration) {
             if ($version > $current) {
@@ -227,4 +228,93 @@ function api_migration_1(PDO $pdo): void
         expira   DATETIME    NOT NULL,
         PRIMARY KEY (ambiente, servicio)
     ) $engine");
+}
+
+/** Agrega una columna si no existe. */
+function api_add_column(PDO $pdo, string $table, string $column, string $definition): void
+{
+    if (!api_column_exists($pdo, $table, $column)) {
+        $pdo->exec("ALTER TABLE $table ADD COLUMN $column $definition");
+    }
+}
+
+/**
+ * Datos compartidos: usuarios con sesión, clientes, comprobantes y ajustes en el
+ * servidor (antes vivían en el navegador de cada equipo), y numeración de remitos
+ * asignada por el servidor.
+ */
+function api_migration_2(PDO $pdo): void
+{
+    $engine = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS usuarios (
+        id               INT AUTO_INCREMENT PRIMARY KEY,
+        nombre           VARCHAR(120) NOT NULL,
+        email            VARCHAR(160) NOT NULL,
+        clave_hash       VARCHAR(255) NOT NULL,
+        rol              VARCHAR(12)  NOT NULL DEFAULT 'operador',
+        activo           TINYINT(1)   NOT NULL DEFAULT 1,
+        debe_cambiar     TINYINT(1)   NOT NULL DEFAULT 1,
+        intentos         SMALLINT     NOT NULL DEFAULT 0,
+        bloqueado_hasta  DATETIME     DEFAULT NULL,
+        ultimo_ingreso   DATETIME     DEFAULT NULL,
+        clave_cambiada   DATETIME     DEFAULT NULL,
+        creado           DATETIME     NOT NULL,
+        UNIQUE KEY uq_email (email)
+    ) $engine");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS ajustes (
+        clave           VARCHAR(40)  NOT NULL PRIMARY KEY,
+        valor           TEXT         NOT NULL,
+        actualizado     DATETIME     NOT NULL,
+        actualizado_por VARCHAR(120) DEFAULT NULL
+    ) $engine");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS clientes (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        razon_social    VARCHAR(160) NOT NULL DEFAULT '',
+        cuit            VARCHAR(13)  DEFAULT NULL,
+        data            TEXT         NOT NULL,
+        creado          DATETIME     NOT NULL,
+        actualizado     DATETIME     NOT NULL,
+        creado_por      VARCHAR(120) DEFAULT NULL,
+        actualizado_por VARCHAR(120) DEFAULT NULL,
+        UNIQUE KEY uq_cuit (cuit),
+        INDEX idx_razon (razon_social)
+    ) $engine");
+
+    api_add_column($pdo, 'remitos', 'numero_int', 'INT UNSIGNED DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'punto_venta', 'INT UNSIGNED DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'estado', "VARCHAR(12) NOT NULL DEFAULT 'borrador'");
+    api_add_column($pdo, 'remitos', 'creado_por', 'VARCHAR(120) DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'actualizado_por', 'VARCHAR(120) DEFAULT NULL');
+    if (!api_index_exists($pdo, 'remitos', 'idx_numero_int')) {
+        $pdo->exec('ALTER TABLE remitos ADD INDEX idx_numero_int (numero_int)');
+    }
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS comprobantes (
+        id       VARCHAR(16)  NOT NULL PRIMARY KEY,
+        tipo     VARCHAR(12)  NOT NULL,
+        letra    VARCHAR(2)   NOT NULL,
+        pto_vta  VARCHAR(5)   NOT NULL,
+        numero   VARCHAR(8)   NOT NULL,
+        fecha    VARCHAR(12)  DEFAULT NULL,
+        cliente  VARCHAR(255) DEFAULT NULL,
+        cae      VARCHAR(20)  DEFAULT NULL,
+        cae_vto  VARCHAR(12)  DEFAULT NULL,
+        created  BIGINT       NOT NULL
+    ) $engine");
+    api_add_column($pdo, 'comprobantes', 'subtipo', "VARCHAR(8) NOT NULL DEFAULT '' AFTER tipo");
+    api_add_column($pdo, 'comprobantes', 'numero_int', 'INT UNSIGNED NOT NULL DEFAULT 0');
+    api_add_column($pdo, 'comprobantes', 'data', 'LONGTEXT NULL');
+    api_add_column($pdo, 'comprobantes', 'updated', 'BIGINT NOT NULL DEFAULT 0');
+    api_add_column($pdo, 'comprobantes', 'creado_por', 'VARCHAR(120) DEFAULT NULL');
+    api_add_column($pdo, 'comprobantes', 'actualizado_por', 'VARCHAR(120) DEFAULT NULL');
+    if (api_index_exists($pdo, 'comprobantes', 'uq_num')) {
+        $pdo->exec('ALTER TABLE comprobantes DROP INDEX uq_num');
+    }
+    $pdo->exec('ALTER TABLE comprobantes ADD UNIQUE KEY uq_num (tipo, subtipo, letra, pto_vta, numero_int)');
+    if (!api_index_exists($pdo, 'comprobantes', 'idx_updated')) {
+        $pdo->exec('ALTER TABLE comprobantes ADD INDEX idx_updated (updated)');
+    }
 }

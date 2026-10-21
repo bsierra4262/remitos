@@ -14,7 +14,7 @@
 declare(strict_types=1);
 
 /** Categorías válidas de la auditoría. */
-const AUDIT_CATEGORIES = ['remito', 'comprobante', 'cai', 'arca', 'clave', 'acceso', 'error', 'sistema'];
+const AUDIT_CATEGORIES = ['remito', 'comprobante', 'cliente', 'cai', 'arca', 'clave', 'usuario', 'acceso', 'error', 'sistema'];
 
 /** Cantidad de eventos que se conservan; los más antiguos se depuran. */
 const AUDIT_KEEP = 2000;

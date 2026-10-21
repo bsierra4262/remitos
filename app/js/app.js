@@ -5,24 +5,21 @@
  * comprobantes, agenda de clientes, calibración por impresora, respaldo en el
  * servidor y conexión con ARCA.
  *
- * La aplicación trabaja primero en el equipo (localStorage) y funciona sin
- * conexión. Los secretos de ARCA nunca pasan por el almacenamiento local: se
- * envían una sola vez al servidor, que los guarda cifrados.
+ * Los datos (clientes, remitos, comprobantes y ajustes) viven en el servidor y
+ * los comparte todo el equipo (ver servidor.js). En el navegador solo quedan la
+ * calibración de la impresora, las preferencias de pantalla y el borrador en
+ * curso de cada usuario, que protege el trabajo ante un corte de conexión.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
  */
 'use strict';
 
+/* Claves del almacenamiento local. Las de borrador se vuelven propias de cada
+   usuario al ingresar (servidor.js · aplicarClavesLocales). */
 const LS = {
-  docs: 'remitos_docs',
   calib: 'remitos_calib',
-  clientes: 'remitos_clientes',
   draft: 'remitos_draft',
-  api: 'remitos_api',
-  outbox: 'remitos_outbox', // remitos pendientes de respaldo en el servidor
-  fiscal: 'remitos_fiscal', // punto de venta, C.A.I. y ejemplares del remito
-  comp: 'remitos_comprobantes',
   compDraft: 'remitos_compdraft',
   sidebar: 'remitos_sidebar',
 };
@@ -73,6 +70,8 @@ function emptyRemito() {
     numero: '',
     fecha: '',
     estado: 'borrador',
+    cai: '',
+    caiVto: '',
     cliente: {
       senores: '',
       razonSocial: '',
@@ -109,16 +108,14 @@ function tieneContenido(b) {
    de guardar/terminar la app arranca limpia. */
 function hayTrabajoPendiente(b) {
   if (!tieneContenido(b)) return false;
-  const guardado = load(LS.docs, []).find(d => d.id === b.id);
+  const guardado = datos.remitos.find(d => d.id === b.id);
   if (guardado && JSON.stringify(guardado) === JSON.stringify(b)) return false; // igual a lo guardado
   return true;
 }
 
-/* Al arrancar: se retoma el borrador SÓLO si hay trabajo sin guardar; si no, en blanco. */
-let doc = (() => {
-  const b = load(LS.draft, null);
-  return hayTrabajoPendiente(b) ? b : emptyRemito();
-})();
+/* El borrador se retoma después del ingreso (appLista), cuando ya se conocen los
+   remitos guardados y el usuario. */
+let doc = emptyRemito();
 /* Copia profunda de los valores de fábrica: retocar un campo nunca debe modificar DEFAULT_CALIB. */
 let calib = Object.assign(clone(DEFAULT_CALIB), load(LS.calib, {}));
 let zoom = 1;
@@ -141,21 +138,19 @@ if (calib.adjustFullBaked !== 'v2') {
   save(LS.calib, calib);
 }
 
-/* Migraciones del almacenamiento local:
-   · La aplicación arranca vacía: se descarta el remito de ejemplo de versiones anteriores.
-   · El certificado y la clave privada de ARCA ya no se guardan en el navegador: si una
-     versión anterior los dejó en localStorage, se borran. Ahora viven cifrados en el servidor. */
-(function migrarAlmacenamiento() {
-  const docs = load(LS.docs, []);
-  const limpios = docs.filter(d => d.id !== 'ejemplo' && !d.ejemplo);
-  if (limpios.length !== docs.length) save(LS.docs, limpios);
-  localStorage.removeItem('remitos_seed');
-  localStorage.removeItem('remitos_compfiscal'); // el CAE ahora vive en cada comprobante
-  const api = load(LS.api, null);
-  if (api && ('cert' in api || 'key' in api)) {
-    delete api.cert;
-    delete api.key;
-    save(LS.api, api);
+/* Limpieza de claves de versiones anteriores que ya no se usan. La configuración de
+   ARCA (incluido cualquier certificado que hubiera quedado) se descarta del navegador:
+   ahora vive en el servidor. Los documentos y clientes se traspasan al ingresar. */
+(function limpiarAlmacenamientoAnterior() {
+  ['remitos_seed', 'remitos_compfiscal', 'remitos_api', 'remitos_outbox', 'remitos_panel_key'].forEach(k =>
+    localStorage.removeItem(k)
+  );
+  const docs = load('remitos_docs', null);
+  if (Array.isArray(docs) && docs.some(d => d && (d.id === 'ejemplo' || d.ejemplo))) {
+    save(
+      'remitos_docs',
+      docs.filter(d => d && d.id !== 'ejemplo' && !d.ejemplo)
+    );
   }
 })();
 
@@ -528,63 +523,42 @@ function updatePageStyle(paper) {
   st.textContent = `@page{ size:${paper.w}mm ${paper.h}mm; margin:0 }`;
 }
 
-/* Numeración / autorización del remito (documento completo). Autoincrementa desde el último. */
-let fiscal = Object.assign({}, REMITO_FISCAL, load(LS.fiscal, {}));
-function saveFiscal() {
-  save(LS.fiscal, fiscal);
-}
+/* Punto de venta de los remitos (ajuste compartido) y ejemplares a imprimir
+   (preferencia de cada equipo, junto con la calibración de su impresora). */
+const fiscal = {
+  get ptoVenta() {
+    return datos.ajustes.remito.ptoVenta || REMITO_FISCAL.ptoVenta;
+  },
+  get copias() {
+    return calib.copias === 1 ? 1 : 2;
+  },
+};
 /* Correlativo del número de remito, tanto del borrador («00000012») como del
    autorizado («00001-00000012»): se toma siempre la parte posterior al guion. */
 function correlativo(numero) {
   const s = String(numero || '');
   return parseInt(s.includes('-') ? s.split('-').pop() : s, 10) || 0;
 }
+/* Número que tendrá el próximo remito, para la vista previa: el definitivo lo
+   asigna el servidor al guardar, así dos usuarios nunca obtienen el mismo. */
 function nextRemitoNumero() {
-  const n = load(LS.docs, []).reduce((m, x) => Math.max(m, correlativo(x.numero)), 0) + 1;
+  const n = datos.remitos.reduce((m, x) => Math.max(m, correlativo(x.numero)), 0) + 1;
   return String(n).padStart(8, '0');
 }
 function syncFiscalUI() {
-  const pv = $('#remPv'),
-    cai = $('#remCai'),
-    vto = $('#remCaiVto'),
-    cp = $('#remCopias');
-  if (pv) pv.value = fiscal.ptoVenta || '';
-  if (cai) cai.value = fiscal.cai || '';
-  if (vto) vto.value = esFecha(vto) ? dmyAIso(fiscal.caiVto) : fiscal.caiVto || '';
-  if (cp) cp.value = String(fiscal.copias == null ? 2 : fiscal.copias);
+  $('#remPv').value = fiscal.ptoVenta;
+  $('#remCopias').value = String(fiscal.copias);
+  const bloqueado = doc.estado === 'autorizado';
+  ['#remNumero', '#remCai', '#remCaiVto'].forEach(id => {
+    $(id).readOnly = bloqueado;
+    $(id).title = bloqueado ? 'Asignado por la autorización: no se modifica' : '';
+  });
 }
 function wireRemitoFiscal() {
-  const rebuild = () => {
-    dibujarPlantilla();
-  };
-  const pv = $('#remPv'),
-    cai = $('#remCai'),
-    vto = $('#remCaiVto'),
-    cp = $('#remCopias');
-  if (pv)
-    pv.addEventListener('input', () => {
-      fiscal.ptoVenta = pv.value.trim();
-      saveFiscal();
-      rebuild();
-    });
-  if (cai)
-    cai.addEventListener('input', () => {
-      fiscal.cai = cai.value.trim();
-      saveFiscal();
-      rebuild();
-    });
-  if (vto)
-    vto.addEventListener('input', () => {
-      fiscal.caiVto = esFecha(vto) ? isoADmy(vto.value) : vto.value.trim();
-      saveFiscal();
-      rebuild();
-    });
-  if (cp)
-    cp.addEventListener('change', () => {
-      fiscal.copias = parseInt(cp.value, 10) || 2;
-      saveFiscal();
-    });
-  syncFiscalUI();
+  $('#remCopias').addEventListener('change', e => {
+    calib.copias = parseInt(e.target.value, 10) === 1 ? 1 : 2;
+    save(LS.calib, calib);
+  });
 }
 
 /* Arma los ejemplares ORIGINAL / DUPLICADO para imprimir (RG 1415 art. 14: mínimo 2,
@@ -661,7 +635,7 @@ function buildRemitoTemplate(opts = {}) {
     `<div style="position:absolute;left:${X(x)};top:${Y(y)};width:${X(w)};text-align:center;` +
     `font-size:${size}mm;font-weight:500;color:#000;line-height:1.05;white-space:nowrap">${esc(valor || '')}</div>`;
   const D = blanco ? emptyRemito() : doc; // en blanco: cliente/ítems vacíos
-  const F = blanco ? { ptoVenta: fiscal.ptoVenta, cai: '', caiVto: '' } : fiscal;
+  const F = blanco ? { cai: '', caiVto: '' } : doc;
   const lbl = '#1a1a1a',
     val = '#000';
   const C = COMPANY,
@@ -1215,15 +1189,13 @@ function borradorRecuperable() {
 
 function renderInicio() {
   renderSaludo();
-  const docs = load(LS.docs, []),
-    clientes = load(LS.clientes, []),
-    comps = load(LS.comp, []);
+  const docs = datos.remitos;
   const stat = (icn, v, l) =>
     `<div class="stat"><div class="icn">${icn}</div><div><div class="v">${esc(String(v))}</div><div class="l">${l}</div></div></div>`;
   $('#inicioStats').innerHTML =
-    stat(ICN.doc, docs.length, 'Remitos guardados') +
-    stat(ICN.receipt, comps.length, 'Comprobantes guardados') +
-    stat(ICN.users, clientes.length, 'Clientes en la agenda');
+    stat(ICN.doc, datos.remitosTotal, 'Remitos') +
+    stat(ICN.receipt, datos.comprobantesTotal, 'Comprobantes') +
+    stat(ICN.users, datos.clientes.length, 'Clientes en la agenda');
 
   const list = $('#inicioRecent');
   const borrador = borradorRecuperable();
@@ -1234,8 +1206,8 @@ function renderInicio() {
   const pagina = sorted.slice(desde, desde + RECENT_PER);
 
   const cnt = $('#recentCount');
-  cnt.textContent = docs.length;
-  cnt.hidden = !docs.length;
+  cnt.textContent = datos.remitosTotal;
+  cnt.hidden = !datos.remitosTotal;
 
   if (!docs.length && !borrador) {
     list.innerHTML = `<div class="empty">${ICN.doc}<span>Todavía no hay remitos guardados.<br>Creá el primero con «Nuevo remito».</span></div>`;
@@ -1251,15 +1223,16 @@ function renderInicio() {
         ? '<span class="doc-state auth">Autorizado</span>'
         : '<span class="doc-state saved">Guardado</span>';
     const nro = d.numero ? 'Nº ' + d.numero : 'Sin número';
+    const autor = !esBorrador && d.actualizado_por ? ' · ' + d.actualizado_por : '';
     return `<div class="doc-row${esBorrador ? ' is-draft' : ''}" data-id="${escA(d.id || '')}" data-borrador="${esBorrador ? 1 : ''}">
       <span class="doc-ico">${esBorrador ? ICN.edit : ICN.doc}</span>
       <div class="doc-main"><strong>${esc(d.cliente.razonSocial || d.cliente.senores || 'Sin razón social')}</strong><small>${esc(nro)} · ${esc(d.cliente.cuit || 'sin CUIT')}</small></div>
-      <div class="doc-meta">${esc(fecha)}${nItems ? ' · ' + nItems + (nItems === 1 ? ' ítem' : ' ítems') : ''}</div>
+      <div class="doc-meta">${esc(fecha)}${nItems ? ' · ' + nItems + (nItems === 1 ? ' ítem' : ' ítems') : ''}${esc(autor)}</div>
       ${estado}
       <div class="doc-act">
         <button class="icon-btn" data-open title="${esBorrador ? 'Retomar' : 'Abrir'}">${ICN.edit}</button>
         ${esBorrador ? '' : `<button class="icon-btn" data-print title="Imprimir">${ICN.print}</button>`}
-        <button class="icon-btn danger" data-del title="${esBorrador ? 'Descartar borrador' : 'Eliminar'}">${ICN.trash}</button>
+        ${!esBorrador && d.estado === 'autorizado' ? '' : `<button class="icon-btn danger" data-del title="${esBorrador ? 'Descartar borrador' : 'Eliminar'}">${ICN.trash}</button>`}
       </div></div>`;
   };
 
@@ -1294,15 +1267,7 @@ function renderInicio() {
           toast('Borrador descartado', 1400);
           return;
         }
-        const d = load(LS.docs, []).find(x => x.id === r.dataset.id);
-        const nombre = d ? d.cliente.razonSocial || d.cliente.senores || 'este remito' : 'este remito';
-        if (!confirm(`¿Eliminar el remito de "${nombre}"?`)) return;
-        save(
-          LS.docs,
-          load(LS.docs, []).filter(x => x.id !== r.dataset.id)
-        );
-        renderInicio();
-        toast('Remito eliminado', 1400);
+        eliminarRemito(r.dataset.id).then(renderInicio);
         return;
       }
       if (esBorr) {
@@ -1327,168 +1292,128 @@ function cargarRemito(d) {
   dibujarPlantilla();
   save(LS.draft, doc);
 }
+/* Elimina un remito del servidor (con confirmación). Devuelve si se eliminó. */
+async function eliminarRemito(id) {
+  const d = datos.remitos.find(x => x.id === id);
+  const nombre = d ? d.cliente.razonSocial || d.cliente.senores || 'este remito' : 'este remito';
+  if (!confirm('¿Eliminar el remito de «' + nombre + '»? Se elimina para todo el equipo.')) return false;
+  try {
+    await api('remitos.php?id=' + encodeURIComponent(id), { method: 'DELETE' });
+  } catch (e) {
+    avisarError(e, 'No se pudo eliminar');
+    return false;
+  }
+  datos.remitos = datos.remitos.filter(x => x.id !== id);
+  datos.remitosTotal = Math.max(0, datos.remitosTotal - 1);
+  if (doc.id === id) {
+    doc = emptyRemito();
+    save(LS.draft, doc);
+    formFromDoc();
+  }
+  toast('Remito eliminado', 1400);
+  return true;
+}
 function openDoc(id) {
-  const d = load(LS.docs, []).find(x => x.id === id);
+  const d = datos.remitos.find(x => x.id === id);
   if (!d) return;
   cargarRemito(d);
   showView('remito');
   toast('Remito cargado', 1200);
 }
 
-/* ===================== CONFIGURACIÓN · Impresión y ARCA =====================
-   En el navegador se guardan solo datos no secretos: ambiente, CUIT, punto de venta
-   y la clave de acceso de esta aplicación (una clave de servicio con permisos
-   acotados, revocable desde el Panel). El certificado y la clave privada de ARCA
-   se envían una única vez al servidor y nunca se almacenan acá. */
-let apiCfg = Object.assign(
-  { mode: 'local', ambiente: 'homologacion', cuit: '', ptoVenta: '', panelKey: '', enabled: false },
-  load(LS.api, {})
-);
+/* ===================== CONFIGURACIÓN · Impresión, ARCA y usuarios =====================
+   Los datos del emisor y la conexión con ARCA son ajustes compartidos: los ven todos
+   y solo los modifica un administrador. El certificado y la clave privada se envían
+   una única vez al servidor, que los guarda cifrados; nunca quedan en el navegador. */
+const emisor = () => datos.ajustes.emisor;
 let certEstado = { homologacion: null, produccion: null }; // datos públicos informados por el servidor
-let certCargado = false; // si ya se consultó al servidor
 
 function renderConfig() {
-  $('#apiAmbiente').value = apiCfg.ambiente;
-  $('#apiCuit').value = apiCfg.cuit || '';
-  $('#apiPv').value = apiCfg.ptoVenta || '';
-  $('#apiPanelKey').value = apiCfg.panelKey || '';
-  $('#apiEnabled').checked = !!apiCfg.enabled;
+  const e = emisor();
+  $('#apiAmbiente').value = e.ambiente;
+  $('#apiCuit').value = fmtCuit(e.cuit);
+  $('#apiPv').value = e.ptoVenta || '';
+  $('#remPvCfg').value = String(parseInt(fiscal.ptoVenta, 10) || '');
+  $('#apiEnabled').checked = !!e.emision;
+  const admin = esAdmin();
+  ['#apiAmbiente', '#apiCuit', '#apiPv', '#remPvCfg', '#apiEnabled'].forEach(id => ($(id).disabled = !admin));
+  ['#apiSave', '#certUpload', '#certDelete'].forEach(id => ($(id).hidden = !admin));
   updateModeUI();
   renderCertificado();
   consultarCertificado();
+  if (admin) renderUsuarios();
 }
 
 /* Registra un evento en la auditoría del servidor (remito, comprobante, error…).
-   No interrumpe nunca la operación del usuario: sin clave o sin red, se omite. */
+   No interrumpe nunca la operación del usuario: sin sesión o sin red, se omite. */
 function auditar(categoria, accion, detalle, nivel) {
-  if (!(apiCfg.panelKey || '').trim()) return;
-  apiPanel('evento.php', {
+  if (!sesion.usuario) return;
+  api('evento.php', {
     method: 'POST',
-    body: JSON.stringify({ categoria, accion, detalle: detalle || '', nivel: nivel || 'info' }),
+    body: { categoria, accion, detalle: detalle || '', nivel: nivel || 'info' },
   }).catch(() => {});
 }
 
-/* ============================ CONEXIÓN Y RESPALDO ==========================
-   La aplicación guarda todo en el equipo y funciona sin conexión; el borrador se
-   guarda solo mientras se carga. Con la clave de acceso configurada, cada remito
-   guardado se respalda además en el servidor; sin conexión queda en cola y se
-   envía al volver. Cada remito lleva su identificador local, así el servidor
-   lo actualiza en vez de duplicarlo. */
+/* ============================ CONEXIÓN ============================
+   Los datos viven en el servidor. Si se corta la conexión, el documento en curso
+   se sigue guardando en el equipo como borrador y se sube solo al volver la red. */
 function estaEnLinea() {
   return navigator.onLine !== false;
-}
-
-function encolarNube(d) {
-  if (!(apiCfg.panelKey || '').trim()) return;
-  const box = load(LS.outbox, []);
-  const i = box.findIndex(x => x.id === d.id);
-  const item = { id: d.id, doc: d, ts: Date.now() };
-  if (i >= 0) box[i] = item;
-  else box.push(item);
-  save(LS.outbox, box);
-  sincronizarNube();
-}
-let _sincronizando = false;
-async function sincronizarNube() {
-  if (_sincronizando || !estaEnLinea() || !(apiCfg.panelKey || '').trim()) return;
-  if (!load(LS.outbox, []).length) {
-    renderEstadoChip();
-    return;
-  }
-  _sincronizando = true;
-  try {
-    for (const item of load(LS.outbox, [])) {
-      const { status, j } = await apiPanel('remitos.php', {
-        method: 'POST',
-        body: JSON.stringify(Object.assign({}, item.doc, { id_local: item.id })),
-      });
-      if (j && j.ok) {
-        save(
-          LS.outbox,
-          load(LS.outbox, []).filter(x => !(x.id === item.id && x.ts === item.ts))
-        );
-      } else if (status === 401 || status === 403 || status === 429) {
-        break; // clave inválida: no se reintenta en bucle
-      }
-    }
-  } catch (e) {
-    /* sin conexión: queda en cola para el próximo intento */
-  }
-  _sincronizando = false;
-  renderEstadoChip();
 }
 
 function wireConexion() {
   renderEstadoChip();
   window.addEventListener('online', () => {
     renderEstadoChip();
-    sincronizarNube();
     toast('Conexión restablecida', 1500, true);
+    reintentarPendiente();
   });
   window.addEventListener('offline', () => {
     renderEstadoChip();
-    toast('Sin conexión: el trabajo se sigue guardando en este equipo', 2600);
+    toast('Sin conexión: el documento en curso se sigue guardando en este equipo', 3000);
   });
 }
 
-/* Llama a la API propia con la clave de acceso de la aplicación. */
-async function apiPanel(ruta, opts = {}, clave) {
-  const key = (clave !== undefined ? clave : apiCfg.panelKey || '').trim();
-  const headers = Object.assign({ 'X-API-Key': key }, opts.body ? { 'Content-Type': 'application/json' } : {});
-  const res = await fetch('api/' + ruta, Object.assign({ cache: 'no-store', credentials: 'omit' }, opts, { headers }));
-  let j;
-  try {
-    j = await res.json();
-  } catch (e) {
-    j = { ok: false, error: 'Respuesta inesperada del servidor (HTTP ' + res.status + ')' };
-  }
-  return { status: res.status, j };
+/* Sube el borrador que quedó pendiente por un corte de conexión. */
+async function reintentarPendiente() {
+  if (!sesion.usuario || !doc.pendiente || !estaEnLinea()) return;
+  if (await guardar({ silencioso: true })) toast('El remito pendiente se guardó en el servidor', 2400, true);
 }
 
 function updateModeUI() {
   const pill = $('#apiStatePill');
   if (pill) {
-    pill.textContent = apiCfg.enabled ? 'Activa' : 'Inactiva';
-    pill.className = 'mode-pill ' + (apiCfg.enabled ? 'api' : 'wait');
+    pill.textContent = emisor().emision ? 'Activa' : 'Inactiva';
+    pill.className = 'mode-pill ' + (emisor().emision ? 'api' : 'wait');
   }
   renderEstadoChip();
 }
-/* Un solo indicador para modo y conexión. */
+/* Un solo indicador para el modo de numeración y la conexión. */
 function renderEstadoChip() {
   const chip = $('#modeChip'),
     txt = $('#modeChipT');
   if (!chip) return;
-  const online = estaEnLinea(),
-    pend = load(LS.outbox, []).length;
+  const online = estaEnLinea();
   chip.classList.toggle('offline', !online);
-  chip.classList.toggle('api', online && apiCfg.enabled);
+  chip.classList.toggle('api', online && emisor().emision);
   txt.textContent = !online
     ? 'Sin conexión'
-    : (apiCfg.enabled ? 'Emisión electrónica' : 'Modo local') + (pend ? ' · ' + pend + ' por respaldar' : '');
+    : (emisor().emision ? 'Emisión electrónica' : 'Numeración propia') + (doc.pendiente ? ' · 1 por guardar' : '');
 }
 
 /* ----------------------------- Certificado ----------------------------- */
 const ICN_CERT =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>';
 const fmtFechaHora = s => (s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '—');
-const fmtCuit = c => (c && c.length === 11 ? c.slice(0, 2) + '-' + c.slice(2, 10) + '-' + c.slice(10) : c || '');
+const fmtCuit = c => {
+  const d = String(c || '').replace(/\D/g, '');
+  return d.length === 11 ? d.slice(0, 2) + '-' + d.slice(2, 10) + '-' + d.slice(10) : c || '';
+};
 const ambienteNombre = a => (a === 'produccion' ? 'producción' : 'homologación');
 
 async function consultarCertificado() {
-  if (!(apiCfg.panelKey || '').trim()) {
-    certCargado = false;
-    renderCertificado();
-    return;
-  }
   try {
-    const { status, j } = await apiPanel('arca.php');
-    if (j.ok) {
-      certEstado = j.ambientes;
-      certCargado = true;
-    } else if (status === 401 || status === 403) {
-      certCargado = false;
-      avisoCert('err', 'No se pudo consultar el certificado', esc(j.error));
-    }
+    certEstado = (await api('arca.php')).ambientes;
   } catch (e) {
     /* sin conexión: se muestra el último estado conocido */
   }
@@ -1496,11 +1421,10 @@ async function consultarCertificado() {
 }
 
 function renderCertificado() {
-  const amb = $('#apiAmbiente') ? $('#apiAmbiente').value : apiCfg.ambiente;
+  const amb = $('#apiAmbiente').value || emisor().ambiente;
   const c = certEstado[amb];
   const box = $('#certStatus'),
     pill = $('#certPill');
-  const sinClave = !(apiCfg.panelKey || '').trim();
   if (c) {
     const vence = c.vencido
       ? 'Vencido el ' + fmtFechaHora(c.valido_hasta)
@@ -1519,13 +1443,12 @@ function renderCertificado() {
   } else {
     box.innerHTML = `<div class="cert empty-cert"><span class="cert-ico">${ICN_CERT}</span>
         <div class="cert-main"><strong>Sin certificado para ${ambienteNombre(amb)}</strong>
-          <small>${sinClave ? 'Cargá primero la clave de acceso de esta aplicación y guardá.' : 'Cargá el certificado emitido por ARCA y su clave privada.'}</small></div></div>`;
+          <small>${esAdmin() ? 'Cargá el certificado emitido por ARCA y su clave privada.' : 'Lo carga un administrador.'}</small></div></div>`;
     pill.textContent = 'Sin cargar';
     pill.className = 'mode-pill wait';
   }
-  $('#certUpload').disabled = sinClave;
-  $('#certTest').disabled = !c || sinClave;
-  $('#certDelete').disabled = !c || sinClave;
+  $('#certTest').disabled = !c;
+  $('#certDelete').disabled = !c;
 }
 
 function avisoCert(tipo, titulo, detalle, id = '#certAlert') {
@@ -1578,7 +1501,7 @@ function nombreArchivo(input) {
   el.classList.toggle('on', !!f);
 }
 function limpiarFormCert() {
-  ['#certFile', '#keyFile', '#keyPass', '#certMaster'].forEach(id => {
+  ['#certFile', '#keyFile', '#keyPass', '#certConfirm'].forEach(id => {
     const el = $(id);
     if (el) el.value = '';
   });
@@ -1594,14 +1517,9 @@ async function enviarCertificado(e) {
   e.preventDefault();
   const btn = $('#certSend');
   const ambiente = $('#certAmbiente').value;
-  const maestra = $('#certMaster').value.trim();
-  if (!maestra)
-    return avisoCert(
-      'warn',
-      'Falta la clave maestra',
-      ' Es la única autorizada a cargar certificados.',
-      '#certFormAlert'
-    );
+  const confirmacion = $('#certConfirm').value;
+  if (!confirmacion)
+    return avisoCert('warn', 'Falta tu contraseña', ' Se pide para confirmar la operación.', '#certFormAlert');
   let certificado, clave;
   try {
     [certificado, clave] = await Promise.all([
@@ -1614,23 +1532,19 @@ async function enviarCertificado(e) {
   btn.disabled = true;
   btn.textContent = 'Validando…';
   try {
-    const { j } = await apiPanel(
-      'arca.php',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          accion: 'cargar',
-          ambiente,
-          cuit: $('#apiCuit').value.replace(/\D/g, ''),
-          certificado,
-          clave,
-          frase: $('#keyPass').value,
-        }),
+    const j = await api('arca.php', {
+      method: 'POST',
+      body: {
+        accion: 'cargar',
+        ambiente,
+        cuit: emisor().cuit,
+        certificado,
+        clave,
+        frase: $('#keyPass').value,
+        confirmacion,
       },
-      maestra
-    );
+    });
     certificado = clave = null; // no se retienen en memoria más de lo necesario
-    if (!j.ok) return avisoCert('err', 'El servidor rechazó el certificado', ' ' + esc(j.error), '#certFormAlert');
     certEstado[ambiente] = j.credencial;
     limpiarFormCert();
     closePanels();
@@ -1642,12 +1556,7 @@ async function enviarCertificado(e) {
       ' Se validó contra su clave privada y quedó guardado cifrado en el servidor.'
     );
   } catch (err) {
-    avisoCert(
-      'err',
-      'No se pudo conectar con el servidor',
-      ' Verificá la conexión y volvé a intentar.',
-      '#certFormAlert'
-    );
+    avisoCert('err', 'El certificado no se cargó', ' ' + esc(err.message), '#certFormAlert');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Validar y guardar';
@@ -1659,19 +1568,15 @@ async function probarConexionArca() {
   btn.disabled = true;
   btn.textContent = 'Probando…';
   try {
-    const { j } = await apiPanel('arca.php', { method: 'POST', body: JSON.stringify({ accion: 'probar', ambiente }) });
-    if (j.ok) {
-      const s = j.servidores || {};
-      avisoCert(
-        'ok',
-        'Conexión con ARCA verificada',
-        ` Servidores: aplicación ${esc(s.app)}, base ${esc(s.db)}, autenticación ${esc(s.auth)}. Acceso vigente hasta el ${esc(fmtFechaHora(j.ticket_vence))} a las ${esc((j.ticket_vence || '').slice(11, 16))}.`
-      );
-    } else {
-      avisoCert('err', 'ARCA no aceptó la conexión', ' ' + esc(j.error));
-    }
+    const j = await api('arca.php', { method: 'POST', body: { accion: 'probar', ambiente } });
+    const s = j.servidores || {};
+    avisoCert(
+      'ok',
+      'Conexión con ARCA verificada',
+      ` Servidores: aplicación ${esc(s.app)}, base ${esc(s.db)}, autenticación ${esc(s.auth)}. Acceso vigente hasta el ${esc(fmtFechaHora(j.ticket_vence))} a las ${esc((j.ticket_vence || '').slice(11, 16))}.`
+    );
   } catch (e) {
-    avisoCert('err', 'No se pudo conectar con el servidor', ' Verificá la conexión y volvé a intentar.');
+    avisoCert('err', 'ARCA no aceptó la conexión', ' ' + esc(e.message));
   } finally {
     btn.textContent = 'Probar conexión';
     renderCertificado();
@@ -1679,13 +1584,12 @@ async function probarConexionArca() {
 }
 async function quitarCertificado() {
   const ambiente = $('#apiAmbiente').value;
-  const maestra = prompt(
-    'Para quitar el certificado de ' + ambienteNombre(ambiente) + ', ingresá la clave maestra de la API:'
+  const confirmacion = prompt(
+    'Para quitar el certificado de ' + ambienteNombre(ambiente) + ', confirmá con tu contraseña:'
   );
-  if (!maestra) return;
+  if (!confirmacion) return;
   try {
-    const { j } = await apiPanel('arca.php?ambiente=' + encodeURIComponent(ambiente), { method: 'DELETE' }, maestra);
-    if (!j.ok) return avisoCert('err', 'No se pudo quitar el certificado', ' ' + esc(j.error));
+    await api('arca.php', { method: 'POST', body: { accion: 'quitar', ambiente, confirmacion } });
     certEstado[ambiente] = null;
     renderCertificado();
     avisoCert(
@@ -1694,44 +1598,56 @@ async function quitarCertificado() {
       ' Se eliminaron del servidor el certificado, la clave privada y los accesos vigentes.'
     );
   } catch (e) {
-    avisoCert('err', 'No se pudo conectar con el servidor', '');
+    avisoCert('err', 'No se pudo quitar el certificado', ' ' + esc(e.message));
   }
-}
-
-/* Qué falta para poder activar la emisión electrónica */
-function faltantesApi() {
-  const f = [];
-  if ($('#apiCuit').value.replace(/\D/g, '').length !== 11) f.push('CUIT del emisor (11 dígitos)');
-  if (!$('#apiPv').value.trim()) f.push('Punto de venta habilitado para web services');
-  if (!$('#apiPanelKey').value.trim()) f.push('Clave de acceso de esta aplicación');
-  const c = certEstado[$('#apiAmbiente').value];
-  if (!c) f.push('Certificado digital de ' + ambienteNombre($('#apiAmbiente').value) + ' cargado en el servidor');
-  else if (c.vencido) f.push('Certificado vigente (el cargado está vencido)');
-  return f;
 }
 function avisoApi(tipo, titulo, detalle) {
   avisoCert(tipo, titulo, detalle, '#apiAlert');
 }
 
-function saveApiCfg(silencioso) {
-  const claveAnterior = apiCfg.panelKey;
-  apiCfg.ambiente = $('#apiAmbiente').value;
-  apiCfg.cuit = $('#apiCuit').value.trim();
-  apiCfg.ptoVenta = $('#apiPv').value.trim();
-  apiCfg.panelKey = $('#apiPanelKey').value.trim();
-  apiCfg.enabled = $('#apiEnabled').checked;
-  apiCfg.mode = apiCfg.enabled ? 'api' : 'local';
-  save(LS.api, apiCfg);
-  updateModeUI();
-  if (apiCfg.panelKey !== claveAnterior) consultarCertificado();
-  if (!silencioso) toast('Configuración guardada', 1600, true);
+/* Guarda los datos del emisor y el punto de venta de los remitos (solo administradores). */
+async function saveApiCfg(silencioso) {
+  const valores = {
+    ambiente: $('#apiAmbiente').value,
+    cuit: $('#apiCuit').value,
+    ptoVenta: $('#apiPv').value.trim(),
+    emision: $('#apiEnabled').checked,
+  };
+  try {
+    await api('ajustes.php', { method: 'POST', body: { seccion: 'emisor', valores } });
+    const j = await api('ajustes.php', {
+      method: 'POST',
+      body: { seccion: 'remito', valores: { ptoVenta: $('#remPvCfg').value || '1', copias: fiscal.copias } },
+    });
+    datos.ajustes = j.ajustes;
+    updateModeUI();
+    syncFiscalUI();
+    if (compDoc) renderComprobanteEditor();
+    if (!silencioso) toast('Configuración guardada', 1600, true);
+    return true;
+  } catch (e) {
+    $('#apiEnabled').checked = emisor().emision;
+    const faltan = e.respuesta && e.respuesta.faltan;
+    if (faltan) {
+      avisoApi(
+        'warn',
+        'Todavía no se puede activar la emisión electrónica',
+        'Falta:<ul>' + faltan.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+      );
+    } else {
+      avisoApi('err', 'No se guardó la configuración', ' ' + esc(e.message));
+    }
+    return false;
+  }
 }
 function wireConfig() {
   $$('.cfg-tab').forEach(t =>
     t.addEventListener('click', () => {
       $$('.cfg-tab').forEach(x => x.classList.toggle('active', x === t));
       $$('.cfg-panel').forEach(x => x.classList.remove('active'));
-      $('#cfg' + (t.dataset.tab === 'api' ? 'Api' : 'Local')).classList.add('active');
+      const panel = { local: '#cfgLocal', api: '#cfgApi', usuarios: '#cfgUsuarios' }[t.dataset.tab];
+      $(panel).classList.add('active');
+      if (t.dataset.tab === 'usuarios') renderUsuarios();
     })
   );
   $('#cfgOpenCalib').addEventListener('click', () => {
@@ -1761,29 +1677,21 @@ function wireConfig() {
     closePanels();
   });
 
-  /* El interruptor solo se activa con todo lo necesario cargado; si falta algo, lo dice. */
-  $('#apiEnabled').addEventListener('change', e => {
-    if (!e.target.checked) {
-      saveApiCfg(true);
-      avisoApi('warn', 'Emisión electrónica desactivada', ' Los comprobantes vuelven a numerarse en este equipo.');
-      if (compDoc) renderComprobanteEditor();
-      return;
-    }
-    const faltan = faltantesApi();
-    if (faltan.length) {
-      e.target.checked = false;
+  /* El interruptor solo se activa con todo lo necesario: el servidor lo verifica y,
+     si falta algo, lo indica. */
+  $('#apiEnabled').addEventListener('change', async e => {
+    const activar = e.target.checked;
+    if (await saveApiCfg(true)) {
       avisoApi(
-        'warn',
-        'Todavía no se puede activar la emisión electrónica',
-        'Falta:<ul>' + faltan.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+        activar ? 'ok' : 'warn',
+        activar ? 'Emisión electrónica activada' : 'Emisión electrónica desactivada',
+        activar
+          ? ' La numeración de cada comprobante se toma de ARCA.'
+          : ' Los comprobantes vuelven a numerarse en el sistema.'
       );
-      return;
     }
-    saveApiCfg(true);
-    avisoApi('ok', 'Emisión electrónica activada', ' La numeración de cada comprobante se toma de ARCA.');
-    if (compDoc) renderComprobanteEditor();
   });
-  ['#apiCuit', '#apiPv', '#apiPanelKey'].forEach(id => $(id).addEventListener('input', () => ocultar('#apiAlert')));
+  ['#apiCuit', '#apiPv', '#remPvCfg'].forEach(id => $(id).addEventListener('input', () => ocultar('#apiAlert')));
 }
 
 /* =============================== GUARDADO =============================== */
@@ -1796,44 +1704,58 @@ function touch() {
   clearTimeout(touch._t);
   touch._t = setTimeout(() => save(LS.draft, d), 400);
 }
-function guardar(opts = {}) {
+/* Guarda el remito en el servidor, que asigna el número si falta. Sin conexión,
+   el remito queda como borrador pendiente en el equipo y se sube al volver la red. */
+let _guardando = false;
+async function guardar(opts = {}) {
   cerrarPrueba(); // si había una prueba en curso, se guarda el documento real y no el de ejemplo
   clearTimeout(touch._t);
-  if (!doc.numero) doc.numero = nextRemitoNumero();
-  const docs = load(LS.docs, []);
-  doc.updated = Date.now();
-  if (!doc.id) {
-    doc.id = uid();
-    docs.unshift(doc);
-  } else {
-    const i = docs.findIndex(d => d.id === doc.id);
-    if (i >= 0) docs[i] = doc;
-    else docs.unshift(doc);
+  if (_guardando) return false;
+  _guardando = true;
+  const cuerpo = clone(doc);
+  delete cuerpo.pendiente;
+  try {
+    const j = await api('remitos.php', { method: 'POST', body: cuerpo });
+    doc = j.remito;
+    actualizarEnLista(datos.remitos, doc);
+    if (!j.actualizado) datos.remitosTotal++;
+    save(LS.draft, doc);
+    formFromDoc();
+    renderPreview();
+    dibujarPlantilla();
+    updateCrumb();
+    renderEstadoChip();
+    if (!opts.silencioso) toast('Remito guardado · Nº ' + doc.numero, 1900, true);
+    return true;
+  } catch (e) {
+    if (e.status === 0) {
+      doc.pendiente = true;
+      save(LS.draft, doc);
+      renderEstadoChip();
+      toast('Sin conexión: el remito quedó en este equipo y se guarda solo al volver la red', 3600, 'err');
+    } else {
+      avisarError(e, 'No se guardó el remito');
+    }
+    return false;
+  } finally {
+    _guardando = false;
   }
-  if (!save(LS.docs, docs)) return false;
-  save(LS.draft, doc);
-  formFromDoc();
-  dibujarPlantilla();
-  updateCrumb();
-  auditar('remito', 'Remito guardado Nº ' + (doc.numero || '—'), doc.cliente.razonSocial || doc.cliente.senores || '');
-  encolarNube(clone(doc));
-  if (!opts.silencioso) toast('Remito guardado · Nº ' + doc.numero, 1900, true);
-  return true;
 }
 function nuevo() {
   cerrarPrueba(); // primero vuelve el documento real: si no, dirty() compararía los datos de ejemplo
   if (dirty() && !confirm('¿Empezar un remito nuevo? Se perderán los cambios sin guardar.')) return false;
   doc = emptyRemito();
-  doc.numero = nextRemitoNumero();
   formFromDoc();
   applyCurrentDate(true);
   save(LS.draft, doc);
+  syncFiscalUI();
   updateCrumb();
   return true;
 }
 /* ¿Hay cambios sin guardar? Un remito vacío nunca guardado no cuenta como cambio. */
 function dirty() {
-  const saved = load(LS.docs, []).find(d => d.id === doc.id);
+  if (doc.pendiente) return true;
+  const saved = datos.remitos.find(d => d.id === doc.id);
   if (!saved) return tieneContenido(doc);
   return JSON.stringify(saved) !== JSON.stringify(doc);
 }
@@ -1875,7 +1797,7 @@ function applyCurrentDate(force) {
 }
 
 function renderSavedList() {
-  const docs = load(LS.docs, []);
+  const docs = datos.remitos;
   const list = $('#savedList');
   list.innerHTML = '';
   if (!docs.length) {
@@ -1891,7 +1813,7 @@ function renderSavedList() {
         <strong>${esc(d.cliente.razonSocial || d.cliente.senores || 'Sin razón social')}</strong>
         <div class="meta">${esc(d.numero ? 'Nº ' + d.numero + ' · ' : '')}${esc(d.fecha || fecha)}${n ? ' · ' + n + (n === 1 ? ' ítem' : ' ítems') : ''}</div>
       </div>
-      <button class="icon-btn danger" data-del title="Eliminar" aria-label="Eliminar">${ICN.trash}</button>`;
+      ${d.estado === 'autorizado' ? '<span class="doc-state auth">Autorizado</span>' : `<button class="icon-btn danger" data-del title="Eliminar" aria-label="Eliminar">${ICN.trash}</button>`}`;
     el.addEventListener('click', e => {
       if (e.target.closest('[data-del]')) return;
       cargarRemito(d);
@@ -1899,62 +1821,95 @@ function renderSavedList() {
       if (document.body.getAttribute('data-view') !== 'remito') showView('remito');
       toast('Remito cargado', 1400);
     });
-    el.querySelector('[data-del]').addEventListener('click', () => {
-      if (
-        !confirm('¿Eliminar el remito de «' + (d.cliente.razonSocial || d.cliente.senores || 'sin razón social') + '»?')
-      )
-        return;
-      save(
-        LS.docs,
-        load(LS.docs, []).filter(x => x.id !== d.id)
-      );
-      renderSavedList();
-      if (document.body.getAttribute('data-view') === 'inicio') renderInicio();
-    });
+    const del = el.querySelector('[data-del]');
+    if (del)
+      del.addEventListener('click', async () => {
+        if (!(await eliminarRemito(d.id))) return;
+        renderSavedList();
+        if (document.body.getAttribute('data-view') === 'inicio') renderInicio();
+      });
     list.appendChild(el);
   });
 }
 
-/* ============================ AGENDA CLIENTES ============================ */
+/* ============================ AGENDA CLIENTES ============================
+   La agenda es compartida: vive en el servidor y la usa todo el equipo. */
+const CLIENTE_REMITO = [
+  'senores',
+  'razonSocial',
+  'cuit',
+  'domicilio',
+  'localidad',
+  'telefono',
+  'cp',
+  'mail',
+  'nombre',
+  'otrosDatos',
+];
+const clienteDeAgenda = id => datos.clientes.find(c => String(c.id) === String(id));
+/* Solo los datos del cliente que van en el remito (sin id ni datos de auditoría). */
+function clienteParaRemito(c) {
+  const out = emptyRemito().cliente;
+  CLIENTE_REMITO.forEach(k => (out[k] = c[k] || ''));
+  return out;
+}
+
 function renderClientes() {
   const sel = $('#selCliente');
   sel.innerHTML = '<option value="">Cargar cliente de la agenda…</option>';
-  load(LS.clientes, []).forEach((c, i) => {
+  datos.clientes.forEach(c => {
     const o = document.createElement('option');
-    o.value = i;
+    o.value = c.id;
     o.textContent = c.razonSocial || c.cuit || 'Cliente';
     sel.appendChild(o);
   });
 }
+
+/* Alta o edición de un cliente en el servidor. Devuelve el cliente guardado o null. */
+async function guardarClienteServidor(c) {
+  try {
+    const j = await api('clientes.php', { method: 'POST', body: c });
+    const i = datos.clientes.findIndex(x => x.id === j.cliente.id);
+    if (i >= 0) datos.clientes[i] = j.cliente;
+    else datos.clientes.push(j.cliente);
+    datos.clientes.sort((a, b) => (a.razonSocial || '').localeCompare(b.razonSocial || '', 'es'));
+    return j.cliente;
+  } catch (e) {
+    avisarError(e, 'No se guardó el cliente');
+    return null;
+  }
+}
+
 function wireClientes() {
-  $('#btnGuardarCliente').addEventListener('click', () => {
+  /* Guarda en la agenda el cliente cargado en el remito: si el CUIT ya existe, lo actualiza. */
+  $('#btnGuardarCliente').addEventListener('click', async () => {
     const c = { ...doc.cliente };
     if (!c.razonSocial && !c.cuit) {
       toast('Completá razón social o CUIT', 1800);
       return;
     }
-    const list = load(LS.clientes, []);
-    const i = list.findIndex(x => x.cuit && x.cuit === c.cuit);
-    if (i >= 0) list[i] = c;
-    else list.push(c);
-    save(LS.clientes, list);
-    renderClientes();
-    toast('Cliente guardado', 1600, true);
+    const existente = c.cuit && datos.clientes.find(x => x.cuit === c.cuit);
+    if (existente) Object.assign(c, { id: existente.id, condIVA: existente.condIVA });
+    if (await guardarClienteServidor(c)) {
+      renderClientes();
+      toast(existente ? 'Cliente actualizado en la agenda' : 'Cliente guardado en la agenda', 1600, true);
+    }
   });
   $('#selCliente').addEventListener('change', e => {
-    const c = load(LS.clientes, [])[+e.target.value];
+    const c = clienteDeAgenda(e.target.value);
     if (!c) return;
-    doc.cliente = { ...doc.cliente, ...c };
+    doc.cliente = clienteParaRemito(c);
     formFromDoc();
     renderPreview();
     touch();
+    updateCrumb();
     e.target.value = '';
   });
 }
 
 /* ---------------------- Vista Clientes (agenda completa) ---------------- */
 let cliFilter = '',
-  cliEditIdx = -1;
+  cliEditId = null;
 const CLI_FIELDS = {
   razonSocial: 'cliRazon',
   cuit: 'cliCuit',
@@ -1971,19 +1926,17 @@ const CLI_FIELDS = {
 function renderClientesView() {
   const grid = $('#cliGrid');
   if (!grid) return;
-  const all = load(LS.clientes, []);
+  const all = datos.clientes;
   const cnt = $('#cliCount');
   if (cnt) cnt.textContent = all.length ? all.length + (all.length === 1 ? ' cliente' : ' clientes') : '';
   const q = cliFilter.trim().toLowerCase();
-  const list = all
-    .map((c, i) => ({ c, i }))
-    .filter(
-      ({ c }) =>
-        !q ||
-        [c.razonSocial, c.cuit, c.localidad, c.senores, c.mail, c.nombre, c.domicilio].some(v =>
-          (v || '').toLowerCase().includes(q)
-        )
-    );
+  const list = all.filter(
+    c =>
+      !q ||
+      [c.razonSocial, c.cuit, c.localidad, c.senores, c.mail, c.nombre, c.domicilio].some(v =>
+        (v || '').toLowerCase().includes(q)
+      )
+  );
   if (!all.length) {
     grid.innerHTML = `<div class="cli-empty card empty">${ICN.users}<span>Todavía no hay clientes. Agregá el primero con «Nuevo cliente» o importá una planilla.</span></div>`;
     return;
@@ -1993,10 +1946,11 @@ function renderClientesView() {
     return;
   }
   grid.innerHTML = list
-    .map(({ c, i }) => {
+    .map(c => {
+      const id = escA(String(c.id));
       const dir = [c.domicilio, c.localidad].filter(Boolean).join(', ');
       const nombre = c.razonSocial || c.senores || 'Cliente sin nombre';
-      return `<div class="cli-card" data-i="${i}">
+      return `<div class="cli-card" data-id="${id}">
       <div class="cli-top"><span class="avatar">${esc(iniciales(nombre))}</span>
         <div class="grow"><div class="cli-name">${esc(nombre)}</div>
         ${c.cuit ? `<div class="cli-cuit">CUIT ${esc(c.cuit)}</div>` : ''}</div></div>
@@ -2004,25 +1958,25 @@ function renderClientesView() {
       ${c.telefono ? `<div class="cli-line">${ICN.phone}<span>${esc(c.telefono)}</span></div>` : ''}
       ${c.mail ? `<div class="cli-line">${ICN.mail}<span>${esc(c.mail)}</span></div>` : ''}
       <div class="cli-acts">
-        <button class="btn sm soft grow" data-use="${i}">Usar en remito</button>
-        <button class="btn sm ghost" data-edit="${i}">Editar</button>
-        <button class="btn sm ghost icon danger" data-del="${i}" title="Eliminar" aria-label="Eliminar">${ICN.trash}</button>
+        <button class="btn sm soft grow" data-use="${id}">Usar en remito</button>
+        <button class="btn sm ghost" data-edit="${id}">Editar</button>
+        <button class="btn sm ghost icon danger" data-del="${id}" title="Eliminar" aria-label="Eliminar">${ICN.trash}</button>
       </div></div>`;
     })
     .join('');
-  grid.querySelectorAll('[data-use]').forEach(b => b.addEventListener('click', () => useCliente(+b.dataset.use)));
+  grid.querySelectorAll('[data-use]').forEach(b => b.addEventListener('click', () => useCliente(b.dataset.use)));
   grid
     .querySelectorAll('[data-edit]')
-    .forEach(b => b.addEventListener('click', () => openClienteModal(+b.dataset.edit)));
-  grid.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => delCliente(+b.dataset.del)));
+    .forEach(b => b.addEventListener('click', () => openClienteModal(b.dataset.edit)));
+  grid.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => delCliente(b.dataset.del)));
 }
-function openClienteModal(idx) {
-  cliEditIdx = typeof idx === 'number' && idx >= 0 ? idx : -1;
-  const c = cliEditIdx >= 0 ? load(LS.clientes, [])[cliEditIdx] || {} : {};
-  $('#cliModalTitle').textContent = cliEditIdx >= 0 ? 'Editar cliente' : 'Nuevo cliente';
+function openClienteModal(id) {
+  const c = id != null ? clienteDeAgenda(id) || null : null;
+  cliEditId = c ? c.id : null;
+  $('#cliModalTitle').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
   for (const k in CLI_FIELDS) {
     const el = $('#' + CLI_FIELDS[k]);
-    if (el) el.value = c[k] || '';
+    if (el) el.value = (c && c[k]) || '';
   }
   openPanel($('#clienteModal'), $('#backdrop4'));
   setTimeout(() => {
@@ -2030,8 +1984,8 @@ function openClienteModal(idx) {
     if (r) r.focus();
   }, 60);
 }
-function saveClienteModal() {
-  const c = {};
+async function saveClienteModal() {
+  const c = cliEditId ? { id: cliEditId } : {};
   for (const k in CLI_FIELDS) {
     const el = $('#' + CLI_FIELDS[k]);
     c[k] = el ? el.value.trim() : '';
@@ -2040,30 +1994,39 @@ function saveClienteModal() {
     toast('Completá al menos razón social o CUIT', 2000);
     return;
   }
-  const list = load(LS.clientes, []);
-  if (cliEditIdx >= 0) list[cliEditIdx] = c;
-  else list.push(c);
-  save(LS.clientes, list);
+  const btn = $('#cliSave');
+  btn.disabled = true;
+  const guardado = await guardarClienteServidor(c);
+  btn.disabled = false;
+  if (!guardado) return;
   renderClientes();
   renderClientesView();
   closePanels();
   toast('Cliente guardado', 1600, true);
 }
-function delCliente(idx) {
-  const list = load(LS.clientes, []);
-  const c = list[idx];
+async function delCliente(id) {
+  const c = clienteDeAgenda(id);
   if (!c) return;
-  if (!confirm(`¿Eliminar a "${c.razonSocial || c.cuit || 'este cliente'}" de la agenda?`)) return;
-  list.splice(idx, 1);
-  save(LS.clientes, list);
+  if (
+    !confirm(
+      '¿Eliminar a «' + (c.razonSocial || c.cuit || 'este cliente') + '» de la agenda? Se elimina para todo el equipo.'
+    )
+  )
+    return;
+  try {
+    await api('clientes.php?id=' + encodeURIComponent(c.id), { method: 'DELETE' });
+  } catch (e) {
+    return avisarError(e, 'No se eliminó el cliente');
+  }
+  datos.clientes = datos.clientes.filter(x => x.id !== c.id);
   renderClientes();
   renderClientesView();
   toast('Cliente eliminado', 1400);
 }
-function useCliente(idx) {
-  const c = load(LS.clientes, [])[idx];
+function useCliente(id) {
+  const c = clienteDeAgenda(id);
   if (!c) return;
-  doc.cliente = Object.assign(emptyRemito().cliente, c);
+  doc.cliente = clienteParaRemito(c);
   formFromDoc();
   renderPreview();
   touch();
@@ -2135,35 +2098,37 @@ function importClientesFile(file) {
     reader.readAsArrayBuffer(file);
   });
 }
-function applyClienteImport(rows) {
+/* Envía la planilla al servidor, que da de alta o actualiza cada cliente por CUIT. */
+async function applyClienteImport(rows) {
   if (!rows || !rows.length) {
     toast('El archivo no tiene filas de datos', 2600);
     return;
   }
-  const list = load(LS.clientes, []);
-  let added = 0,
-    upd = 0,
-    skip = 0;
-  rows.forEach(row => {
+  const clientes = rows.map(row => {
     const c = {};
     for (const k in row) {
       const f = CLI_HEADER_TO_FIELD[normHeader(k)];
       if (f && c[f] == null) c[f] = String(row[k] ?? '').trim();
     }
-    if (!c.razonSocial && !c.cuit) {
-      skip++;
-      return;
-    }
-    const i = c.cuit ? list.findIndex(x => x.cuit && x.cuit === c.cuit) : -1;
-    if (i >= 0) {
-      list[i] = { ...list[i], ...c };
-      upd++;
-    } else {
-      list.push(c);
-      added++;
-    }
+    return c;
   });
-  save(LS.clientes, list);
+  let added = 0,
+    upd = 0,
+    skip = 0;
+  try {
+    for (let i = 0; i < clientes.length; i += 2000) {
+      const j = await api('clientes.php', {
+        method: 'POST',
+        body: { accion: 'importar', clientes: clientes.slice(i, i + 2000) },
+      });
+      added += j.agregados;
+      upd += j.actualizados;
+      skip += j.omitidos;
+    }
+    await refrescarClientes();
+  } catch (e) {
+    return avisarError(e, 'La importación no se completó');
+  }
   renderClientes();
   renderClientesView();
   toast(`Importados: ${added} nuevos, ${upd} actualizados${skip ? `, ${skip} sin datos` : ''}`, 3600, true);
@@ -2244,28 +2209,27 @@ let compDoc = null,
 
 /* El CAE y su vencimiento forman parte de cada comprobante. Sin CAE, el documento
    se imprime marcado como BORRADOR. */
-const apiActiva = () => !!(apiCfg && apiCfg.enabled);
+const apiActiva = () => !!emisor().emision;
+const pv5 = v => String(parseInt(String(v || '').replace(/\D/g, ''), 10) || 1).padStart(5, '0');
 
 /* Próximo número según ARCA (último autorizado + 1) con la emisión electrónica activa.
    Devuelve null si no corresponde (letra X, sin conexión o sin certificado): en ese
    caso se usa el correlativo local. */
 async function proximoNumeroArca(d) {
   if (!apiActiva() || !/^[ABC]$/.test(d.letra)) return null;
-  const pv = (d.ptoVenta || apiCfg.ptoVenta || '').replace(/\D/g, '');
+  const pv = (d.ptoVenta || emisor().ptoVenta || '').replace(/\D/g, '');
   if (!pv) return null;
   const q = new URLSearchParams({
-    ambiente: apiCfg.ambiente,
+    ambiente: emisor().ambiente,
     tipo: d.tipo,
     subtipo: d.subtipo || '',
     letra: d.letra,
     pv,
   });
   try {
-    const { j } = await apiPanel('proximo.php?' + q);
-    if (j && j.ok && j.numero) return j.numero;
-    if (j && j.error) toast('Numeración local: ' + j.error, 3600, 'err');
+    return (await api('proximo.php?' + q)).numero;
   } catch (e) {
-    /* sin conexión: correlativo local */
+    if (e.status !== 0) toast('No se pudo consultar ARCA: ' + e.message, 3600, 'err');
   }
   return null;
 }
@@ -2319,11 +2283,15 @@ function compTotals(d) {
   }
   return { neto, iva: 0, total: neto, disc: false };
 }
-function nextCompNumero(tipo) {
-  const n =
-    load(LS.comp, [])
-      .filter(x => x.tipo === tipo)
-      .reduce((m, x) => Math.max(m, correlativo(x.numero)), 0) + 1;
+/* Próximo número de la serie (tipo, letra y punto de venta), para la vista previa:
+   el definitivo lo asigna el servidor al guardar. */
+function nextCompNumero(d) {
+  const serie = x =>
+    x.tipo === d.tipo &&
+    (x.subtipo || '') === (d.tipo === 'nota' ? d.subtipo || 'credito' : '') &&
+    x.letra === d.letra &&
+    pv5(x.ptoVenta) === pv5(d.ptoVenta);
+  const n = datos.comprobantes.filter(serie).reduce((m, x) => Math.max(m, correlativo(x.numero)), 0) + 1;
   return String(n).padStart(8, '0');
 }
 
@@ -2432,7 +2400,7 @@ function showComprobante(tipo) {
   cerrarPrueba(); // devuelve el documento anterior antes de cambiar
   if (!compDoc || compDoc.tipo !== tipo) compDoc = loadCompDraft(tipo);
   if (!compDoc.fecha) compDoc.fecha = currentFecha();
-  if (!compDoc.ptoVenta && apiCfg.ptoVenta) compDoc.ptoVenta = apiCfg.ptoVenta;
+  if (!compDoc.ptoVenta && emisor().ptoVenta) compDoc.ptoVenta = pv5(emisor().ptoVenta);
   $('#compBadge').textContent = COMP_INFO[tipo].badge;
   renderComprobanteEditor();
   renderComprobante();
@@ -2472,7 +2440,7 @@ function renderComprobanteEditor() {
             : ''
         }
         <div class="field"><label>Punto de venta</label><input data-cpath="ptoVenta" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" value="${escA(d.ptoVenta)}"></div>
-        <div class="field"><label>Número <span class="note-auto">${apiActiva() ? 'según ARCA' : 'correlativo'}</span></label><input data-cpath="numero" inputmode="numeric" pattern="[0-9]{1,8}" maxlength="8" value="${escA(d.numero)}" placeholder="${nextCompNumero(t)}"></div>
+        <div class="field"><label>Número <span class="note-auto">${apiActiva() ? 'según ARCA' : 'correlativo'}</span></label><input data-cpath="numero" inputmode="numeric" pattern="[0-9]{1,8}" maxlength="8" value="${escA(d.numero)}" placeholder="${nextCompNumero(d)}"></div>
         <div class="field full"><label>Fecha <span class="note-auto">automática</span></label><input type="date" data-cpath="fecha" value="${escA(dmyAIso(d.fecha))}"></div>
       </div>
     </div></div>
@@ -2522,7 +2490,7 @@ function renderComprobanteEditor() {
   html += `
     <div class="section"><h3>Autorización fiscal (CAE)</h3><div class="section-body">
       <p class="cal-mode-wrap">Numeración:
-        <span class="cal-mode ${api ? 'full' : 'ov'}">${api ? 'ARCA · ' + ambienteNombre(apiCfg.ambiente) : 'Correlativa en este equipo'}</span></p>
+        <span class="cal-mode ${api ? 'full' : 'ov'}">${api ? 'ARCA · ' + ambienteNombre(emisor().ambiente) : 'Correlativa del sistemo'}</span></p>
       <div class="grid">
         <div class="field"><label for="compCae">CAE Nº</label><input id="compCae" inputmode="numeric" pattern="[0-9]{14}" maxlength="14" value="${escA(d.cae)}" placeholder="14 dígitos"></div>
         <div class="field"><label for="compCaeVto">Vencimiento del CAE</label><input type="date" id="compCaeVto" value="${escA(dmyAIso(d.caeVto))}"></div>
@@ -2597,18 +2565,19 @@ function renderCompClientesSelect() {
   const sel = $('#compSelCliente');
   if (!sel) return;
   sel.innerHTML = '<option value="">Cargar cliente de la agenda…</option>';
-  load(LS.clientes, []).forEach((c, i) => {
+  datos.clientes.forEach(c => {
     const o = document.createElement('option');
-    o.value = i;
+    o.value = c.id;
     o.textContent = c.razonSocial || c.cuit || 'Cliente';
     sel.appendChild(o);
   });
   sel.addEventListener('change', e => {
-    const c = load(LS.clientes, [])[+e.target.value];
+    const c = clienteDeAgenda(e.target.value);
     if (!c) return;
     Object.assign(compDoc.cliente, {
       razonSocial: c.razonSocial || '',
       cuit: c.cuit || '',
+      condIVA: c.condIVA || compDoc.cliente.condIVA,
       domicilio: c.domicilio || '',
       localidad: c.localidad || '',
       cp: c.cp || '',
@@ -2652,7 +2621,7 @@ function renderComprobante() {
     rec = d.tipo === 'recibo';
   let title = COMP_INFO[d.tipo].title;
   if (d.tipo === 'nota') title = 'NOTA DE ' + (d.subtipo === 'debito' ? 'DÉBITO' : 'CRÉDITO');
-  const numero = d.numero || nextCompNumero(d.tipo);
+  const numero = d.numero || nextCompNumero(d);
   const cli = d.cliente;
   /* Diseño tomado de facturas emitidas por ARCA:
      banda "ORIGINAL" arriba · emisor izq · letra + código al centro · tipo y numeración der. */
@@ -2774,7 +2743,7 @@ function renderComprobante() {
 function sampleComprobante(tipo) {
   const base = emptyComprobante(tipo);
   base.fecha = currentFecha();
-  base.numero = nextCompNumero(tipo);
+  base.numero = nextCompNumero(base);
   base.cliente = {
     razonSocial: 'ACME DISTRIBUCIONES S.A.',
     cuit: '30-11111111-1',
@@ -2832,28 +2801,28 @@ function imprimirTestComprobante() {
   );
 }
 
+/* Guarda el comprobante en el servidor. Con la emisión electrónica activa el número
+   se toma de ARCA; si no, lo asigna el servidor (correlativo de la serie). */
 async function guardarComprobante() {
   cerrarPrueba(); // nunca se guardan los datos de ejemplo
   const d = compDoc;
-  if (!d.numero) d.numero = (await proximoNumeroArca(d)) || nextCompNumero(d.tipo);
+  if (!d.numero && !d.id) d.numero = (await proximoNumeroArca(d)) || '';
   if (compDoc !== d) return; // se cambió de documento mientras se esperaba a ARCA
-  d.updated = Date.now();
-  const list = load(LS.comp, []);
-  if (!d.id) {
-    d.id = uid();
-    list.unshift(d);
-  } else {
-    const i = list.findIndex(x => x.id === d.id);
-    if (i >= 0) list[i] = d;
-    else list.unshift(d);
+  try {
+    const j = await api('comprobantes.php', { method: 'POST', body: d });
+    if (compDoc !== d) return;
+    compDoc = Object.assign(emptyComprobante(d.tipo), j.comprobante);
+    actualizarEnLista(datos.comprobantes, compDoc);
+    if (!d.id) datos.comprobantesTotal++;
+  } catch (e) {
+    return avisarError(e, 'No se guardó el comprobante');
   }
-  if (!save(LS.comp, list)) return;
   saveCompDraft();
   renderComprobanteEditor();
   renderComprobante();
-  const info = COMP_INFO[d.tipo];
-  auditar('comprobante', info.badge + ' ' + info.guardada + ' Nº ' + d.numero, d.cliente.razonSocial || '');
-  toast(info.badge + ' Nº ' + d.numero + ' ' + info.guardada, 2000, true);
+  updateCrumb();
+  const info = COMP_INFO[compDoc.tipo];
+  toast(info.badge + ' Nº ' + compDoc.ptoVenta + '-' + compDoc.numero + ' ' + info.guardada, 2000, true);
 }
 /* Ejemplares ORIGINAL / DUPLICADO del comprobante (RG 1415 art. 14) */
 function buildCompCopies() {
@@ -2932,65 +2901,39 @@ async function autorizarRemito() {
   if (doc.estado === 'autorizado') {
     return toast('Este remito ya está autorizado · Nº ' + (doc.numero || ''), 2200);
   }
-  if (!(apiCfg.panelKey || '').trim()) {
-    return toast('Para autorizar, cargá la clave de acceso en Configuración → Conexión con ARCA', 3400);
-  }
-  const pv = parseInt((fiscal.ptoVenta || '1').replace(/\D/g, ''), 10) || 1;
-  const fecha = doc.fecha || currentFecha(); // dd/mm/aaaa → aaaa-mm-dd
-  const iso = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha)
-    ? fecha
-        .split('/')
-        .reverse()
-        .map((v, i) => (i === 0 ? v : v.padStart(2, '0')))
-        .join('-')
-    : '';
   const btn = $('#btnAutorizar');
   btn.disabled = true;
-  toast('Autorizando…', 1500);
-  let status, j;
   try {
-    ({ status, j } = await apiPanel('talonarios.php', {
-      method: 'POST',
-      body: JSON.stringify({ accion: 'autorizar', pv, tipo: 91, fecha: iso }),
-    }));
-  } catch (e) {
-    btn.disabled = false;
-    return toast('Sin conexión con el servidor: el remito no se autorizó', 3200, 'err');
-  }
-  btn.disabled = false;
-  if (!j.ok) {
-    if (j.vencido && confirm(j.error + '\n\n¿Autorizar igual con este C.A.I.?')) {
-      const r2 = await apiPanel('talonarios.php', {
-        method: 'POST',
-        body: JSON.stringify({ accion: 'autorizar', pv, tipo: 91, fecha: iso, confirmar: true }),
-      });
-      if (!r2.j.ok) return toast(r2.j.error || 'No se pudo autorizar', 3200);
-      aplicarAutorizacion(r2.j);
-      return;
+    /* Se autoriza un remito guardado: el número y el C.A.I. quedan escritos en el
+       servidor en la misma operación, y no pueden perderse aunque se cierre la ventana. */
+    if (!(await guardar({ silencioso: true }))) return;
+    const pv = parseInt(String(fiscal.ptoVenta).replace(/\D/g, ''), 10) || 1;
+    const fecha = doc.fecha || currentFecha(); // dd/mm/aaaa → aaaa-mm-dd
+    const iso = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha) ? fecha.split('/').reverse().join('-') : '';
+    const pedido = { accion: 'autorizar', pv, tipo: 91, fecha: iso, remito_id: doc.id };
+    let j;
+    try {
+      j = await api('talonarios.php', { method: 'POST', body: pedido });
+    } catch (e) {
+      if (!(e.respuesta && e.respuesta.vencido && confirm(e.message + '\n\n¿Autorizar igual con este C.A.I.?'))) {
+        return avisarError(e, 'No se autorizó');
+      }
+      j = await api('talonarios.php', { method: 'POST', body: Object.assign(pedido, { confirmar: true }) });
     }
-    return toast(
-      j.error ||
-        (status === 401 ? 'La clave del panel no es válida o le falta el permiso «crear»' : 'No se pudo autorizar'),
-      3600
-    );
+    doc = (await api('remitos.php?id=' + encodeURIComponent(doc.id))).remito;
+    actualizarEnLista(datos.remitos, doc);
+    save(LS.draft, doc);
+    formFromDoc();
+    syncFiscalUI();
+    renderPreview();
+    dibujarPlantilla();
+    const av = j.restantes <= 20 ? ` · quedan ${j.restantes} números en el talonario` : '';
+    toast('Remito autorizado · Nº ' + j.numero_formato + av, 3200, true);
+  } catch (e) {
+    avisarError(e, 'No se autorizó');
+  } finally {
+    btn.disabled = false;
   }
-  aplicarAutorizacion(j);
-}
-function aplicarAutorizacion(j) {
-  doc.numero = j.numero_formato;
-  doc.estado = 'autorizado';
-  fiscal.cai = j.cai;
-  fiscal.caiVto = j.cai_vencimiento
-    ? j.cai_vencimiento.slice(8, 10) + '/' + j.cai_vencimiento.slice(5, 7) + '/' + j.cai_vencimiento.slice(0, 4)
-    : fiscal.caiVto;
-  saveFiscal();
-  syncFiscalUI();
-  /* El número ya quedó consumido en el talonario: el remito se guarda en el acto para
-     que no se pierda aunque se cierre la ventana. */
-  guardar({ silencioso: true });
-  renderPreview();
-  const av = j.restantes <= 20 ? ` · quedan ${j.restantes} números en el talonario` : '';
-  toast('Remito autorizado · Nº ' + j.numero_formato + av, 3200, true);
 }
 
 function imprimirTestRemito() {
@@ -3177,15 +3120,32 @@ function printPositions() {
 }
 
 /* ============================ EXPORT / IMPORT =========================== */
-/* Copia de seguridad: remitos, comprobantes, clientes y calibración (sin secretos). */
-function exportAll() {
+/* Copia de seguridad de los datos del servidor (remitos, comprobantes y clientes)
+   y de la calibración de este equipo. No incluye secretos. */
+async function exportAll() {
+  let remitos, comprobantes;
+  try {
+    [remitos, comprobantes] = await Promise.all([
+      api('remitos.php?por_pagina=200'),
+      api('comprobantes.php?por_pagina=200'),
+    ]);
+    const juntar = async (ruta, campo, r) => {
+      const todos = [...r[campo]];
+      for (let p = 2; p <= r.paginas; p++) todos.push(...(await api(ruta + '&pagina=' + p))[campo]);
+      return todos;
+    };
+    remitos = await juntar('remitos.php?por_pagina=200', 'remitos', remitos);
+    comprobantes = await juntar('comprobantes.php?por_pagina=200', 'comprobantes', comprobantes);
+  } catch (e) {
+    return avisarError(e, 'No se pudo armar la copia');
+  }
   const data = {
     formato: 'remitos-intellihelp',
-    version: 2,
+    version: 3,
     exportado: new Date().toISOString(),
-    docs: load(LS.docs, []),
-    comprobantes: load(LS.comp, []),
-    clientes: load(LS.clientes, []),
+    docs: remitos,
+    comprobantes,
+    clientes: datos.clientes,
     calib,
   };
   const a = document.createElement('a');
@@ -3194,11 +3154,15 @@ function exportAll() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1500);
 }
+/* Importa una copia de seguridad al servidor (solo administradores). Los documentos se
+   agregan sin pisar los existentes: un remito ya importado se reconoce y se actualiza. */
 function importAll(file) {
-  if (file.size > 20 * 1024 * 1024)
+  if (!esAdmin()) return toast('Solo un administrador puede importar una copia de seguridad', 3000, 'err');
+  if (file.size > 20 * 1024 * 1024) {
     return toast('El archivo es demasiado grande para ser una copia de seguridad', 3000, 'err');
+  }
   const r = new FileReader();
-  r.onload = () => {
+  r.onload = async () => {
     let d;
     try {
       d = JSON.parse(r.result);
@@ -3211,23 +3175,50 @@ function importAll(file) {
       return toast('El archivo no tiene el formato de una copia de seguridad de esta aplicación', 3200, 'err');
     }
     const n = docsOk ? d.docs.length : 0;
-    if (!confirm('Se reemplazarán los datos de este equipo por los de la copia (' + n + ' remitos). ¿Continuar?'))
-      return;
-    if (docsOk) save(LS.docs, d.docs);
-    if (lista(d.comprobantes)) save(LS.comp, d.comprobantes);
-    if (lista(d.clientes)) save(LS.clientes, d.clientes);
-    if (d.calib && typeof d.calib === 'object') {
-      calib = Object.assign(clone(DEFAULT_CALIB), d.calib);
-      save(LS.calib, calib);
-      syncCalibUI();
-      applyCalib();
+    if (!confirm('Se van a agregar al servidor ' + n + ' remitos y los clientes de la copia. ¿Continuar?')) return;
+    let fallas = 0;
+    try {
+      if (lista(d.clientes) && d.clientes.length) {
+        await api('clientes.php', { method: 'POST', body: { accion: 'importar', clientes: d.clientes } });
+      }
+      for (const x of docsOk ? d.docs : []) {
+        try {
+          await api('remitos.php', {
+            method: 'POST',
+            body: Object.assign({}, x, {
+              id: undefined,
+              id_local: 'copia' + x.id,
+              numero: x.estado === 'autorizado' ? x.numero : '',
+            }),
+          });
+        } catch (e) {
+          if (e.status === 0) throw e;
+          fallas++;
+        }
+      }
+      for (const x of lista(d.comprobantes) ? d.comprobantes : []) {
+        try {
+          await api('comprobantes.php', {
+            method: 'POST',
+            body: Object.assign({}, x, { id: undefined, numero: x.cae ? x.numero : '' }),
+          });
+        } catch (e) {
+          if (e.status === 0) throw e;
+          fallas++;
+        }
+      }
+      await cargarDatos();
+    } catch (e) {
+      return avisarError(e, 'La importación no se completó');
     }
     renderSavedList();
     renderClientes();
-    renderPreview();
-    dibujarPlantilla();
     if (document.body.getAttribute('data-view') === 'inicio') renderInicio();
-    toast('Copia de seguridad importada', 1800, true);
+    toast(
+      fallas ? 'Copia importada; ' + fallas + ' documentos no se pudieron importar' : 'Copia de seguridad importada',
+      3000,
+      fallas ? 'err' : true
+    );
   };
   r.readAsText(file);
 }
@@ -3362,41 +3353,19 @@ function wire() {
   window.addEventListener('resize', () => fitCompZoom());
 }
 
-/* Abre un remito creado por una integración externa (enlace ?open=<id>). */
+/* Abre un remito por su enlace (?open=<id>), por ejemplo el que devuelve la API al
+   crearlo desde otro sistema. */
 async function openFromApi(id) {
-  if (!/^[0-9a-f]{16}$/.test(id)) {
-    toast('El enlace del remito no es válido', 2400, 'err');
-    return;
-  }
+  history.replaceState(null, '', location.pathname); // el enlace no vuelve a abrirse al recargar
+  if (!/^[0-9a-f]{16}$/.test(id)) return toast('El enlace del remito no es válido', 2400, 'err');
   try {
-    const r = await fetch('api/remitos.php?id=' + encodeURIComponent(id), { cache: 'no-store' });
-    const j = await r.json();
-    if (!j || !j.ok || !j.remito) {
-      toast('No se encontró ese remito', 2200);
-      return;
-    }
-    const rem = j.remito,
-      base = emptyRemito();
-    doc = Object.assign(base, {
-      id: rem.id,
-      numero: rem.numero || '',
-      fecha: rem.fecha || '',
-      cliente: Object.assign(base.cliente, rem.cliente || {}),
-      items: Array.isArray(rem.items) && rem.items.length ? rem.items : base.items,
-      recibi: Object.assign(base.recibi, rem.recibi || {}),
-      transporte: Object.assign(base.transporte, rem.transporte || {}),
-      updated: Date.now(),
-    });
-    fechaManual = !!doc.fecha;
-    formFromDoc();
-    if (!doc.fecha) applyCurrentDate(true);
-    else renderPreview();
-    save(LS.draft, doc);
+    const rem = (await api('remitos.php?id=' + encodeURIComponent(id))).remito;
+    actualizarEnLista(datos.remitos, rem);
+    cargarRemito(rem);
     showView('remito');
     toast('Remito abierto', 1600, true);
-    history.replaceState(null, '', location.pathname); // el enlace no vuelve a pisar el borrador al recargar
   } catch (e) {
-    toast('Error al abrir el remito de la API', 2200);
+    avisarError(e, 'No se pudo abrir el remito');
   }
 }
 
@@ -3415,32 +3384,25 @@ function wireAuditoriaErrores() {
   );
 }
 
+/* Arranque: se preparan los controles y se verifica la sesión. Los datos se cargan
+   recién después del ingreso (appLista). */
 async function init() {
   wireAuditoriaErrores();
   wire();
+  wireServidor();
   bindForm();
   wireFormatos();
-  if (!doc.numero) doc.numero = nextRemitoNumero(); // Nº automático para el borrador actual
-  formFromDoc();
   syncCalibUI();
-  renderClientes();
   applyCalib();
   dibujarPlantilla();
   setDocMode(calib.docMode || 'overlay');
-  renderPreview();
-  fitZoom();
-  updateModeUI();
   wireConexion();
-  sincronizarNube(); // estado de la conexión y respaldos pendientes
-  const openId = new URLSearchParams(location.search).get('open');
-  showView(openId ? 'remito' : 'inicio');
-  if (openId) openFromApi(openId);
   document.fonts &&
     document.fonts.ready.then(() => {
       renderPreview();
     });
   await syncServerTime();
-  applyCurrentDate();
+  iniciarSesionApp();
   setInterval(
     async () => {
       await syncServerTime();
@@ -3451,5 +3413,24 @@ async function init() {
   /* Sin la función flecha, el evento llegaría como argumento «force» y pisaría
      la fecha que el usuario cargó a mano. */
   window.addEventListener('focus', () => applyCurrentDate());
+}
+
+/* Con la sesión iniciada y los datos cargados: se retoma el borrador del usuario y se
+   muestra la vista inicial (o el remito del enlace ?open=). */
+function appLista() {
+  const b = load(LS.draft, null);
+  doc = b && (b.pendiente || hayTrabajoPendiente(b)) ? Object.assign(emptyRemito(), b) : emptyRemito();
+  fechaManual = !!doc.id;
+  compDoc = null;
+  formFromDoc();
+  applyCurrentDate();
+  syncFiscalUI();
+  renderClientes();
+  renderPreview();
+  updateModeUI();
+  const openId = new URLSearchParams(location.search).get('open');
+  showView(openId ? 'remito' : 'inicio');
+  if (openId) openFromApi(openId);
+  reintentarPendiente();
 }
 document.addEventListener('DOMContentLoaded', init);
