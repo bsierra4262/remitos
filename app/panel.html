@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#663399">
+<meta name="robots" content="noindex, nofollow">
+<title>Panel de la API · Intellihelp</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="assets/logos/favicon.png">
+<link rel="stylesheet" href="css/panel.css?v=200">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand"><img src="assets/logos/ITH-logo-mark.png" alt="Intellihelp" width="46" height="26"><div><b>Panel de la API</b><small>Remitos y comprobantes</small></div></div>
+    <span class="mode" id="modoBadge">Consulta</span>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="login" id="login">
+    <h1>Ingresar al panel</h1>
+    <p>Estado de los documentos, talonarios de C.A.I., claves de acceso y auditoría. No muestra importes ni datos confidenciales.</p>
+    <form class="key" id="loginForm" autocomplete="off">
+      <input id="apiKey" type="password" placeholder="Clave de la API (X-API-Key)" autocomplete="off" spellcheck="false" aria-label="Clave de la API">
+      <button class="btn" id="btnVer" type="submit">Entrar</button>
+    </form>
+    <p class="fine">La clave se conserva solo mientras esta pestaña esté abierta.</p>
+  </section>
+
+  <div class="top" id="top" hidden>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button class="tab" data-tab="estado" aria-selected="true" role="tab">Estado</button>
+      <button class="tab" data-tab="cai" aria-selected="false" role="tab">C.A.I.</button>
+      <button class="tab" data-tab="claves" aria-selected="false" role="tab">Claves</button>
+      <button class="tab" data-tab="registro" aria-selected="false" role="tab">Actividad</button>
+    </nav>
+    <button class="btn sec sm" id="btnSalir" type="button">Salir</button>
+  </div>
+
+  <div id="aviso" role="alert"></div>
+  <div id="cont"></div>
+  <p class="foot" id="foot" hidden>La pestaña activa se actualiza sola cada 6 segundos.</p>
+</main>
+
+<script src="js/panel.js?v=200"></script>
+</body>
+</html>

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#663399">
+<meta name="description" content="Remitos, facturas, recibos y notas de crédito y débito de Intellihelp.">
+<meta name="robots" content="noindex, nofollow">
+<title>Remitos y Comprobantes · Intellihelp</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="icon" href="assets/logos/favicon.png">
+<link rel="stylesheet" href="css/styles.css?v=200">
+</head>
+<body data-view="inicio">
+<div class="app">
+
+  <!-- ============================== Navegación ============================== -->
+  <aside class="navbar" id="navbar" aria-label="Navegación principal">
+    <div class="nav-brand">
+      <img class="logo" src="assets/logos/ITH-logo-mark.png" alt="Intellihelp" width="46" height="26">
+      <div class="brand-text"><strong>Intellihelp</strong><small>Remitos y comprobantes</small></div>
+    </div>
+    <nav class="nav-menu">
+      <button class="nav-item" data-view="inicio">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        <span>Inicio</span></button>
+      <p class="nav-label">Documentos</p>
+      <button class="nav-item" data-view="remito">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>
+        <span>Remitos</span></button>
+      <button class="nav-item" data-view="factura">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3h16v18l-3-2-2 2-3-2-3 2-2-2-3 2z"/><path d="M8 8h8M8 12h5"/></svg>
+        <span>Facturas</span></button>
+      <button class="nav-item" data-view="recibo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg>
+        <span>Recibos</span></button>
+      <button class="nav-item" data-view="nota">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 15h6M12 12v6"/></svg>
+        <span>Notas de crédito y débito</span></button>
+      <p class="nav-label">Datos</p>
+      <button class="nav-item" data-view="clientes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11"/></svg>
+        <span>Clientes</span></button>
+      <button class="nav-item" data-view="config">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        <span>Configuración</span></button>
+    </nav>
+    <div class="nav-foot">
+      <div class="mode-chip" id="modeChip" title="Modo de trabajo y estado de la conexión"><span class="dot"></span><span id="modeChipT">Modo local</span></div>
+      <div class="nav-user"><span class="nav-ava">ITH</span><div class="nav-user-t"><strong>Intellihelp S.A.</strong><small>Uso interno</small></div></div>
+    </div>
+  </aside>
+
+  <div class="nav-backdrop" id="navBackdrop"></div>
+
+  <!-- ============================ Área de trabajo ============================ -->
+  <div class="workspace">
+    <header class="topbar">
+      <button class="icon-btn nav-toggle" id="btnNavToggle" title="Menú" aria-label="Mostrar u ocultar el menú">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <button class="icon-btn only-doc" id="btnToggleSidebar" title="Mostrar u ocultar el panel de datos" aria-label="Panel de datos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
+      </button>
+      <div class="crumb" id="crumb"><b>Inicio</b></div>
+      <div class="spacer"></div>
+      <div class="toolbar only-remito">
+        <button class="btn ghost" id="btnNuevo" title="Empezar un remito nuevo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>Nuevo</span></button>
+        <button class="btn ghost" id="btnGuardar" title="Guardar (Ctrl+S)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Guardar</span></button>
+        <button class="btn ghost" id="btnGuardados" title="Remitos guardados y copia de seguridad">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Guardados</span></button>
+        <span class="tb-divider"></span>
+        <button class="btn ghost icon" id="btnAjustar" title="Ajuste fino de cada campo (milímetros)" aria-label="Ajustar campos">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 21v-6M4 10V3M12 21v-9M12 6V3M20 21v-4M20 12V3M1 15h6M9 8h6M17 15h6"/></svg></button>
+        <button class="btn ghost icon" id="btnCalibrar" title="Calibración de impresión" aria-label="Calibración">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3H3v18h18z"/><path d="M3 9h3M3 15h3M9 3v3M15 3v3"/><circle cx="14" cy="14" r="3"/></svg></button>
+        <button class="btn ghost" id="btnTestRemito" title="Imprimir una prueba con datos ficticios">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/></svg><span>Prueba</span></button>
+        <button class="btn ghost" id="btnAutorizar" title="Asigna el próximo número y el C.A.I. del talonario vigente">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span>Autorizar</span></button>
+        <button class="btn primary" id="btnImprimir" title="Imprimir (Ctrl+P)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg><span>Imprimir</span></button>
+      </div>
+      <div class="toolbar only-comp">
+        <button class="btn ghost" id="tbCompNuevo" title="Empezar un comprobante nuevo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>Nuevo</span></button>
+        <button class="btn ghost" id="tbCompGuardar" title="Guardar (Ctrl+S)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Guardar</span></button>
+        <button class="btn ghost" id="tbCompPdf" title="Descargar en PDF">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span>PDF</span></button>
+        <button class="btn ghost" id="tbCompTest" title="Imprimir una prueba con datos ficticios">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/></svg><span>Prueba</span></button>
+        <button class="btn primary" id="tbCompImprimir" title="Imprimir (Ctrl+P)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg><span>Imprimir</span></button>
+      </div>
+    </header>
+
+    <!-- ================================ Inicio ================================ -->
+    <section class="view view-page" id="viewInicio">
+      <div class="page-wrap-view">
+        <div class="hero">
+          <div>
+            <h1 id="inicioHi">Buen día</h1>
+            <p id="inicioFecha"></p>
+          </div>
+          <div class="quick">
+            <button class="quick-btn" data-quick="remito"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg></span>Nuevo remito</button>
+            <button class="quick-btn" data-quick="factura"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3h16v18l-3-2-2 2-3-2-3 2-2-2-3 2z"/><path d="M8 8h8M8 12h5"/></svg></span>Nueva factura</button>
+            <button class="quick-btn" data-quick="recibo"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg></span>Nuevo recibo</button>
+            <button class="quick-btn" data-quick="cliente"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>Nuevo cliente</button>
+          </div>
+        </div>
+        <div class="stat-row" id="inicioStats"></div>
+        <div class="card">
+          <div class="card-head">
+            <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Documentos recientes <em class="count" id="recentCount" hidden></em></h2>
+            <div class="actions"><button class="btn sm" id="btnGestionar" title="Exportar o importar una copia de seguridad">Copia de seguridad</button></div>
+          </div>
+          <div class="doc-list" id="inicioRecent"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================ Remito ================================ -->
+    <section class="view view-remito" id="viewRemito">
+      <div class="editor" id="editor">
+        <div class="section">
+          <h3>Remito</h3>
+          <div class="section-body">
+            <div class="grid">
+              <div class="field full"><label for="remFecha">Fecha <span class="note-auto">automática</span> <span class="note">(hora de Buenos Aires, editable)</span></label>
+                <div class="inline-row">
+                  <input type="date" id="remFecha" class="grow" data-path="fecha" title="Se completa con la fecha de hoy; se puede cambiar">
+                  <button class="btn sm" id="btnFechaHoy" title="Volver a la fecha de hoy">Hoy</button>
+                </div>
+              </div>
+              <div class="field"><label for="remPv">Punto de venta</label><input id="remPv" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="00001"></div>
+              <div class="field"><label for="remNumero">Nº de remito <span class="note-auto">correlativo</span></label><input id="remNumero" data-path="numero" inputmode="numeric" pattern="[0-9]{1,8}(-[0-9]{8})?" maxlength="14" placeholder="00000001"></div>
+              <div class="field"><label for="remCai">C.A.I.</label><input id="remCai" inputmode="numeric" pattern="[0-9]{14}" maxlength="14" placeholder="14 dígitos"></div>
+              <div class="field"><label for="remCaiVto">Vencimiento del C.A.I.</label><input type="date" id="remCaiVto"></div>
+              <div class="field full"><label for="remCopias">Ejemplares a imprimir</label><select id="remCopias">
+                <option value="2">Original y duplicado (RG 1415)</option>
+                <option value="1">Solo original</option>
+              </select></div>
+            </div>
+            <p class="hint">El número, el C.A.I. y su vencimiento se imprimen en el documento completo. Con un talonario cargado, <b>Autorizar</b> los completa solos.</p>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Cliente</h3>
+          <div class="section-body">
+            <div class="inline-row mb-md">
+              <select id="selCliente" class="select-sm grow" aria-label="Cargar un cliente de la agenda"><option value="">Cargar cliente de la agenda…</option></select>
+              <button class="btn sm" id="btnGuardarCliente" title="Guardar este cliente en la agenda">Guardar en agenda</button>
+            </div>
+            <div class="grid">
+              <div class="field full"><label>Señor/es <span class="note">(opcional)</span></label><input data-path="cliente.senores" maxlength="160"></div>
+              <div class="field full"><label>Razón social</label><input data-path="cliente.razonSocial" maxlength="160" autocomplete="organization"></div>
+              <div class="field"><label>CUIT</label><input data-path="cliente.cuit" inputmode="numeric" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]" maxlength="13" placeholder="30-12345678-9"></div>
+              <div class="field"><label>Teléfono</label><input type="tel" data-path="cliente.telefono" inputmode="tel" maxlength="40"></div>
+              <div class="field full"><label>Domicilio</label><input data-path="cliente.domicilio" maxlength="160"></div>
+              <div class="field"><label>Localidad</label><input data-path="cliente.localidad" maxlength="80"></div>
+              <div class="field"><label>C.P.</label><input data-path="cliente.cp" maxlength="10" pattern="[A-Za-z]?[0-9]{4}[A-Za-z]{0,3}" placeholder="C1043 o 1043"></div>
+              <div class="field"><label>Mail</label><input type="email" data-path="cliente.mail" inputmode="email" maxlength="120"></div>
+              <div class="field"><label>Contacto</label><input data-path="cliente.nombre" maxlength="120"></div>
+              <div class="field full"><label>Otros datos</label><input data-path="cliente.otrosDatos" maxlength="160"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Ítems</h3>
+          <div class="section-body">
+            <div id="itemsList"></div>
+            <button class="btn sm soft" id="btnAddItem">＋ Agregar ítem</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Recibí conforme</h3>
+          <div class="section-body">
+            <div class="grid">
+              <div class="field full">
+                <label>Tipo de documento</label>
+                <div class="radios">
+                  <label><input type="radio" name="tipoDoc" value=""> Ninguno</label>
+                  <label><input type="radio" name="tipoDoc" value="DNI"> DNI</label>
+                  <label><input type="radio" name="tipoDoc" value="CI"> CI</label>
+                  <label><input type="radio" name="tipoDoc" value="Pasaporte"> Pasaporte</label>
+                  <label><input type="radio" name="tipoDoc" value="Otro"> Otro</label>
+                </div>
+              </div>
+              <div class="field"><label>Nombre y apellido</label><input data-path="recibi.nombre" maxlength="120"></div>
+              <div class="field"><label>Documento Nº</label><input data-path="recibi.documentoNro" inputmode="numeric" maxlength="20"></div>
+              <div class="field"><label>Sector</label><input data-path="recibi.sector" maxlength="80"></div>
+              <div class="field"><label>Puesto</label><input data-path="recibi.puesto" maxlength="80"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Datos del transportista</h3>
+          <div class="section-body">
+            <div class="grid">
+              <div class="field"><label>Nombre</label><input data-path="transporte.nombre" maxlength="120"></div>
+              <div class="field"><label>Vehículo</label><input data-path="transporte.vehiculo" maxlength="120"></div>
+              <div class="field"><label>Chofer</label><input data-path="transporte.chofer" maxlength="120"></div>
+              <div class="field"><label>Lugar de entrega</label><input data-path="transporte.lugarEntrega" maxlength="160"></div>
+              <div class="field"><label>Fecha</label><input type="date" data-path="transporte.fecha"></div>
+              <div class="field"><label>Hora</label><input type="time" data-path="transporte.hora"></div>
+              <div class="field full"><label>Observaciones</label><textarea data-path="transporte.observaciones" rows="2" maxlength="600"></textarea></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="preview-pane" id="previewPane">
+        <div class="pv-tools no-print">
+          <div class="mode-switch" id="modeSwitch" role="group" aria-label="Modo de impresión">
+            <button data-mode="overlay" class="active" title="Imprime solo los datos sobre el remito pre-impreso">Sobre pre-impreso</button>
+            <button data-mode="full" title="Genera el remito completo (papel en blanco o PDF)">Documento completo</button>
+          </div>
+          <button class="btn sm" id="btnPdf" title="Descargar el remito en PDF">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span>PDF</span></button>
+        </div>
+        <div class="page-wrap">
+          <div class="page" id="page">
+            <div class="template" id="template"></div>
+            <div class="data-layer" id="dataLayer"></div>
+          </div>
+        </div>
+        <!-- Ejemplares ORIGINAL / DUPLICADO: se arman solo al imprimir (RG 1415, art. 14) -->
+        <div class="print-copies" id="printCopies"></div>
+        <div class="zoombar no-print">
+          <button class="btn ghost" id="zoomOut" aria-label="Alejar">−</button>
+          <span class="zval" id="zoomVal">100%</span>
+          <button class="btn ghost" id="zoomIn" aria-label="Acercar">＋</button>
+          <button class="btn ghost sm" id="zoomFit" title="Ajustar a la ventana" aria-label="Ajustar a la ventana">⤢</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ Configuración ============================ -->
+    <section class="view view-page" id="viewConfig">
+      <div class="page-wrap-view">
+        <div class="page-head">
+          <div><h1>Configuración</h1><p>Impresión en este equipo y conexión con ARCA para la emisión electrónica.</p></div>
+        </div>
+        <div class="cfg-tabs" role="tablist">
+          <button class="cfg-tab active" data-tab="local" role="tab">Impresión</button>
+          <button class="cfg-tab" data-tab="api" role="tab">Conexión con ARCA</button>
+        </div>
+
+        <div class="cfg-panel active" id="cfgLocal">
+          <div class="cfg-card">
+            <div class="cfg-card-head">
+              <div><h3>Impresión en este equipo</h3><p>Los documentos se guardan en este navegador y se imprimen sin conexión. La calibración se ajusta una vez por impresora.</p></div>
+              <span class="mode-pill on">Activa</span>
+            </div>
+            <ul class="cfg-list">
+              <li>Impresión sobre el remito pre-impreso, calibrada al milímetro, o documento completo en papel en blanco o PDF.</li>
+              <li>Agenda de clientes con importación desde CSV o Excel.</li>
+              <li>Copia de seguridad: exportar e importar todos los datos en un archivo.</li>
+            </ul>
+            <div class="cfg-actions">
+              <button class="btn" id="cfgOpenCalib">Abrir la calibración de impresión</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="cfg-panel" id="cfgApi">
+          <div class="cfg-card">
+            <div class="cfg-card-head">
+              <div><h3>Datos del emisor</h3><p>Facturas, recibos y notas con validez fiscal a través de los web services de ARCA. El remito se autoriza con su C.A.I.</p></div>
+              <span class="mode-pill wait" id="apiStatePill">Pendiente</span>
+            </div>
+            <div class="cfg-grid">
+              <div class="field"><label for="apiAmbiente">Ambiente</label><select id="apiAmbiente"><option value="homologacion">Homologación (pruebas)</option><option value="produccion">Producción</option></select></div>
+              <div class="field"><label for="apiCuit">CUIT del emisor</label><input id="apiCuit" inputmode="numeric" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]" maxlength="13" placeholder="30-71140975-7"></div>
+              <div class="field"><label for="apiPv">Punto de venta</label><input id="apiPv" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="Ej. 2"></div>
+              <div class="field full"><label for="apiPanelKey">Clave de acceso de esta aplicación <span class="note">(se crea en el Panel → Claves, con permisos «leer» y «crear»)</span></label><input id="apiPanelKey" type="password" placeholder="ith_…" autocomplete="off" spellcheck="false"></div>
+            </div>
+            <div class="switch cfg-switch">
+              <label for="apiEnabled">Emisión electrónica<span class="hint">La numeración de cada comprobante se toma de ARCA (último autorizado + 1).</span></label>
+              <label class="toggle"><input type="checkbox" id="apiEnabled"><span class="track"></span></label>
+            </div>
+            <div class="cfg-alert" id="apiAlert" hidden></div>
+            <div class="cfg-actions">
+              <button class="btn primary" id="apiSave">Guardar</button>
+              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=200" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
+            </div>
+          </div>
+
+          <div class="cfg-card">
+            <div class="cfg-card-head">
+              <div><h3>Certificado digital</h3><p>El certificado y la clave privada se guardan en el servidor, cifrados. Nunca quedan en este navegador ni vuelven a mostrarse.</p></div>
+              <span class="mode-pill wait" id="certPill">Sin cargar</span>
+            </div>
+            <div id="certStatus"></div>
+            <div class="cfg-alert" id="certAlert" hidden></div>
+            <div class="cfg-actions">
+              <button class="btn primary" id="certUpload">Cargar certificado</button>
+              <button class="btn" id="certTest" disabled>Probar conexión</button>
+              <button class="btn danger" id="certDelete" disabled>Quitar</button>
+            </div>
+          </div>
+
+          <div class="cfg-note">
+            La numeración es correlativa por punto de venta y tipo de comprobante, y ARCA la valida al autorizar.
+            El remito clase R no se autoriza por web service: lleva el <b>C.A.I.</b> del talonario, que se carga en el Panel.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================== Clientes =============================== -->
+    <section class="view view-page" id="viewClientes">
+      <div class="page-wrap-view">
+        <div class="page-head">
+          <div><h1>Clientes</h1><p>Se cargan una vez y completan cualquier documento al instante.</p></div>
+          <div class="actions">
+            <button class="btn" id="btnImportarCli" title="Importar clientes desde un archivo CSV o Excel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4-4 4M5 21h14"/></svg><span>Importar CSV o Excel</span></button>
+            <button class="btn ghost" id="btnPlantillaCli" title="Descargar una planilla modelo">Planilla modelo</button>
+            <button class="btn primary" id="btnNuevoCliente">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>Nuevo cliente</span></button>
+          </div>
+          <input type="file" id="cliImportFile" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        </div>
+        <div class="clientes-bar">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="cliSearch" type="search" placeholder="Buscar por razón social, CUIT, localidad o mail…" aria-label="Buscar clientes">
+          </div>
+          <span class="panel-count" id="cliCount"></span>
+        </div>
+        <div class="cli-grid" id="cliGrid"></div>
+      </div>
+    </section>
+
+    <!-- ============== Comprobantes: factura, recibo y notas ============== -->
+    <section class="view view-comprobante" id="viewComprobante">
+      <div class="editor" id="compEditor"></div>
+      <div class="preview-pane comp-preview" id="compPreview">
+        <div class="pv-tools no-print">
+          <span class="comp-badge" id="compBadge">Documento</span>
+          <div class="comp-zoom">
+            <button class="btn ghost" id="compZoomOut" aria-label="Alejar">−</button>
+            <span class="zval" id="compZoomVal">100%</span>
+            <button class="btn ghost" id="compZoomIn" aria-label="Acercar">＋</button>
+            <button class="btn ghost sm" id="btnCompFit" title="Ajustar a la ventana" aria-label="Ajustar a la ventana">⤢</button>
+          </div>
+        </div>
+        <div class="page-wrap" id="compWrap"><div class="comp-page" id="compPage"></div></div>
+        <div class="print-copies" id="compPrintCopies"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ========================= Calibración de impresión ========================= -->
+<div class="backdrop" id="backdrop"></div>
+<aside class="calib" id="calib" aria-label="Calibración">
+  <div class="calib-head">
+    <h3>Calibración de impresión</h3>
+    <button class="btn ghost icon" id="calibClose" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="calib-body">
+    <p class="cal-mode-wrap">Ajustando: <span class="cal-mode ov" id="calModeBadge">Sobre pre-impreso</span></p>
+    <p class="hint">Cada modo guarda su propia calibración: lo que se mueve en el documento completo no afecta al pre-impreso.</p>
+    <div class="row"><label for="calPaper">Tamaño de papel</label><select id="calPaper" class="select-sm"></select></div>
+    <div class="row"><label for="calOffX">Desplazamiento horizontal (mm)</label><div class="slider"><input type="range" id="calOffX" min="-20" max="20" step="0.5"><output id="calOffXv"></output></div></div>
+    <div class="row"><label for="calOffY">Desplazamiento vertical (mm)</label><div class="slider"><input type="range" id="calOffY" min="-20" max="20" step="0.5"><output id="calOffYv"></output></div></div>
+    <div class="row"><label for="calScaleX">Escala horizontal (%)</label><div class="slider"><input type="range" id="calScaleX" min="90" max="110" step="0.25"><output id="calScaleXv"></output></div></div>
+    <div class="row"><label for="calScaleY">Escala vertical (%)</label><div class="slider"><input type="range" id="calScaleY" min="90" max="110" step="0.25"><output id="calScaleYv"></output></div></div>
+    <div class="row"><label for="calFont">Tamaño de letra (%)</label><div class="slider"><input type="range" id="calFont" min="80" max="130" step="1"><output id="calFontv"></output></div></div>
+    <div class="row"><label for="calGuide">Opacidad del formulario guía (%)</label><div class="slider"><input type="range" id="calGuide" min="0" max="70" step="1"><output id="calGuidev"></output></div></div>
+    <p class="hint">Para calibrar: imprimí la hoja de prueba sobre un remito pre-impreso y ajustá el desplazamiento hasta que todo coincida. Imprimí con márgenes en cero y sin «ajustar a la página».</p>
+  </div>
+  <div class="calib-foot">
+    <button class="btn sm" id="calPositions" title="Imprime el nombre de cada campo en su lugar">Probar posiciones</button>
+    <button class="btn sm" id="calTest" title="Imprime una grilla en milímetros">Hoja de prueba</button>
+    <button class="btn sm danger" id="calReset">Restablecer</button>
+  </div>
+</aside>
+
+<!-- ============================ Remitos guardados ============================ -->
+<div class="backdrop" id="backdrop2"></div>
+<aside class="calib" id="saved" aria-label="Remitos guardados">
+  <div class="calib-head">
+    <h3>Remitos guardados</h3>
+    <button class="btn ghost icon" id="savedClose" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="calib-body"><div id="savedList"></div></div>
+  <div class="calib-foot">
+    <button class="btn sm" id="btnExport">Exportar copia de seguridad</button>
+    <button class="btn sm" id="btnImport">Importar</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+  </div>
+</aside>
+
+<!-- ============================== Ajuste por campo ============================== -->
+<div class="backdrop" id="backdrop3"></div>
+<aside class="calib wide" id="adjust" aria-label="Ajuste fino por campo">
+  <div class="calib-head">
+    <h3>Ajuste fino por campo</h3>
+    <button class="btn ghost icon" id="adjustClose" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="calib-body">
+    <p class="cal-mode-wrap">Ajustando: <span class="cal-mode ov" id="adjModeBadge">Sobre pre-impreso</span></p>
+    <p class="hint">Mueve cada campo al milímetro. Se guarda solo y se aplica al instante; cada modo tiene su propio ajuste.</p>
+    <div class="adj-tools">
+      <label for="adjStep">Paso <select id="adjStep" class="select-sm"><option value="0.5">0,5 mm</option><option value="0.25">0,25 mm</option><option value="1">1 mm</option></select></label>
+      <button class="btn sm danger ml-auto" id="adjResetAll">Restablecer todo</button>
+    </div>
+    <div class="adj-head"><span>Campo</span><span>Horizontal</span><span>Vertical</span></div>
+    <div id="adjList"></div>
+  </div>
+</aside>
+
+<!-- ================================ Cliente ================================ -->
+<div class="backdrop" id="backdrop4"></div>
+<aside class="calib wide" id="clienteModal" aria-label="Cliente">
+  <div class="calib-head">
+    <h3 id="cliModalTitle">Nuevo cliente</h3>
+    <button class="btn ghost icon" id="cliModalClose" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="calib-body">
+    <div class="grid">
+      <div class="field full"><label for="cliRazon">Razón social</label><input id="cliRazon" maxlength="160"></div>
+      <div class="field"><label for="cliCuit">CUIT</label><input id="cliCuit" inputmode="numeric" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]" maxlength="13" placeholder="30-12345678-9"></div>
+      <div class="field"><label for="cliTel">Teléfono</label><input type="tel" id="cliTel" inputmode="tel" maxlength="40"></div>
+      <div class="field full"><label for="cliSenores">Señor/es <span class="note">(opcional)</span></label><input id="cliSenores" maxlength="160"></div>
+      <div class="field full"><label for="cliDom">Domicilio</label><input id="cliDom" maxlength="160"></div>
+      <div class="field"><label for="cliLoc">Localidad</label><input id="cliLoc" maxlength="80"></div>
+      <div class="field"><label for="cliCp">C.P.</label><input id="cliCp" maxlength="10" pattern="[A-Za-z]?[0-9]{4}[A-Za-z]{0,3}" placeholder="C1043 o 1043"></div>
+      <div class="field"><label for="cliMail">Mail</label><input type="email" id="cliMail" inputmode="email" maxlength="120"></div>
+      <div class="field"><label for="cliNombre">Contacto</label><input id="cliNombre" maxlength="120"></div>
+      <div class="field full"><label for="cliOtros">Otros datos</label><input id="cliOtros" maxlength="160"></div>
+    </div>
+  </div>
+  <div class="calib-foot">
+    <button class="btn primary" id="cliSave">Guardar cliente</button>
+    <button class="btn ghost" id="cliCancel">Cancelar</button>
+  </div>
+</aside>
+
+<!-- ======================== Carga del certificado de ARCA ======================== -->
+<div class="backdrop" id="backdrop5"></div>
+<aside class="calib wide" id="certModal" aria-label="Cargar certificado de ARCA">
+  <div class="calib-head">
+    <h3>Cargar certificado de ARCA</h3>
+    <button class="btn ghost icon" id="certClose" aria-label="Cerrar">✕</button>
+  </div>
+  <form class="calib-body" id="certForm" autocomplete="off">
+    <div class="secure-note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      <span>Los archivos viajan una sola vez por HTTPS al servidor, que valida que la clave corresponda al certificado y los guarda cifrados (AES-256-GCM). No se guardan en este equipo.</span>
+    </div>
+    <div class="grid">
+      <div class="field full"><label for="certAmbiente">Ambiente</label><select id="certAmbiente"><option value="homologacion">Homologación (pruebas)</option><option value="produccion">Producción</option></select></div>
+      <div class="field full"><label>Certificado <span class="note">(.crt o .pem emitido por ARCA)</span></label><div class="file-pick"><input type="file" id="certFile" accept=".crt,.pem,.cer,application/x-x509-ca-cert"><label for="certFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="certFile">Ningún archivo elegido</span></div></div>
+      <div class="field full"><label>Clave privada <span class="note">(.key generada con el pedido)</span></label><div class="file-pick"><input type="file" id="keyFile" accept=".key,.pem"><label for="keyFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="keyFile">Ningún archivo elegido</span></div></div>
+      <div class="field full"><label for="keyPass">Contraseña de la clave <span class="note">(solo si la clave está protegida)</span></label><input type="password" id="keyPass" autocomplete="off"></div>
+      <div class="field full"><label for="certMaster">Clave maestra de la API <span class="note">(no se guarda)</span></label><input type="password" id="certMaster" autocomplete="off" spellcheck="false" placeholder="ith_…" required></div>
+    </div>
+    <div class="cfg-alert" id="certFormAlert" hidden></div>
+  </form>
+  <div class="calib-foot">
+    <button class="btn primary" id="certSend" form="certForm" type="submit">Validar y guardar</button>
+    <button class="btn ghost" id="certCancel" type="button">Cancelar</button>
+  </div>
+</aside>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/config.js?v=200"></script>
+<script src="js/app.js?v=200"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# ============================================================================
+#  Remitos y Comprobantes — Intellihelp
+#  Cabeceras de seguridad y caché.
+# ============================================================================
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_headers.c>
+  # Seguridad: sin scripts de terceros ni inline, sin iframes de otros sitios.
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" "expr=%{HTTPS} == 'on'"
+
+  # Caché: el HTML siempre se revalida y referencia los recursos con ?v=NNN;
+  # los recursos versionados se guardan por una semana.
+  Header set Cache-Control "no-cache, must-revalidate"
+  <FilesMatch "\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|pdf)$">
+    Header set Cache-Control "public, max-age=604800, immutable"
+  </FilesMatch>
+</IfModule>
+
+# Forzar HTTPS
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
