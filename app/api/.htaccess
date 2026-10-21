@@ -1,0 +1,12 @@
+# Remitos y Comprobantes — Intellihelp
+# La configuración, el arranque y las librerías no se sirven por web.
+<FilesMatch "^(config|config\.sample|bootstrap)\.php$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+Options -Indexes

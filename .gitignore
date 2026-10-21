@@ -1,0 +1,18 @@
+# Secretos y datos del servidor
+app/api/config.php
+*.key
+*.pem
+*.crt
+*.csr
+*.p12
+
+# Pruebas y herramientas
+__pycache__/
+*.pyc
+node_modules/
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
