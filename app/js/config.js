@@ -269,7 +269,7 @@ const SAMPLE_REMITO = {
   cliente: {
     senores: 'Sres. Compras',
     razonSocial: 'DISTRIBUIDORA EJEMPLO S.A.',
-    cuit: '30-12345678-9',
+    cuit: '30-50001091-2',
     domicilio: 'Av. Corrientes 1234, piso 5',
     localidad: 'CABA',
     telefono: '011 4000-0000',
@@ -322,10 +322,8 @@ const COMPANY = {
   logo: 'assets/logos/ITH-logo-139x75.png',
 };
 
-/* Datos de numeración / autorización del REMITO (documento completo).
-   Editables a mano; el número es correlativo desde el último guardado. */
+/* Punto de venta por defecto de los remitos. El número fiscal, el C.A.I. y su
+   vencimiento los asigna «Autorizar» contra el talonario cargado en el panel. */
 const REMITO_FISCAL = {
   ptoVenta: '00001',
-  cai: '', // C.A.I. del talonario vigente: lo completa «Autorizar» o se carga a mano
-  caiVto: '', // Vencimiento del CAI
 };

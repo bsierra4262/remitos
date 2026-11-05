@@ -30,6 +30,7 @@
 
   let clave = '',
     csrf = '', // sesión de un administrador de la aplicación (sin clave de API)
+    conectado = false, // con clave de API o con la sesión de un administrador
     esMaestra = false,
     tab = 'estado',
     ultimaNueva = null;
@@ -108,6 +109,7 @@
       p = d.pendientes || [];
     let h = `<div class="stats">
       <div class="stat"><div class="v">${esc(r.remitos_totales ?? '—')}</div><div class="l">Remitos en el servidor</div></div>
+      <div class="stat"><div class="v">${esc(r.remitos_autorizados ?? '—')}</div><div class="l">Autorizados</div></div>
       <div class="stat"><div class="v">${esc(r.remitos_de_hoy ?? '—')}</div><div class="l">Emitidos hoy</div></div>
       <div class="stat w"><div class="v">${esc(r.pendientes_facturar ?? '—')}</div><div class="l">Pendientes de facturar</div></div>
     </div><div class="panel"><h2>Pendientes de facturar</h2>`;
@@ -296,7 +298,8 @@
       ).join('') +
       '</div>';
     const titulo = logCat ? ' · ' + esc(CATS.find(c => c.k === logCat).et) : '';
-    h += `<div class="panel"><h2>Actividad${titulo} <span class="hint">${esc(d.total)} ${d.total === 1 ? 'evento' : 'eventos'}</span></h2>`;
+    h += `<div class="panel"><h2>Actividad${titulo} <span class="hint">${esc(d.total)} ${d.total === 1 ? 'evento' : 'eventos'}</span>
+      <button class="btn sm sec" id="btnIntegridad" type="button" title="Recalcula la cadena de hashes de la auditoría">Verificar integridad</button></h2>`;
     const m = d.movimientos || [];
     if (!m.length) h += '<div class="empty">No hay actividad en esta categoría.</div>';
     else
@@ -339,6 +342,23 @@
           logPag = Math.max(1, +b.dataset.pag);
           verRegistro();
         })
+      );
+    $('#btnIntegridad').addEventListener('click', verificarIntegridad);
+  }
+  /* Cada evento guarda el hash del anterior: si alguien borra o modifica un registro
+     directamente en la base, la cadena se corta y se informa dónde. */
+  async function verificarIntegridad() {
+    const { d } = await api('api/claves.php?accion=integridad');
+    if (!d || !d.ok) return avisar((d && d.error) || 'No se pudo verificar la auditoría');
+    const r = d.integridad;
+    if (r.ok)
+      avisar(
+        `Auditoría íntegra: ${r.eventos} eventos encadenados desde el ${fecha(r.desde || '')}. Se conservan ${d.retencion_dias} días.`,
+        'okmsg'
+      );
+    else
+      avisar(
+        `La auditoría fue alterada: ${r.falla.motivo} en el evento #${r.falla.id} (${fecha(r.falla.fecha)}). Quedó registrado como error.`
       );
   }
 
@@ -476,14 +496,14 @@
   function iniciarTiempoReal() {
     clearInterval(poll);
     poll = setInterval(() => {
-      if (!clave || document.hidden) return;
+      if (!conectado || document.hidden) return;
       const ae = document.activeElement;
       if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && $('#cont').contains(ae)) return;
       pintar();
     }, 6000);
   }
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && clave) {
+    if (!document.hidden && conectado) {
       cache.clear();
       pintar();
     }
@@ -513,6 +533,7 @@
     $('#apiKey').value = '';
     if (clave) sessionStorage.setItem(SK, clave);
     $('#btnSalir').hidden = !clave; // con la sesión de la aplicación se sale desde la aplicación
+    conectado = true;
     mostrarSesion(true);
     ultimoRender[tab] = null;
     pintar();
@@ -520,6 +541,7 @@
   }
   function salir() {
     clearInterval(poll);
+    conectado = false;
     sessionStorage.removeItem(SK);
     cache.clear();
     clave = '';

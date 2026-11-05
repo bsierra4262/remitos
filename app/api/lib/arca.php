@@ -115,6 +115,9 @@ function arca_inspect(string $certPem, string $keyPem, string $passphrase = ''):
         throw new InvalidArgumentException('La clave privada no corresponde a este certificado');
     }
     $details = openssl_pkey_get_details($key);
+    if (($details['type'] ?? null) !== OPENSSL_KEYTYPE_RSA) {
+        throw new InvalidArgumentException('La clave privada debe ser RSA (ARCA no acepta otros tipos)');
+    }
     if (($details['bits'] ?? 0) < 2048) {
         throw new InvalidArgumentException('La clave privada debe ser RSA de 2048 bits o más');
     }
@@ -271,20 +274,52 @@ function arca_ticket(PDO $pdo, array $config, string $environment, string $servi
         );
     }
 
+    $cached = arca_cached_ticket($pdo, $config, $environment, $service, $credentials['cuit']);
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    // Un solo pedido de ticket a la vez: ARCA rechaza un segundo LoginCms mientras el
+    // primero sigue vigente (alreadyAuthenticated).
+    $lock = 'remitos_wsaa_' . $environment . '_' . $service;
+    api_lock($pdo, $lock, 30);
+    try {
+        $cached = arca_cached_ticket($pdo, $config, $environment, $service, $credentials['cuit']);
+
+        return $cached ?? arca_request_ticket($pdo, $config, $environment, $service, $credentials);
+    } finally {
+        api_unlock($pdo, $lock);
+    }
+}
+
+/** Ticket vigente guardado, o null. */
+function arca_cached_ticket(PDO $pdo, array $config, string $environment, string $service, string $cuit): ?array
+{
     $st = $pdo->prepare(
         'SELECT token, sign, expira FROM arca_tickets
           WHERE ambiente = ? AND servicio = ? AND expira > NOW() + INTERVAL ' . ARCA_TICKET_MARGIN_SECONDS . ' SECOND'
     );
     $st->execute([$environment, $service]);
     $cached = $st->fetch();
-    if ($cached) {
-        return [
-            'token' => crypto_decrypt((string) $cached['token'], $config, 'arca:' . $environment . ':' . $service . ':token'),
-            'sign' => crypto_decrypt((string) $cached['sign'], $config, 'arca:' . $environment . ':' . $service . ':sign'),
-            'cuit' => $credentials['cuit'],
-            'expira' => (string) $cached['expira'],
-        ];
+    if (!$cached) {
+        return null;
     }
+
+    return [
+        'token' => crypto_decrypt((string) $cached['token'], $config, 'arca:' . $environment . ':' . $service . ':token'),
+        'sign' => crypto_decrypt((string) $cached['sign'], $config, 'arca:' . $environment . ':' . $service . ':sign'),
+        'cuit' => $cuit,
+        'expira' => (string) $cached['expira'],
+    ];
+}
+
+/**
+ * Pide un ticket nuevo a WSAA y lo guarda cifrado.
+ *
+ * @param array{cuit: string, certificado: string, clave: string} $credentials
+ */
+function arca_request_ticket(PDO $pdo, array $config, string $environment, string $service, array $credentials): array
+{
 
     $cms = arca_sign_cms(arca_login_request($service), $credentials['certificado'], $credentials['clave']);
     $envelope = '<?xml version="1.0" encoding="UTF-8"?>'
@@ -299,8 +334,8 @@ function arca_ticket(PDO $pdo, array $config, string $environment, string $servi
         throw new ArcaException('ARCA no devolvió el ticket de acceso');
     }
 
-    $ticket = new DOMDocument();
-    if (!@$ticket->loadXML($return->textContent)) {
+    $ticket = arca_xml($return->textContent);
+    if ($ticket === null) {
         throw new ArcaException('El ticket de acceso de ARCA no tiene el formato esperado');
     }
     $token = (string) $ticket->getElementsByTagName('token')->item(0)?->textContent;
@@ -398,21 +433,38 @@ function arca_soap(string $url, string $envelope, string $action): DOMDocument
     curl_close($ch);
 
     if ($body === false || $body === '') {
-        throw new ArcaException('No se pudo conectar con ARCA' . ($error !== '' ? ': ' . $error : ''));
+        error_log('[remitos] ARCA sin respuesta (' . $url . '): ' . $error);
+        throw new ArcaException('No se pudo conectar con ARCA. Volvé a intentar en unos minutos.');
     }
 
-    $doc = new DOMDocument();
-    if (!@$doc->loadXML((string) $body)) {
+    $doc = arca_xml((string) $body);
+    if ($doc === null) {
+        error_log('[remitos] ARCA respondió HTTP ' . $status . ' con contenido no XML');
         throw new ArcaException('ARCA devolvió una respuesta inesperada (HTTP ' . $status . ')');
     }
 
     $fault = $doc->getElementsByTagName('faultstring')->item(0);
     if ($fault !== null) {
         $code = (string) $doc->getElementsByTagName('faultcode')->item(0)?->textContent;
+        error_log('[remitos] Falla SOAP de ARCA: ' . $code . ' ' . trim($fault->textContent));
         throw new ArcaException(arca_fault_message($code, trim($fault->textContent)));
     }
 
     return $doc;
+}
+
+/**
+ * Interpreta XML recibido de ARCA sin acceso a red ni definiciones de tipo de
+ * documento (evita XXE y la resolución de entidades externas).
+ */
+function arca_xml(string $xml): ?DOMDocument
+{
+    if ($xml === '' || stripos($xml, '<!DOCTYPE') !== false || stripos($xml, '<!ENTITY') !== false) {
+        return null;
+    }
+    $doc = new DOMDocument();
+
+    return @$doc->loadXML($xml, LIBXML_NONET) ? $doc : null;
 }
 
 /** Traduce las fallas más frecuentes de WSAA a un mensaje accionable. */
@@ -434,7 +486,7 @@ function arca_fault_message(string $code, string $message): string
         }
     }
 
-    return 'ARCA: ' . ($message !== '' ? $message : 'error sin detalle');
+    return 'ARCA rechazó el pedido' . ($code !== '' ? ' (' . preg_replace('/[^\w.:-]/', '', $code) . ')' : '') . '.';
 }
 
 /** Ejecuta una operación de WSFEv1. */
@@ -507,4 +559,141 @@ function arca_last_authorized(PDO $pdo, array $config, string $environment, int 
     arca_wsfe_assert($doc);
 
     return (int) arca_wsfe_value($doc, 'CbteNro');
+}
+
+/** Importe con dos decimales y punto, como lo espera WSFEv1 (a partir de centavos). */
+function arca_amount(int $cents): string
+{
+    return number_format($cents / 100, 2, '.', '');
+}
+
+/**
+ * Detalle de un comprobante para FECAESolicitar, a partir de datos ya validados. El
+ * orden de los elementos sigue el esquema de WSFEv1.
+ *
+ * @param array{concepto: int, doc_tipo: int, doc_nro: string, numero: int, fecha: string, total: int, neto: int,
+ *              iva: int, exento: int, no_gravado: int, serv_desde?: string, serv_hasta?: string, vto_pago?: string,
+ *              cond_iva_receptor: int, alicuotas: array<int, array{id: int, base: int, importe: int}>,
+ *              asociados?: array<int, array{tipo: int, pv: int, nro: int, cuit: string, fecha: string}>} $c
+ */
+function arca_cae_detail(array $c): string
+{
+    $x = static fn (string|int $v): string => htmlspecialchars((string) $v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    $xml = '<ar:FECAEDetRequest>'
+        . '<ar:Concepto>' . $c['concepto'] . '</ar:Concepto>'
+        . '<ar:DocTipo>' . $c['doc_tipo'] . '</ar:DocTipo>'
+        . '<ar:DocNro>' . $x($c['doc_nro']) . '</ar:DocNro>'
+        . '<ar:CbteDesde>' . $c['numero'] . '</ar:CbteDesde>'
+        . '<ar:CbteHasta>' . $c['numero'] . '</ar:CbteHasta>'
+        . '<ar:CbteFch>' . $x($c['fecha']) . '</ar:CbteFch>'
+        . '<ar:ImpTotal>' . arca_amount($c['total']) . '</ar:ImpTotal>'
+        . '<ar:ImpTotConc>' . arca_amount($c['no_gravado']) . '</ar:ImpTotConc>'
+        . '<ar:ImpNeto>' . arca_amount($c['neto']) . '</ar:ImpNeto>'
+        . '<ar:ImpOpEx>' . arca_amount($c['exento']) . '</ar:ImpOpEx>'
+        . '<ar:ImpTrib>0.00</ar:ImpTrib>'
+        . '<ar:ImpIVA>' . arca_amount($c['iva']) . '</ar:ImpIVA>';
+    if ($c['concepto'] !== 1) {
+        $xml .= '<ar:FchServDesde>' . $x($c['serv_desde'] ?? '') . '</ar:FchServDesde>'
+            . '<ar:FchServHasta>' . $x($c['serv_hasta'] ?? '') . '</ar:FchServHasta>'
+            . '<ar:FchVtoPago>' . $x($c['vto_pago'] ?? '') . '</ar:FchVtoPago>';
+    }
+    $xml .= '<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz>'
+        . '<ar:CondicionIVAReceptorId>' . $c['cond_iva_receptor'] . '</ar:CondicionIVAReceptorId>';
+    if (!empty($c['asociados'])) {
+        $xml .= '<ar:CbtesAsoc>';
+        foreach ($c['asociados'] as $a) {
+            $xml .= '<ar:CbteAsoc><ar:Tipo>' . $a['tipo'] . '</ar:Tipo><ar:PtoVta>' . $a['pv'] . '</ar:PtoVta>'
+                . '<ar:Nro>' . $a['nro'] . '</ar:Nro>'
+                . (($a['cuit'] ?? '') !== '' ? '<ar:Cuit>' . $x($a['cuit']) . '</ar:Cuit>' : '')
+                . (($a['fecha'] ?? '') !== '' ? '<ar:CbteFch>' . $x($a['fecha']) . '</ar:CbteFch>' : '')
+                . '</ar:CbteAsoc>';
+        }
+        $xml .= '</ar:CbtesAsoc>';
+    }
+    if (!empty($c['alicuotas'])) {
+        $xml .= '<ar:Iva>';
+        foreach ($c['alicuotas'] as $a) {
+            $xml .= '<ar:AlicIva><ar:Id>' . $a['id'] . '</ar:Id><ar:BaseImp>' . arca_amount($a['base']) . '</ar:BaseImp>'
+                . '<ar:Importe>' . arca_amount($a['importe']) . '</ar:Importe></ar:AlicIva>';
+        }
+        $xml .= '</ar:Iva>';
+    }
+
+    return $xml . '</ar:FECAEDetRequest>';
+}
+
+/** Observaciones o errores de una respuesta de WSFEv1 («[código] mensaje»). */
+function arca_wsfe_messages(DOMDocument $doc, string $container, string $item): array
+{
+    $out = [];
+    foreach ($doc->getElementsByTagNameNS(ARCA_WSFE_NS, $container) as $node) {
+        foreach ($node->getElementsByTagNameNS(ARCA_WSFE_NS, $item) as $entry) {
+            $code = trim((string) $entry->getElementsByTagNameNS(ARCA_WSFE_NS, 'Code')->item(0)?->textContent);
+            $msg = trim((string) $entry->getElementsByTagNameNS(ARCA_WSFE_NS, 'Msg')->item(0)?->textContent);
+            $out[] = ($code !== '' ? '[' . $code . '] ' : '') . mb_substr($msg, 0, 300);
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * Solicita el CAE de un comprobante (FECAESolicitar).
+ *
+ * @return array{resultado: string, cae: string, vencimiento: string, observaciones: string[], errores: string[]}
+ */
+function arca_cae_request(PDO $pdo, array $config, string $environment, int $pointOfSale, int $cbteTipo, array $detail): array
+{
+    $ticket = arca_ticket($pdo, $config, $environment);
+    $doc = arca_wsfe(
+        $environment,
+        'FECAESolicitar',
+        arca_wsfe_auth($ticket)
+            . '<ar:FeCAEReq><ar:FeCabReq><ar:CantReg>1</ar:CantReg><ar:PtoVta>' . $pointOfSale . '</ar:PtoVta>'
+            . '<ar:CbteTipo>' . $cbteTipo . '</ar:CbteTipo></ar:FeCabReq>'
+            . '<ar:FeDetReq>' . arca_cae_detail($detail) . '</ar:FeDetReq></ar:FeCAEReq>'
+    );
+
+    $resultado = '';
+    $det = $doc->getElementsByTagNameNS(ARCA_WSFE_NS, 'FECAEDetResponse')->item(0);
+    if ($det !== null) {
+        $resultado = trim((string) $det->getElementsByTagNameNS(ARCA_WSFE_NS, 'Resultado')->item(0)?->textContent);
+    }
+
+    return [
+        'resultado' => $resultado !== '' ? $resultado : arca_wsfe_value($doc, 'Resultado'),
+        'cae' => arca_wsfe_value($doc, 'CAE'),
+        'vencimiento' => arca_wsfe_value($doc, 'CAEFchVto'),
+        'observaciones' => arca_wsfe_messages($doc, 'Observaciones', 'Obs'),
+        'errores' => arca_wsfe_messages($doc, 'Errors', 'Err'),
+    ];
+}
+
+/**
+ * Consulta un comprobante ya autorizado (FECompConsultar). Sirve para recuperar el CAE
+ * si la respuesta de FECAESolicitar se perdió por un corte de conexión.
+ *
+ * @return array{cae: string, vencimiento: string, total: string, doc_nro: string, fecha: string}|null
+ */
+function arca_cae_lookup(PDO $pdo, array $config, string $environment, int $pointOfSale, int $cbteTipo, int $number): ?array
+{
+    $ticket = arca_ticket($pdo, $config, $environment);
+    $doc = arca_wsfe(
+        $environment,
+        'FECompConsultar',
+        arca_wsfe_auth($ticket) . '<ar:FeCompConsReq><ar:CbteTipo>' . $cbteTipo . '</ar:CbteTipo>'
+            . '<ar:CbteNro>' . $number . '</ar:CbteNro><ar:PtoVta>' . $pointOfSale . '</ar:PtoVta></ar:FeCompConsReq>'
+    );
+    $cae = arca_wsfe_value($doc, 'CodAutorizacion');
+    if ($cae === '') {
+        return null;
+    }
+
+    return [
+        'cae' => $cae,
+        'vencimiento' => arca_wsfe_value($doc, 'FchVto'),
+        'total' => arca_wsfe_value($doc, 'ImpTotal'),
+        'doc_nro' => arca_wsfe_value($doc, 'DocNro'),
+        'fecha' => arca_wsfe_value($doc, 'CbteFch'),
+    ];
 }

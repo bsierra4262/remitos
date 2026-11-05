@@ -6,23 +6,30 @@ Options -Indexes
 DirectoryIndex index.html
 
 <IfModule mod_headers.c>
-  # Seguridad: sin scripts de terceros ni inline, sin iframes de otros sitios.
-  Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+  # Seguridad: todo se sirve desde el propio sitio (scripts, estilos y fuentes), sin
+  # scripts ni hojas de estilo inline y sin iframes de otros sitios. Los atributos
+  # style se admiten porque el motor de impresión posiciona cada campo en milímetros.
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "DENY"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
-  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" "expr=%{HTTPS} == 'on'"
+  # El sitio solo se sirve por HTTPS (ver la redirección más abajo): HSTS incondicional.
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
-  # Caché: el HTML siempre se revalida y referencia los recursos con ?v=NNN;
-  # los recursos versionados se guardan por una semana.
-  Header set Cache-Control "no-cache, must-revalidate"
+  # Caché: el HTML siempre se revalida y referencia los recursos con ?v=NNN; los
+  # recursos versionados se guardan por una semana. Los .php no se tocan: la API
+  # fija su propio «Cache-Control: no-store».
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
   <FilesMatch "\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|pdf)$">
     Header set Cache-Control "public, max-age=604800, immutable"
   </FilesMatch>
 </IfModule>
 
-# Forzar HTTPS
+# Forzar HTTPS. X-Forwarded-Proto solo evita un bucle de redirecciones detrás de un
+# proxy; la aplicación no confía en esa cabecera salvo desde `trusted_proxies`.
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteCond %{HTTPS} !=on

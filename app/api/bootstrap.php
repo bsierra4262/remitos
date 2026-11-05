@@ -3,8 +3,8 @@
 /**
  * Remitos y Comprobantes — Intellihelp
  *
- * Arranque común de los endpoints: configuración, manejo de errores y librerías.
- * Devuelve la configuración normalizada.
+ * Arranque común de los endpoints y de los comandos de consola: configuración,
+ * manejo de errores y librerías. Devuelve la configuración normalizada.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -23,26 +23,40 @@ require __DIR__ . '/lib/crypto.php';
 require __DIR__ . '/lib/audit.php';
 require __DIR__ . '/lib/session.php';
 require __DIR__ . '/lib/users.php';
+require __DIR__ . '/lib/totp.php';
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/arca.php';
+require __DIR__ . '/lib/importes.php';
+require __DIR__ . '/lib/ajustes.php';
 
-// Cualquier error no previsto responde JSON genérico; el detalle queda solo en el log del servidor.
+/*
+ * Las respuestas se lanzan como ApiResponse (así los `finally` liberan bloqueos y
+ * transacciones). Cualquier otro error responde JSON genérico; el detalle queda
+ * solo en el log del servidor.
+ */
 set_exception_handler(static function (Throwable $e): void {
-    error_log('[remitos] ' . $e::class . ': ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine());
-    if (!headers_sent()) {
-        header('Content-Type: application/json; charset=utf-8');
+    if ($e instanceof ApiResponse) {
+        api_send($e);
+
+        return;
     }
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => 'Error interno del servidor'], JSON_UNESCAPED_UNICODE);
+    error_log('[remitos] ' . $e::class . ': ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine());
+    api_send(new ApiResponse(500, ['ok' => false, 'error' => 'Error interno del servidor']));
 });
 
 // REMITOS_CONFIG permite usar otra configuración (por ejemplo, la del entorno de pruebas).
 $configFile = getenv('REMITOS_CONFIG') ?: __DIR__ . '/config.php';
 if (!is_file($configFile)) {
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, "Falta api/config.php (ver config.sample.php)\n");
+        exit(1);
+    }
     api_headers();
     api_error(503, 'La API no está configurada: falta api/config.php (ver config.sample.php)');
 }
 
 $config = require $configFile;
+$config = is_array($config) ? $config : [];
+api_config($config);
 
-return is_array($config) ? $config : [];
+return $config;

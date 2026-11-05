@@ -9,6 +9,10 @@
  * - El identificador de sesión se regenera al ingresar.
  * - La sesión vence tras 8 horas sin actividad o 12 horas desde el ingreso.
  * - En cada petición se relee el usuario: desactivarlo o cambiarle el rol rige en el acto.
+ * - Cada usuario tiene una versión de sesión: cambiar la contraseña, el rol, el
+ *   segundo factor o desactivarlo la incrementa y cierra todas sus otras sesiones.
+ * - Con segundo factor activo, la contraseña deja la sesión «pendiente» hasta
+ *   validar el código TOTP.
  * - Toda escritura con sesión exige el token CSRF en la cabecera X-CSRF-Token.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
@@ -41,8 +45,7 @@ function session_begin(): void
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
     }
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+    $https = api_is_https();
     ini_set('session.use_strict_mode', '1');
     ini_set('session.use_only_cookies', '1');
     ini_set('session.gc_maxlifetime', (string) SESSION_MAX_SECONDS);
@@ -80,10 +83,11 @@ function session_user(PDO $pdo): ?array
         return null;
     }
 
-    $st = $pdo->prepare('SELECT id, nombre, email, rol, activo, debe_cambiar FROM usuarios WHERE id = ?');
+    $st = $pdo->prepare('SELECT id, nombre, email, rol, activo, debe_cambiar, sesion_version, totp_activo FROM usuarios WHERE id = ?');
     $st->execute([$id]);
     $row = $st->fetch();
-    if (!$row || !(int) $row['activo'] || !isset(USER_ROLES[$row['rol']])) {
+    if (!$row || !(int) $row['activo'] || !isset(USER_ROLES[$row['rol']])
+        || (int) $row['sesion_version'] !== (int) ($_SESSION['ver'] ?? 0)) {
         session_end();
 
         return null;
@@ -96,20 +100,44 @@ function session_user(PDO $pdo): ?array
         'email' => (string) $row['email'],
         'rol' => (string) $row['rol'],
         'debe_cambiar' => (bool) (int) $row['debe_cambiar'],
+        'segundo_factor' => (bool) (int) $row['totp_activo'],
     ];
 }
 
-/** Abre la sesión de un usuario autenticado. */
-function session_login(int $userId): void
+/** Abre la sesión de un usuario autenticado (con la versión de sesión vigente). */
+function session_login(PDO $pdo, int $userId): void
 {
+    $st = $pdo->prepare('SELECT sesion_version FROM usuarios WHERE id = ?');
+    $st->execute([$userId]);
     session_begin();
     session_regenerate_id(true);
     $_SESSION = [
         'uid' => $userId,
+        'ver' => (int) $st->fetchColumn(),
         'inicio' => time(),
         'visto' => time(),
         'csrf' => bin2hex(random_bytes(32)),
     ];
+}
+
+/** Deja la sesión a la espera del segundo factor (sin acceso a datos). */
+function session_pending_totp(int $userId): void
+{
+    session_begin();
+    session_regenerate_id(true);
+    $_SESSION = ['totp_uid' => $userId, 'totp_desde' => time()];
+}
+
+/** Usuario que validó la contraseña y debe ingresar el código TOTP (5 minutos de plazo). */
+function session_pending_user(): ?int
+{
+    if (!isset($_COOKIE[SESSION_NAME])) {
+        return null;
+    }
+    session_begin();
+    $id = (int) ($_SESSION['totp_uid'] ?? 0);
+
+    return $id > 0 && time() - (int) ($_SESSION['totp_desde'] ?? 0) <= 300 ? $id : null;
 }
 
 /** Cierra la sesión y borra la cookie. */

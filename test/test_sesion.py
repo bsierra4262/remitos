@@ -14,7 +14,7 @@ from playwright.sync_api import sync_playwright
 import base
 from base import ADMIN_CLAVE, ADMIN_EMAIL, API, abrir, asegurar_admin, asegurar_usuario, caso, clave_maestra, ir_a, pedir
 
-OPERADOR = ("operador.pruebas@intellihelp.test", "Operador de Pruebas", "Operador2026x")
+OPERADOR = ("operador.pruebas@intellihelp.test", "Operador de Pruebas", "Faro-Delta-91Wz")
 
 
 class Sesion:
@@ -89,18 +89,24 @@ def csrf_obligatorio():
     return sin == 403 and con == 201, f"sin_token={sin} con_token={con}"
 
 
-@caso("Cinco contraseñas incorrectas bloquean la cuenta y el mensaje no revela si existe")
+@caso("Cinco contraseñas incorrectas frenan el ingreso sin revelar si la cuenta existe")
 def bloqueo_por_intentos():
+    """El freno es por correo y conexión (no bloquea la cuenta para todos) y responde
+    lo mismo exista o no el correo: no sirve para averiguar qué cuentas hay."""
     email = "bloqueo.pruebas@intellihelp.test"
-    asegurar_usuario(email, "Bloqueo de Pruebas", "operador", "Bloqueo2026x")
+    clave = "Cometa-Gris-37Hn"
+    asegurar_usuario(email, "Bloqueo de Pruebas", "operador", clave)
     s = Sesion()
     malos = [s.ingresar(email, "incorrecta")[1].get("error") for _ in range(5)]
-    _, d, _ = s.ingresar(email, "Bloqueo2026x")
-    bloqueada = "bloqueada" in (d.get("error") or "")
-    inexistente = s.ingresar("no.existe@intellihelp.test", "incorrecta")[1].get("error")
-    asegurar_usuario(email, "Bloqueo de Pruebas", "operador", "Bloqueo2026x")  # deja la cuenta usable
-    ok = bloqueada and malos[0] == inexistente == "Correo o contraseña incorrectos"
-    return ok, f"bloqueada={bloqueada} mensaje={malos[0]!r} inexistente={inexistente!r}"
+    st_ok, d, _ = s.ingresar(email, clave)
+    frenada = st_ok == 429
+    inexistentes = [s.ingresar("no.existe@intellihelp.test", "incorrecta") for _ in range(6)]
+    mensaje_inexistente = inexistentes[0][1].get("error")
+    freno_inexistente = inexistentes[-1][0] == 429 and inexistentes[-1][1].get("error") == d.get("error")
+    asegurar_usuario(email, "Bloqueo de Pruebas", "operador", clave)  # restablecer borra el freno
+    ok = frenada and freno_inexistente and malos[0] == mensaje_inexistente == "Correo o contraseña incorrectos"
+    return ok, (f"frenada={frenada} ({d.get('error')!r}) mensaje={malos[0]!r} inexistente={mensaje_inexistente!r} "
+                f"freno_inexistente={freno_inexistente}")
 
 
 @caso("La contraseña temporal obliga a cambiarla y se aplica la política de contraseñas")
@@ -117,13 +123,16 @@ def clave_temporal():
     s.ingresar(email, temporal)
     bloqueado = s.pedir("/clientes.php")[0]
     corta = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "abc12"})[0]
-    sin_numeros = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "solamenteletras"})[0]
+    sin_numeros = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "solamenteletrasaqui"})[0]
+    laxas = [s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": n})[0]
+             for n in ("aaaaaaaaaaa1", "1234567890ab", "Password2026x", "temporal2026xyz")]
     st, d2, _ = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "Definitiva2026"})
     s.csrf = d2.get("csrf", "")
     habilitado = s.pedir("/clientes.php")[0]
     pedir(f"/usuarios.php?id={d['usuario']['id']}", "DELETE", m)
-    ok = len(temporal) >= 12 and bloqueado == 403 and corta == 422 and sin_numeros == 422 and st == 200 and habilitado == 200
-    return ok, f"bloqueado={bloqueado} corta={corta} sin_numeros={sin_numeros} cambio={st} despues={habilitado}"
+    ok = (len(temporal) >= 12 and bloqueado == 403 and corta == 422 and sin_numeros == 422
+          and laxas == [422] * 4 and st == 200 and habilitado == 200)
+    return ok, f"bloqueado={bloqueado} corta={corta} sin_numeros={sin_numeros} laxas={laxas} cambio={st} despues={habilitado}"
 
 
 @caso("El operador trabaja con documentos pero no administra usuarios, ajustes ni certificados")
@@ -160,7 +169,7 @@ def datos_compartidos():
             ir_a(admin, "clientes")
             admin.click("#btnNuevoCliente")
             admin.fill("#cliRazon", "CLIENTE COMPARTIDO S.A.")
-            admin.fill("#cliCuit", "30-55555555-5")
+            admin.fill("#cliCuit", "30-55555555-1")
             admin.click("#cliSave")
             admin.wait_for_timeout(1000)
             operador.reload(wait_until="networkidle")
@@ -173,25 +182,27 @@ def datos_compartidos():
             b2.close()
     _, d = pedir("/clientes.php", clave=clave_maestra())
     for c in d.get("clientes", []):
-        if c["cuit"] == "30-55555555-5":
+        if c["cuit"] == "30-55555555-1":
             pedir(f"/clientes.php?id={c['id']}", "DELETE", clave_maestra())
     return visto and "CLIENTE COMPARTIDO" not in local, f"visto_por_operador={visto} en_localStorage={'CLIENTE COMPARTIDO' in local}"
 
 
-@caso("Dos usuarios guardando a la vez nunca reciben el mismo número de remito")
+@caso("Dos usuarios guardando a la vez nunca reciben la misma referencia, y el borrador no tiene número fiscal")
 def numeracion_concurrente():
     m = clave_maestra()
 
     def alta(i):
-        return pedir("/remitos.php", "POST", m, {"cliente": {"razonSocial": f"CONCURRENTE {i}"}})[1]
+        return pedir("/remitos.php", "POST", m, {"cliente": {"razonSocial": f"CONCURRENTE {i}"}, "numero": "00000001"})[1]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
         res = list(ex.map(alta, range(12)))
-    numeros = [r.get("remito", {}).get("numero") for r in res]
+    refs = [r.get("remito", {}).get("referencia") for r in res]
+    numeros = {r.get("remito", {}).get("numero") for r in res}
     for r in res:
         if r.get("id"):
             pedir(f"/remitos.php?id={r['id']}", "DELETE", m)
-    return len(set(numeros)) == 12 and None not in numeros, f"números={sorted(numeros)}"
+    ok = len(set(refs)) == 12 and None not in refs and numeros == {""}
+    return ok, f"referencias={sorted(x for x in refs if x)} números={numeros}"
 
 
 @caso("El sistema nunca queda sin administradores")
@@ -208,15 +219,15 @@ def siempre_un_admin():
 @caso("Un usuario desactivado pierde el acceso en el acto")
 def desactivado_sin_acceso():
     email = "desactivado.pruebas@intellihelp.test"
-    asegurar_usuario(email, "Desactivado de Pruebas", "operador", "Desactivado2026")
+    asegurar_usuario(email, "Desactivado de Pruebas", "operador", "Linterna-Roja-64Pe")
     s = Sesion()
-    s.ingresar(email, "Desactivado2026")
+    s.ingresar(email, "Linterna-Roja-64Pe")
     antes = s.pedir("/clientes.php")[0]
     _, lista = pedir("/usuarios.php", clave=clave_maestra())
     uid = next(u["id"] for u in lista["usuarios"] if u["email"] == email)
     pedir("/usuarios.php", "POST", clave_maestra(), {"accion": "editar", "id": uid, "activo": False})
     despues = s.pedir("/clientes.php")[0]
-    reingreso = s.ingresar(email, "Desactivado2026")[0]
+    reingreso = s.ingresar(email, "Linterna-Roja-64Pe")[0]
     pedir(f"/usuarios.php?id={uid}", "DELETE", clave_maestra())
     return antes == 200 and despues == 401 and reingreso == 401, f"antes={antes} después={despues} reingreso={reingreso}"
 
@@ -227,7 +238,7 @@ def traspaso_de_datos_locales():
         b, pg, errores = abrir(pw)
         try:
             pg.evaluate("""() => {
-                localStorage.setItem('remitos_clientes', JSON.stringify([{ razonSocial: 'CLIENTE LOCAL VIEJO', cuit: '30-77777777-7' }]));
+                localStorage.setItem('remitos_clientes', JSON.stringify([{ razonSocial: 'CLIENTE LOCAL VIEJO', cuit: '30-77777777-3' }]));
                 localStorage.setItem('remitos_docs', JSON.stringify([{ id: 'viejo01', numero: '00000005',
                     cliente: { razonSocial: 'REMITO LOCAL VIEJO' }, items: [{ descripcion: 'x' }] }]));
             }""")
@@ -241,7 +252,7 @@ def traspaso_de_datos_locales():
     m = clave_maestra()
     _, c = pedir("/clientes.php", clave=m)
     _, r = pedir("/remitos.php?por_pagina=200", clave=m)
-    cli = [x for x in c.get("clientes", []) if x["cuit"] == "30-77777777-7"]
+    cli = [x for x in c.get("clientes", []) if x["cuit"] == "30-77777777-3"]
     rem = [x for x in r.get("remitos", []) if x["cliente"]["razonSocial"] == "REMITO LOCAL VIEJO"]
     for x in cli:
         pedir(f"/clientes.php?id={x['id']}", "DELETE", m)
@@ -249,3 +260,97 @@ def traspaso_de_datos_locales():
         pedir(f"/remitos.php?id={x['id']}", "DELETE", m)
     ok = len(cli) == 1 and len(rem) == 1 and quedan == [None, None]
     return ok, f"clientes={len(cli)} remitos={len(rem)} quedan_en_navegador={quedan}"
+
+
+@caso("Cambiar la contraseña cierra las demás sesiones del usuario")
+def cambio_cierra_sesiones():
+    email = "sesiones.pruebas@intellihelp.test"
+    clave, nueva = "Velero-Azul-28Km", "Velero-Azul-29Km"
+    asegurar_usuario(email, "Sesiones de Pruebas", "operador", clave)
+    a, b = Sesion(), Sesion()
+    a.ingresar(email, clave)
+    b.ingresar(email, clave)
+    antes = b.pedir("/clientes.php")[0]
+    st, d, _ = a.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": clave, "nueva": nueva})
+    a.csrf = d.get("csrf", "")
+    propia = a.pedir("/clientes.php")[0]
+    otra = b.pedir("/clientes.php")[0]
+    asegurar_usuario(email, "Sesiones de Pruebas", "operador", clave)
+    ok = antes == 200 and st == 200 and propia == 200 and otra == 401
+    return ok, f"antes={antes} cambio={st} propia={propia} otra={otra}"
+
+
+@caso("Reconfirmar la contraseña tiene límite: cinco fallos cierran la sesión")
+def reconfirmacion_limitada():
+    email = "reconfirma.pruebas@intellihelp.test"
+    clave = "Glaciar-Ocre-45Bd"
+    asegurar_usuario(email, "Reconfirma de Pruebas", "operador", clave)
+    s = Sesion()
+    s.ingresar(email, clave)
+    estados = [s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": "mal", "nueva": "Otra-Clave-77Zz"})[0]
+               for _ in range(6)]
+    despues = s.pedir("/clientes.php")[0]
+    asegurar_usuario(email, "Reconfirma de Pruebas", "operador", clave)
+    ok = estados[:5] == [403] * 5 and estados[5] == 429 and despues == 401
+    return ok, f"estados={estados} despues={despues}"
+
+
+@caso("El ingreso rechaza formularios de otro origen o que no son JSON")
+def ingreso_mismo_origen():
+    asegurar_admin()
+    cuerpo = json.dumps({"accion": "ingresar", "email": ADMIN_EMAIL, "clave": ADMIN_CLAVE}).encode()
+
+    def post(tipo, origen=None):
+        req = urllib.request.Request(API + "/sesion.php", data=cuerpo, method="POST")
+        req.add_header("Content-Type", tipo)
+        if origen:
+            req.add_header("Origin", origen)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    formulario = post("text/plain")
+    otro = post("application/json", "https://sitio-malicioso.example")
+    propio = post("application/json", base.SITIO)
+    return formulario == 415 and otro == 403 and propio == 200, f"text/plain={formulario} otro_origen={otro} propio={propio}"
+
+
+@caso("Verificación en dos pasos: sin el código no hay sesión, y un código no se reutiliza")
+def segundo_factor():
+    import base64
+    import hashlib
+    import hmac
+    import struct
+    import time
+
+    def codigo(secreto, desplazamiento=0):
+        clave = base64.b32decode(secreto + "=" * (-len(secreto) % 8))
+        h = hmac.new(clave, struct.pack(">Q", int(time.time() // 30) + desplazamiento), hashlib.sha1).digest()
+        o = h[-1] & 15
+        return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000)
+
+    email = "totp.pruebas@intellihelp.test"
+    clave = "Brasero-Lila-52Cx"
+    asegurar_usuario(email, "TOTP de Pruebas", "operador", clave)
+    a = Sesion()
+    a.ingresar(email, clave)
+    _, d, _ = a.pedir("/sesion.php", "POST", {"accion": "totp_iniciar", "clave": clave})
+    secreto = d.get("secreto", "")
+    st_act, d, _ = a.pedir("/sesion.php", "POST", {"accion": "totp_activar", "codigo": codigo(secreto)})
+    b = Sesion()
+    _, paso1, _ = b.ingresar(email, clave)
+    sin_codigo = b.pedir("/clientes.php")[0]
+    malo = b.pedir("/sesion.php", "POST", {"accion": "verificar_codigo", "codigo": "000000"})[0]
+    usado = b.pedir("/sesion.php", "POST", {"accion": "verificar_codigo", "codigo": codigo(secreto)})[0]
+    st_ok, d2, _ = b.pedir("/sesion.php", "POST", {"accion": "verificar_codigo", "codigo": codigo(secreto, 1)})
+    b.csrf = d2.get("csrf", "")
+    con_codigo = b.pedir("/clientes.php")[0]
+    _, lista = pedir("/usuarios.php", clave=clave_maestra())
+    uid = next(u["id"] for u in lista["usuarios"] if u["email"] == email)
+    pedir("/usuarios.php", "POST", clave_maestra(), {"accion": "quitar_segundo_factor", "id": uid})
+    ok = (st_act == 200 and paso1.get("segundo_factor") and paso1.get("usuario") is None and sin_codigo == 401
+          and malo == 401 and usado == 401 and st_ok == 200 and con_codigo == 200)
+    return ok, (f"activar={st_act} paso1={paso1} sin_codigo={sin_codigo} malo={malo} reutilizado={usado} "
+                f"siguiente={st_ok} con_codigo={con_codigo}")

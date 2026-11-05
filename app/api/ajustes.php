@@ -21,29 +21,6 @@ $config = require __DIR__ . '/bootstrap.php';
 api_headers('GET, POST, OPTIONS');
 $pdo = api_db($config);
 
-/** Valores por defecto de cada sección. */
-const SETTINGS_DEFAULTS = [
-    'emisor' => ['ambiente' => 'homologacion', 'cuit' => '', 'ptoVenta' => '', 'emision' => false],
-    'remito' => ['ptoVenta' => '00001', 'copias' => 2],
-];
-
-/**
- * Todos los ajustes, completados con los valores por defecto.
- *
- * @return array<string, array<string, mixed>>
- */
-function settings_all(PDO $pdo): array
-{
-    $out = SETTINGS_DEFAULTS;
-    foreach ($pdo->query('SELECT clave, valor FROM ajustes')->fetchAll() as $row) {
-        if (isset($out[$row['clave']])) {
-            $out[$row['clave']] = array_merge($out[$row['clave']], json_decode((string) $row['valor'], true) ?: []);
-        }
-    }
-
-    return $out;
-}
-
 $method = api_method();
 
 if ($method === 'GET') {
@@ -67,9 +44,9 @@ if ($method === 'POST') {
         }
         $cuit = preg_replace('/\D/', '', (string) ($values['cuit'] ?? ''));
         $pointOfSale = preg_replace('/\D/', '', (string) ($values['ptoVenta'] ?? ''));
-        $emission = !empty($values['emision']);
-        if ($cuit !== '' && strlen($cuit) !== 11) {
-            api_error(422, 'El CUIT debe tener 11 dígitos');
+        $emission = api_bool($values['emision'] ?? false);
+        if ($cuit !== '' && !api_cuit_valid($cuit)) {
+            api_error(422, 'El CUIT del emisor no es válido (11 dígitos con dígito verificador correcto)');
         }
         if ($pointOfSale !== '' && ((int) $pointOfSale < 1 || (int) $pointOfSale > 99998)) {
             api_error(422, 'Punto de venta inválido (1 a 99998)');
@@ -111,7 +88,7 @@ if ($method === 'POST') {
          ON DUPLICATE KEY UPDATE valor = VALUES(valor), actualizado = VALUES(actualizado), actualizado_por = VALUES(actualizado_por)'
     )->execute([$section, json_encode($stored, JSON_UNESCAPED_UNICODE), $auth['nombre']]);
     audit_event($pdo, 'Ajustes actualizados: ' . $section, [
-        'categoria' => 'sistema', 'clave' => $auth['nombre'], 'detalle' => json_encode($stored, JSON_UNESCAPED_UNICODE),
+        'categoria' => 'sistema', 'detalle' => json_encode($stored, JSON_UNESCAPED_UNICODE),
     ]);
     api_respond(200, ['ok' => true, 'ajustes' => settings_all($pdo)]);
 }

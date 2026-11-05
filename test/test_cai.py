@@ -6,24 +6,43 @@ from datetime import date, timedelta
 
 from playwright.sync_api import sync_playwright
 
-from base import abrir, caso, clave_maestra, ir_a, modo_documento, pedir
+import concurrent.futures
+
+from base import _sql, abrir, caso, clave_maestra, es_local, ir_a, modo_documento, pedir
 
 VTO = (date.today() + timedelta(days=200)).isoformat()
 
 
 def _talonario(desde=1, hasta=50, cai="75041234567890", vto=VTO, pv=1):
+    if es_local() and desde == 1:  # restos de una corrida interrumpida en ese punto de venta
+        _sql(f"DELETE FROM remitos WHERE punto_venta = {int(pv)}")
+        _sql(f"DELETE FROM cai_talonarios WHERE punto_venta = {int(pv)}")
     return pedir("/talonarios.php", "POST", clave_maestra(), {
         "punto_venta": pv, "numero_desde": desde, "numero_hasta": hasta,
         "cai": cai, "cai_vencimiento": vto})
 
 
 def _borrar_talonario(tid):
+    """Un talonario usado no se puede borrar por la API (es respaldo de los remitos
+    autorizados): en la base local de pruebas se limpian directo con SQL."""
     if not tid:
         return
-    # se desactiva primero: un desactivado siempre se puede purgar (el remito ya
-    # conserva el CAI), así el test no deja basura en la base
-    pedir("/talonarios.php", "POST", clave_maestra(), {"id": tid, "activa": False})
-    pedir(f"/talonarios.php?id={tid}", "DELETE", clave_maestra())
+    if es_local():
+        _sql(f"DELETE r FROM remitos r JOIN cai_talonarios t ON r.punto_venta = t.punto_venta "
+             f"AND r.numero_int BETWEEN t.numero_desde AND t.numero_hasta WHERE t.id = {int(tid)}")
+        _sql(f"DELETE FROM cai_talonarios WHERE id = {int(tid)}")
+    else:
+        pedir("/talonarios.php", "POST", clave_maestra(), {"id": tid, "activa": False})
+
+
+def _remito(nombre="PARA AUTORIZAR"):
+    return pedir("/remitos.php", "POST", clave_maestra(), {"cliente": {"razonSocial": nombre}})[1]["id"]
+
+
+def _autorizar(pv, **extra):
+    cuerpo = {"accion": "autorizar", "pv": pv, "tipo": 91, "remito_id": _remito()}
+    cuerpo.update(extra)
+    return pedir("/talonarios.php", "POST", clave_maestra(), cuerpo)
 
 
 @caso("El alta de talonario valida CAI, rango y vencimiento")
@@ -37,13 +56,17 @@ def alta_valida():
                          "cai_vencimiento": (date.today() - timedelta(days=1)).isoformat()}),
         ("rango malo",  {"punto_venta": 90, "numero_desde": 9, "numero_hasta": 9, "cai": "75041234567890", "cai_vencimiento": VTO}),
         ("pv inválido", {"punto_venta": 0, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890", "cai_vencimiento": VTO}),
+        ("tipo inválido", {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890",
+                           "cai_vencimiento": VTO, "tipo_comprobante": 777}),
+        ("fecha imposible", {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890",
+                             "cai_vencimiento": "2027-02-31"}),
     ]
     malos = []
     for etq, cuerpo in casos:
         s, d = pedir("/talonarios.php", "POST", m, cuerpo)
         if s != 400:
             malos.append((etq, s))
-    return not malos, f"no rechazó: {malos}" if malos else "las 4 validaciones OK"
+    return not malos, f"no rechazó: {malos}" if malos else "las 6 validaciones OK"
 
 
 @caso("La numeración es correlativa y se corta al agotar el rango")
@@ -58,11 +81,12 @@ def numeracion_correlativa():
     try:
         nums = []
         for _ in range(4):                    # el 4º debe fallar
-            s, d = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 91, "tipo": 91})
+            s, d = _autorizar(91)
             if d.get("ok"):
                 nums.append(d["numero_formato"])
+        sin_remito = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 91, "tipo": 91})[0]
         esperado = ["00091-00000001", "00091-00000002", "00091-00000003"]
-        return nums == esperado, f"emitió {nums}"
+        return nums == esperado and sin_remito == 400, f"emitió {nums} sin_remito={sin_remito}"
     finally:
         _borrar_talonario(tid)
 
@@ -77,30 +101,40 @@ def cai_vencido_bloquea():
     tid = d.get("id")
     try:
         futuro = (date.today() + timedelta(days=10)).isoformat()
-        s, d = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 92, "tipo": 91, "fecha": futuro})
+        rid = _remito()
+        cuerpo = {"accion": "autorizar", "pv": 92, "tipo": 91, "fecha": futuro, "remito_id": rid}
+        s, d = pedir("/talonarios.php", "POST", m, cuerpo)
         bloqueo = s == 409 and d.get("vencido")
-        s, d = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 92, "tipo": 91, "fecha": futuro, "confirmar": True})
+        s, d = pedir("/talonarios.php", "POST", m, dict(cuerpo, confirmar=True))
         con_confirmar = d.get("ok")
         return bloqueo and con_confirmar, f"bloqueó={bloqueo} confirmar_permite={con_confirmar}"
     finally:
         _borrar_talonario(tid)
 
 
-@caso("Un talonario activo que emitió no se borra hasta desactivarlo")
+@caso("Un talonario usado no se borra (se desactiva); uno cargado por error y sin usar, sí")
 def talonario_activo_emitido():
     m = clave_maestra()
     if not m:
         return False, "sin clave maestra"
     s, d = _talonario(desde=1, hasta=5, pv=93)
     tid = d.get("id")
+    _, d2 = _talonario(desde=100, hasta=105, pv=93)
+    sin_uso = d2.get("id")
     try:
-        pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 93, "tipo": 91})
-        s1, _ = pedir(f"/talonarios.php?id={tid}", "DELETE", m)          # activo+emitido → 409
-        pedir("/talonarios.php", "POST", m, {"id": tid, "activa": False})
-        s2, _ = pedir(f"/talonarios.php?id={tid}", "DELETE", m)          # desactivado → 200
-        return s1 == 409 and s2 == 200, f"activo={s1} desactivado={s2}"
+        _autorizar(93)
+        s1, _ = pedir(f"/talonarios.php?id={tid}", "DELETE", m)          # activo y usado → 409
+        desactivar = pedir("/talonarios.php", "POST", m, {"id": tid, "activa": "false"})[1].get("activa")
+        s2, _ = pedir(f"/talonarios.php?id={tid}", "DELETE", m)          # desactivado pero usado → 409
+        s3, _ = pedir(f"/talonarios.php?id={sin_uso}", "DELETE", m)      # nunca usado → 200
+        _, lista = pedir("/talonarios.php?accion=listar", clave=m)
+        contados = lista.get("resumen", {}).get("remitos_autorizados")
+        _, est = pedir("/estado.php", clave=m)
+        ok = s1 == 409 and desactivar is False and s2 == 409 and s3 == 200 and contados == est["resumen"]["remitos_autorizados"]
+        return ok, f"activo={s1} desactivar('false')={desactivar} desactivado={s2} sin_uso={s3} autorizados={contados}"
     finally:
         _borrar_talonario(tid)
+        _borrar_talonario(sin_uso)
 
 
 def _punto_de_venta_remitos(pv):
@@ -144,7 +178,7 @@ def remito_autoriza_solo():
         _borrar_talonario(tid)
 
 
-@caso("Un remito autorizado no se puede volver a autorizar, editar su número ni eliminar")
+@caso("Un remito autorizado no se puede volver a autorizar, modificar ni eliminar")
 def autorizado_protegido():
     m = clave_maestra()
     s, d = _talonario(desde=1, hasta=5, pv=96)
@@ -154,11 +188,32 @@ def autorizado_protegido():
         rid = r["id"]
         s1, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 96, "tipo": 91, "remito_id": rid})
         s2, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 96, "tipo": 91, "remito_id": rid})
-        _, e = pedir("/remitos.php", "POST", m, {"id": rid, "numero": "99999999", "cai": "1", "cliente": {"razonSocial": "EDITADO"}})
+        s_ed, _ = pedir("/remitos.php", "POST", m, {"id": rid, "numero": "99999999", "cai": "1", "cliente": {"razonSocial": "EDITADO"}})
         s3, _ = pedir(f"/remitos.php?id={rid}", "DELETE", m)
-        rem = e.get("remito", {})
-        ok = s1 == 200 and s2 == 409 and rem.get("numero") == "00096-00000001" and rem.get("cliente", {}).get("razonSocial") == "EDITADO" and s3 == 409
-        return ok, f"autorizar={s1} reautorizar={s2} numero={rem.get('numero')} borrar={s3}"
+        rem = pedir(f"/remitos.php?id={rid}", clave=m)[1].get("remito", {})
+        ok = (s1 == 200 and s2 == 409 and s_ed == 409 and s3 == 409 and rem.get("numero") == "00096-00000001"
+              and rem.get("cliente", {}).get("razonSocial") == "PROTEGIDO")
+        return ok, f"autorizar={s1} reautorizar={s2} editar={s_ed} borrar={s3} numero={rem.get('numero')}"
+    finally:
+        _borrar_talonario(tid)
+
+
+@caso("Autorizaciones simultáneas nunca repiten número y el borrador no se confunde con un autorizado")
+def autorizacion_concurrente():
+    m = clave_maestra()
+    s, d = _talonario(desde=1, hasta=40, pv=97)
+    tid = d.get("id")
+    try:
+        ids = [_remito(f"SIMULTANEO {i}") for i in range(10)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            res = list(ex.map(lambda rid: pedir("/talonarios.php", "POST", m,
+                                                {"accion": "autorizar", "pv": 97, "tipo": 91, "remito_id": rid})[1], ids))
+        numeros = [r.get("numero_formato") for r in res]
+        # un borrador nuevo no toma ningún número fiscal: no puede coincidir con un autorizado
+        _, b = pedir("/remitos.php", "POST", m, {"cliente": {"razonSocial": "BORRADOR"}, "numero": "00000001"})
+        pedir(f"/remitos.php?id={b['id']}", "DELETE", m)
+        ok = len(set(numeros)) == 10 and None not in numeros and b["remito"]["numero"] == ""
+        return ok, f"números={sorted(n for n in numeros if n)} borrador={b['remito']['numero']!r}"
     finally:
         _borrar_talonario(tid)
 

@@ -9,10 +9,14 @@
  *   POST   usuarios.php {nombre, email, rol}              Alta con contraseña temporal (se devuelve una vez).
  *   POST   usuarios.php {accion: 'editar', id, nombre?, rol?, activo?}
  *   POST   usuarios.php {accion: 'restablecer', id}       Nueva contraseña temporal.
+ *   POST   usuarios.php {accion: 'desbloquear', id}       Borra los intentos de ingreso fallidos.
+ *   POST   usuarios.php {accion: 'quitar_segundo_factor', id} Desactiva el TOTP (pérdida del teléfono).
  *   DELETE usuarios.php?id=N                              Elimina un usuario.
  *
  * Reglas: siempre queda al menos un administrador activo, y nadie puede
  * quitarse a sí mismo el rol de administrador, desactivarse ni eliminarse.
+ * Cambiar el rol, desactivar o restablecer la contraseña cierra las sesiones abiertas
+ * de ese usuario.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -52,7 +56,7 @@ $method = api_method();
 
 if ($method === 'GET') {
     $rows = $pdo->query('SELECT * FROM usuarios ORDER BY activo DESC, nombre')->fetchAll();
-    api_respond(200, ['ok' => true, 'usuarios' => array_map('user_public', $rows)]);
+    api_respond(200, ['ok' => true, 'usuarios' => array_map(static fn (array $r): array => user_public($pdo, $r), $rows)]);
 }
 
 if ($method === 'POST') {
@@ -84,11 +88,11 @@ if ($method === 'POST') {
         )->execute([$name, $email, user_hash($temporary), $role]);
         $id = (int) $pdo->lastInsertId();
         audit_event($pdo, 'Usuario creado: ' . $name, [
-            'categoria' => 'usuario', 'clave' => $auth['nombre'], 'detalle' => $email . ' · ' . $role,
+            'categoria' => 'usuario', 'detalle' => $email . ' · ' . $role,
         ]);
         api_respond(201, [
             'ok' => true,
-            'usuario' => user_public(user_find($pdo, $id)),
+            'usuario' => user_public($pdo, user_find($pdo, $id)),
             'clave_temporal' => $temporary,
             'aviso' => 'Compartí la contraseña temporal por un medio seguro: se muestra una sola vez y se pide cambiarla al ingresar.',
         ]);
@@ -100,7 +104,7 @@ if ($method === 'POST') {
     if ($action === 'editar') {
         $name = array_key_exists('nombre', $body) ? api_str($body['nombre'], 120) : (string) $user['nombre'];
         $role = array_key_exists('rol', $body) ? (string) $body['rol'] : (string) $user['rol'];
-        $active = array_key_exists('activo', $body) ? (bool) $body['activo'] : (bool) (int) $user['activo'];
+        $active = array_key_exists('activo', $body) ? api_bool($body['activo'], true) : (bool) (int) $user['activo'];
         if ($name === '') {
             api_error(400, 'Indicá el nombre y apellido');
         }
@@ -113,25 +117,42 @@ if ($method === 'POST') {
         if (($role !== 'admin' || !$active) && $user['rol'] === 'admin' && user_active_admins($pdo, $id) === 0) {
             api_error(409, 'Tiene que quedar al menos un administrador activo');
         }
-        $pdo->prepare('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, intentos = 0, bloqueado_hasta = NULL WHERE id = ?')
+        $pdo->prepare('UPDATE usuarios SET nombre = ?, rol = ?, activo = ? WHERE id = ?')
             ->execute([$name, $role, $active ? 1 : 0, $id]);
+        if ($role !== $user['rol'] || $active !== (bool) (int) $user['activo']) {
+            user_revoke_sessions($pdo, $id);
+        }
         audit_event($pdo, 'Usuario actualizado: ' . $name, [
-            'categoria' => 'usuario', 'clave' => $auth['nombre'],
-            'detalle' => $role . ($active ? '' : ' · desactivado'),
+            'categoria' => 'usuario',
+            'detalle' => $user['rol'] . ' → ' . $role . ($active ? '' : ' · desactivado'),
         ]);
-        api_respond(200, ['ok' => true, 'usuario' => user_public(user_find($pdo, $id))]);
+        api_respond(200, ['ok' => true, 'usuario' => user_public($pdo, user_find($pdo, $id))]);
     }
 
     if ($action === 'restablecer') {
         $temporary = user_temporary_password();
-        $pdo->prepare('UPDATE usuarios SET clave_hash = ?, debe_cambiar = 1, intentos = 0, bloqueado_hasta = NULL WHERE id = ?')
+        $pdo->prepare('UPDATE usuarios SET clave_hash = ?, debe_cambiar = 1, sesion_version = sesion_version + 1 WHERE id = ?')
             ->execute([user_hash($temporary), $id]);
-        audit_event($pdo, 'Contraseña restablecida: ' . $user['nombre'], ['categoria' => 'usuario', 'clave' => $auth['nombre']]);
+        attempts_clear($pdo, 'ingreso', (string) $user['email']);
+        audit_event($pdo, 'Contraseña restablecida: ' . $user['nombre'], ['categoria' => 'usuario']);
         api_respond(200, [
             'ok' => true,
             'clave_temporal' => $temporary,
             'aviso' => 'Compartí la contraseña temporal por un medio seguro: se muestra una sola vez.',
         ]);
+    }
+
+    if ($action === 'desbloquear') {
+        attempts_clear($pdo, 'ingreso', (string) $user['email']);
+        audit_event($pdo, 'Ingreso desbloqueado: ' . $user['nombre'], ['categoria' => 'usuario']);
+        api_respond(200, ['ok' => true, 'usuario' => user_public($pdo, user_find($pdo, $id))]);
+    }
+
+    if ($action === 'quitar_segundo_factor') {
+        $pdo->prepare('UPDATE usuarios SET totp_activo = 0, totp_secret = NULL, totp_ultimo = NULL, sesion_version = sesion_version + 1 WHERE id = ?')
+            ->execute([$id]);
+        audit_event($pdo, 'Segundo factor quitado: ' . $user['nombre'], ['categoria' => 'usuario']);
+        api_respond(200, ['ok' => true, 'usuario' => user_public($pdo, user_find($pdo, $id))]);
     }
 
     api_error(400, 'Acción desconocida');
@@ -147,7 +168,7 @@ if ($method === 'DELETE') {
         api_error(409, 'Tiene que quedar al menos un administrador activo');
     }
     $pdo->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
-    audit_event($pdo, 'Usuario eliminado: ' . $user['nombre'], ['categoria' => 'usuario', 'clave' => $auth['nombre']]);
+    audit_event($pdo, 'Usuario eliminado: ' . $user['nombre'], ['categoria' => 'usuario', 'detalle' => (string) $user['email']]);
     api_respond(200, ['ok' => true, 'id' => $id]);
 }
 

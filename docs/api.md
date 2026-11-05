@@ -1,11 +1,11 @@
 # API de Remitos y Comprobantes
 
-API REST/JSON de la aplicación: usuarios y sesión, clientes, remitos y comprobantes compartidos, ajustes, talonarios de C.A.I., claves de acceso y credenciales de ARCA. La usa la propia aplicación (con la sesión del usuario) y otros sistemas (con una clave de API).
+API REST/JSON de la aplicación: usuarios y sesión, clientes, remitos y comprobantes compartidos, emisión electrónica con CAE, ajustes, talonarios de C.A.I., claves de acceso, auditoría y credenciales de ARCA. La usa la propia aplicación (con la sesión del usuario) y otros sistemas (con una clave de API).
 
 | | |
 |---|---|
 | **URL base** | `https://intellihelp.tech/remitos/api/` |
-| **Formato** | JSON (UTF-8) |
+| **Formato** | JSON (UTF-8). Toda escritura se envía con `Content-Type: application/json` |
 | **Autenticación** | Sesión de usuario (aplicación) o cabecera `X-API-Key` (integraciones) |
 | **Errores** | `{ "ok": false, "error": "mensaje" }` con el código HTTP correspondiente |
 
@@ -13,14 +13,18 @@ API REST/JSON de la aplicación: usuarios y sesión, clientes, remitos y comprob
 
 ### Sesión de usuario (la aplicación)
 
-La aplicación ingresa con correo y contraseña (`sesion.php`) y recibe una cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, más un token CSRF que debe enviar en la cabecera `X-CSRF-Token` en toda escritura. Los permisos dependen del rol:
+La aplicación ingresa con correo y contraseña (`sesion.php`) y recibe una cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, más un token CSRF que debe enviar en la cabecera `X-CSRF-Token` en toda escritura. Las escrituras con sesión, incluido el ingreso, solo se aceptan como `application/json` y, si el navegador informa el origen (`Origin`), desde el propio sitio. Los permisos dependen del rol:
 
 | Rol | Permisos |
 |---|---|
-| Operador | `leer`, `crear`, `borrar`: clientes, remitos, comprobantes y autorización de remitos |
-| Administrador | Lo anterior más `admin`: usuarios, ajustes, certificados de ARCA, talonarios, claves y auditoría |
+| Operador | `leer`, `crear`, `borrar`: clientes, remitos, comprobantes, autorización de remitos y emisión con CAE |
+| Administrador | Lo anterior más `admin`: usuarios, ajustes, certificados de ARCA, talonarios, claves, auditoría y exportación |
 
-La sesión vence tras 8 horas sin actividad o 12 horas desde el ingreso. Cinco contraseñas incorrectas bloquean la cuenta durante 15 minutos.
+- La sesión vence tras 8 horas sin actividad o 12 horas desde el ingreso.
+- Cambiar la contraseña, el rol o el segundo factor, desactivar al usuario o restablecer su contraseña cierra todas sus otras sesiones.
+- **Freno de ingresos fallidos** (ventana de 15 minutos): 5 por correo desde la misma conexión, 30 por conexión y 50 por correo en total. El freno responde `429` con el mismo mensaje exista o no el correo, y no bloquea la cuenta para los demás.
+- **Verificación en dos pasos** (TOTP, RFC 6238) opcional por usuario. Con ella activa, `ingresar` responde `{usuario: null, segundo_factor: true}` y la sesión se completa con `verificar_codigo` dentro de los 5 minutos. Cada código se acepta una sola vez.
+- **Reconfirmación de contraseña** (cambio de contraseña, segundo factor, certificado de ARCA): cinco fallos en 15 minutos cierran la sesión (`429`).
 
 ### Clave de API (integraciones)
 
@@ -35,7 +39,11 @@ X-API-Key: ith_0123456789abcdef0123456789abcdef
 | **Maestra** | `api/config.php` (se guarda solo su SHA-256) | Todo, igual que un administrador |
 | **De servicio** | Panel → Claves | Permisos acotados: `leer`, `crear`, `borrar`. Se guarda solo su SHA-256 y se muestra una única vez |
 
-Una IP que acumula 20 accesos rechazados en 10 minutos queda bloqueada temporalmente (`429`).
+Una conexión que acumula 20 claves rechazadas en 10 minutos queda frenada temporalmente (`429`). Los intentos fallidos se cuentan en una tabla propia, separada de la auditoría.
+
+### CORS
+
+La aplicación llama a la API desde su mismo origen. CORS solo se habilita para los orígenes listados en `allowed_origins` (`config.php`); las integraciones de servidor a servidor no lo necesitan.
 
 ## Flujo típico de integración
 
@@ -45,48 +53,71 @@ sequenceDiagram
     participant A as API
     participant U as Aplicación
     S->>A: POST remitos.php (X-API-Key)
-    A-->>S: 201 { id, url }
+    A-->>S: 201 { id, remito, url }
     S->>U: Abre url (?open=id)
     U->>A: GET remitos.php?id=…
     A-->>U: remito
-    U->>U: Vista previa e impresión
+    U->>A: POST talonarios.php {accion: autorizar}
+    A-->>U: número y C.A.I.
+    U->>U: Impresión
 ```
 
 ## Sesión y usuarios
 
 | Método | Operación | Acceso |
 |---|---|---|
-| `GET sesion.php` | Usuario de la sesión y token CSRF (`usuario: null` sin sesión) | público |
-| `POST sesion.php` `{accion: "ingresar", email, clave}` | Inicia sesión | público |
+| `GET sesion.php` | Usuario de la sesión y token CSRF. Sin sesión: `usuario: null` (y `segundo_factor: true` si falta el código) | público |
+| `POST sesion.php` `{accion: "ingresar", email, clave}` | Inicia sesión o pide el código del segundo factor | público |
+| `POST sesion.php` `{accion: "verificar_codigo", codigo}` | Completa el ingreso con el código TOTP | público |
 | `POST sesion.php` `{accion: "salir"}` | Cierra la sesión | sesión |
-| `POST sesion.php` `{accion: "cambiar_clave", actual, nueva}` | Cambia la contraseña propia (mínimo 10 caracteres, con letras y números) | sesión |
-| `GET usuarios.php` | Lista de usuarios | admin |
+| `POST sesion.php` `{accion: "cambiar_clave", actual, nueva}` | Cambia la contraseña propia | sesión |
+| `POST sesion.php` `{accion: "totp_iniciar", clave}` | Genera el secreto TOTP y su URI `otpauth://` (todavía inactivo) | sesión |
+| `POST sesion.php` `{accion: "totp_activar", codigo}` | Activa el segundo factor | sesión |
+| `POST sesion.php` `{accion: "totp_desactivar", clave, codigo}` | Desactiva el segundo factor | sesión |
+| `GET usuarios.php` | Lista de usuarios (con `segundo_factor` y `bloqueado`) | admin |
 | `POST usuarios.php` `{nombre, email, rol}` | Alta; devuelve una contraseña temporal una única vez | admin |
-| `POST usuarios.php` `{accion: "editar", id, nombre?, rol?, activo?}` | Edición, activación y desbloqueo | admin |
+| `POST usuarios.php` `{accion: "editar", id, nombre?, rol?, activo?}` | Edición y activación | admin |
 | `POST usuarios.php` `{accion: "restablecer", id}` | Nueva contraseña temporal | admin |
+| `POST usuarios.php` `{accion: "desbloquear", id}` | Borra el freno de ingresos fallidos | admin |
+| `POST usuarios.php` `{accion: "quitar_segundo_factor", id}` | Desactiva el TOTP de un usuario que perdió el teléfono | admin |
 | `DELETE usuarios.php?id={id}` | Baja | admin |
 
-Siempre queda al menos un administrador activo, y nadie puede quitarse el rol, desactivarse ni eliminarse a sí mismo. El primer administrador se crea por línea de comandos: `php api/cli/usuario.php "Nombre Apellido" correo@dominio admin`.
+**Política de contraseñas:** al menos 12 caracteres, letras y números, al menos 6 caracteres distintos, sin palabras comunes (lista propia), secuencias evidentes ni partes del correo del usuario. Una contraseña que no cumple responde `422` con el motivo.
+
+Siempre queda al menos un administrador activo, y nadie puede quitarse el rol, desactivarse ni eliminarse a sí mismo. Por línea de comandos:
+
+```bash
+php api/cli/usuario.php "Nombre Apellido" correo@dominio admin   # alta (contraseña temporal)
+php api/cli/usuario.php restablecer correo@dominio               # recuperar el acceso
+php api/cli/usuario.php quitar-segundo-factor correo@dominio
+```
 
 ## Clientes
 
 | Método | Operación | Permiso |
 |---|---|---|
-| `GET clientes.php` | Agenda completa, por razón social | `leer` |
-| `POST clientes.php` `{id?, razonSocial, cuit, …}` | Alta o edición; el CUIT se normaliza y no se repite | `crear` |
-| `POST clientes.php` `{accion: "importar", clientes: […]}` | Alta o actualización por CUIT, hasta 2000 por vez; los campos vacíos no borran datos | `crear` |
+| `GET clientes.php?buscar=` | Agenda por razón social, hasta 5000 por respuesta. `total` es el total real y `completo` indica si entró toda | `leer` |
+| `POST clientes.php` `{id?, razonSocial, cuit, condIVA, …}` | Alta o edición. El CUIT se valida con su dígito verificador (también se acepta un DNI de 7 u 8 dígitos), se normaliza y no se repite | `crear` |
+| `POST clientes.php` `{accion: "importar", clientes: […]}` | Alta o actualización por CUIT, hasta 2000 por vez; los campos vacíos no borran datos y las filas con CUIT inválido se informan en `cuit_invalidos` sin cargarse | `crear` |
 | `DELETE clientes.php?id={id}` | Baja | `borrar` |
 
 ## Remitos
 
-### `POST remitos.php` — crear o editar · permiso `crear`
+### Numeración
+
+El número fiscal de un remito (punto de venta y correlativo, `00001-00000012`), el C.A.I. y su vencimiento los asigna **únicamente la autorización** contra un talonario (`talonarios.php`), y la base impide que se repitan (clave única por punto de venta y número). Hasta entonces el remito es un **borrador** con una referencia interna (`"referencia": 12`) que no se confunde con un número fiscal y se imprime con el sello «SIN AUTORIZAR». Lo que el cliente envíe en `numero`, `cai` o `caiVto` se ignora.
+
+Un remito autorizado no se modifica ni se elimina; solo admite la marca de facturado.
+
+### `POST remitos.php` — crear o editar un borrador · permiso `crear`
 
 ```json
 {
+  "id_local": "erp-000123",
   "fecha": "21/10/2026",
   "cliente": {
     "razonSocial": "DISTRIBUIDORA EJEMPLO S.A.",
-    "cuit": "30-12345678-9",
+    "cuit": "30-50001091-2",
     "domicilio": "Av. Corrientes 1234",
     "localidad": "CABA",
     "cp": "C1043",
@@ -103,14 +134,19 @@ Siempre queda al menos un administrador activo, y nadie puede quitarse el rol, d
 Respuesta `201`:
 
 ```json
-{ "ok": true, "id": "9f2c1a77bd0e4a13", "actualizado": false, "url": "https://intellihelp.tech/remitos/?open=9f2c1a77bd0e4a13" }
+{
+  "ok": true,
+  "id": "9f2c1a77bd0e4a13",
+  "actualizado": false,
+  "remito": { "id": "9f2c1a77bd0e4a13", "estado": "borrador", "referencia": 12, "numero": "", "cai": "", "…": "…" },
+  "url": "https://intellihelp.tech/remitos/?open=9f2c1a77bd0e4a13"
+}
 ```
 
-- Todos los campos son opcionales; la fecha (`dd/mm/aaaa`) toma el día actual si falta o es inválida.
-- Sin `numero`, el servidor asigna el siguiente correlativo con un bloqueo: dos usuarios nunca obtienen el mismo. Un número repetido se rechaza (`409`).
-- Con `id`, edita ese remito. En un remito autorizado, el número, el C.A.I. y su vencimiento no se modifican.
+- Todos los campos son opcionales. Sin `fecha` se toma el día actual; una fecha que no existe en el calendario (`31/02/2026`), una hora inválida o un CUIT con dígito verificador incorrecto responden `422`.
+- Con `id`, edita ese borrador (la edición queda en la auditoría con los grupos de datos que cambiaron). Un remito autorizado responde `409`.
+- `id_local` es la **clave de idempotencia** del sistema que envía: si ya existe un remito con ese `id_local`, se actualiza en lugar de crear otro (`200`, `"actualizado": true`). La búsqueda y el alta ocurren bajo el mismo bloqueo, así que dos envíos simultáneos no generan duplicados.
 - Los textos se recortan a su longitud máxima y los campos desconocidos se descartan. Se aceptan hasta 60 ítems.
-- Si el cuerpo trae `id_local` (identificador del remito en la aplicación) y ya existe, el remito se **actualiza** (`200`, `"actualizado": true`): así funciona el respaldo de la aplicación sin generar duplicados.
 
 | Objeto | Campos |
 |---|---|
@@ -119,15 +155,19 @@ Respuesta `201`:
 | `recibi` | `tipoDoc` (`DNI`, `CI`, `Pasaporte`, `Otro`), `nombre`, `documentoNro`, `sector`, `puesto` |
 | `transporte` | `nombre`, `vehiculo`, `chofer`, `lugarEntrega`, `fecha`, `hora`, `observaciones` |
 
+### `POST remitos.php` `{accion: "facturado", id, facturado}` — marca de facturado · permiso `crear`
+
+Marca o desmarca un remito como facturado; los autorizados sin marcar son los «pendientes de facturar» de `estado.php`.
+
 ### `GET remitos.php?id={id}` — leer · permiso `leer`
 
 El enlace `?open={id}` que devuelve el alta abre el remito en la aplicación, una vez iniciada la sesión.
 
-### `GET remitos.php?pagina=1&por_pagina=50` — listar · permiso `leer`
+### `GET remitos.php?pagina=1&por_pagina=50&buscar=` — listar · permiso `leer`
 
-Remitos completos, del más reciente al más antiguo, con `total`, `pagina` y `paginas`.
+Remitos completos, del más reciente al más antiguo, con `total`, `pagina` y `paginas` (hasta 200 por página). `buscar` filtra por cliente, número o referencia.
 
-### `DELETE remitos.php?id={id}` — eliminar · permiso `borrar`
+### `DELETE remitos.php?id={id}` — eliminar un borrador · permiso `borrar`
 
 Un remito autorizado no se elimina (`409`).
 
@@ -135,38 +175,55 @@ Un remito autorizado no se elimina (`409`).
 
 | Método | Operación | Permiso |
 |---|---|---|
-| `GET comprobantes.php?pagina=1&por_pagina=50` | Facturas, recibos y notas completos | `leer` |
+| `GET comprobantes.php?pagina=1&por_pagina=50&buscar=` | Facturas, recibos y notas completos | `leer` |
 | `GET comprobantes.php?id={id}` | Un comprobante | `leer` |
-| `POST comprobantes.php` `{id?, tipo, subtipo?, letra, ptoVenta, numero?, cliente, items, …}` | Alta o edición. Sin número, el servidor asigna el siguiente de la serie (tipo, letra y punto de venta); la base impide duplicados | `crear` |
-| `DELETE comprobantes.php?id={id}` | Baja | `borrar` |
+| `POST comprobantes.php` `{id?, id_local?, tipo, subtipo?, letra, ptoVenta, numero?, cliente, items, …}` | Alta o edición de un borrador | `crear` |
+| `POST comprobantes.php` `{accion: "emitir", id}` | Solicita el CAE a ARCA (WSFEv1) | `crear` |
+| `POST comprobantes.php` `{accion: "registrar_cae", id, numero, cae, caeVto}` | Registra un CAE obtenido fuera del sistema | admin |
+| `DELETE comprobantes.php?id={id}` | Baja de un borrador (con CAE, solo un administrador) | `borrar` |
 
-Un comprobante con CAE solo lo modifica o elimina un administrador.
+**Importes.** El servidor recalcula siempre los totales (no confía en los que envía la interfaz) y los devuelve en `importes` (centavos). Se aceptan en formato argentino (`1.234,56`), con punto decimal (`1234.56`) o con punto de miles (`1.500`). Letra A: precios netos e IVA discriminado; letra B: precios con IVA incluido; C y X: sin IVA. Alícuotas: 0, 2,5, 5, 10,5, 21 y 27 %. Un importe inválido responde `422`.
+
+**Numeración.**
+- Con la emisión electrónica activa (ajustes del emisor), los comprobantes A, B y C no tienen número hasta que ARCA los autoriza; el punto de venta es el configurado para web services.
+- Sin emisión electrónica, o con letra X, el servidor asigna el correlativo de la serie (tipo, letra y punto de venta) o respeta el número indicado si está libre (`00001-00000012` se toma como `00000012`). La base impide duplicados.
+- El CAE nunca se toma del cliente. Un comprobante autorizado no se modifica (`409`): se corrige con una nota de crédito.
+
+**Emisión (`emitir`).** El servidor valida los datos, toma el número siguiente al último autorizado (`FECompUltimoAutorizado`) bajo un bloqueo por ambiente, punto de venta y tipo, y llama a `FECAESolicitar`. Antes de llamar deja el comprobante en estado `emitiendo` con el número reservado: si la respuesta de ARCA se pierde (`502`), el reintento consulta `FECompConsultar` y, si ese número quedó autorizado para el mismo receptor e importe, recupera el CAE sin pedir otro número. Un rechazo responde `422` con `errores` y `observaciones` de ARCA y el comprobante vuelve a borrador.
+
+Campos para la emisión: `conceptoTipo` (1 productos, 2 servicios, 3 ambos), `servDesde`, `servHasta` y `vtoPago` (servicios; por defecto la fecha del comprobante), `cliente.condIVA` (`Responsable Inscripto`, `Monotributo`, `Exento`, `Consumidor Final`) y, en las notas, `compAsoc` (`tipo`: `Factura`, `Nota de débito` o `Nota de crédito`; `letra`, `pv`, `nro`).
 
 ## Ajustes
 
 | Método | Operación | Permiso |
 |---|---|---|
 | `GET ajustes.php` | `emisor` (ambiente, CUIT, punto de venta, emisión electrónica) y `remito` (punto de venta, ejemplares) | `leer` |
-| `POST ajustes.php` `{seccion, valores}` | Actualiza una sección. La emisión electrónica solo se activa con CUIT, punto de venta y un certificado vigente del mismo CUIT | admin |
+| `POST ajustes.php` `{seccion, valores}` | Actualiza una sección. El CUIT se valida con su dígito verificador; la emisión electrónica solo se activa con CUIT, punto de venta y un certificado vigente del mismo CUIT (`422` con `faltan` si no) | admin |
 
 ## Estado
 
 ### `GET estado.php` — seguimiento · permiso `leer`
 
-Totales, remitos del día y pendientes de facturar. No incluye importes, ítems, CUIT ni domicilios. Con `?formato=texto` devuelve el mismo resumen en texto plano.
+Remitos totales, autorizados, del día y **pendientes de facturar** (autorizados sin la marca de facturado). No incluye importes, ítems, CUIT ni domicilios. Con `?formato=texto` devuelve el mismo resumen en texto plano.
+
+## Exportación
+
+### `GET exportar.php` — copia de los datos · admin
+
+Remitos, comprobantes y clientes en JSON, para la copia descargable de la aplicación. Incluye datos personales de clientes (Ley 25.326): solo la obtiene un administrador y cada exportación queda en la auditoría. No incluye usuarios ni secretos. El respaldo completo del servidor se hace por consola (ver «Operación»).
 
 ## Talonarios de C.A.I.
 
 | Método | Operación | Permiso |
 |---|---|---|
-| `GET talonarios.php?accion=listar` | Talonarios con restantes, vencimiento y alertas | admin |
+| `GET talonarios.php?accion=listar` | Talonarios con restantes, vencimiento y alertas; `remitos_autorizados` cuenta los remitos autorizados reales | admin |
 | `GET talonarios.php?accion=vigente&pv=1&tipo=91` | Talonario activo, sin consumir número | `leer` |
-| `POST talonarios.php` `{punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento}` | Alta (valida rango, superposición, C.A.I. de 14 dígitos y vigencia) | admin |
-| `POST talonarios.php` `{accion: "autorizar", pv, tipo, fecha, remito_id?, confirmar?}` | Asigna el próximo número y el C.A.I. en una transacción con bloqueo de fila; con `remito_id` los escribe en el remito en la misma transacción | `crear` |
+| `POST talonarios.php` `{punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, tipo_comprobante?}` | Alta (valida tipo de comprobante, rango, superposición, C.A.I. de 14 dígitos y una fecha de vencimiento real y vigente) | admin |
+| `POST talonarios.php` `{accion: "autorizar", remito_id, pv, tipo, fecha, confirmar?}` | Asigna el próximo número y el C.A.I. al remito, en una transacción con bloqueo de fila | `crear` |
 | `POST talonarios.php` `{id, activa}` | Activar o desactivar | admin |
-| `DELETE talonarios.php?id={id}` | Eliminar (un talonario activo que ya emitió debe desactivarse antes) | admin |
+| `DELETE talonarios.php?id={id}` | Elimina un talonario cargado por error y nunca usado. Uno que ya autorizó remitos es respaldo de esos comprobantes: se desactiva (`409`) | admin |
 
-Si el C.A.I. está vencido a la fecha de emisión, `autorizar` responde `409` con `"vencido": true` y solo continúa con `"confirmar": true`.
+`autorizar` exige `remito_id`: cada número se asigna a un remito concreto y nunca se consumen números sueltos. Si el C.A.I. está vencido a la fecha de emisión, responde `409` con `"vencido": true` y solo continúa con `"confirmar": true`.
 
 ## ARCA
 
@@ -175,25 +232,41 @@ Si el C.A.I. está vencido a la fecha de emisión, `autorizar` responde `409` co
 | `GET arca.php` | Datos públicos del certificado de cada ambiente (titular, CUIT, vigencia, huella) | `leer` |
 | `POST arca.php` `{accion: "cargar", ambiente, cuit?, certificado, clave, frase?, confirmacion?}` | Valida el par y lo guarda cifrado. Solo por HTTPS; con sesión exige reconfirmar la contraseña | admin |
 | `POST arca.php` `{accion: "probar", ambiente}` | Verifica los servidores de WSFEv1 y obtiene el ticket de WSAA | `crear` |
-| `POST arca.php` `{accion: "quitar", ambiente, confirmacion?}` | Elimina el certificado, la clave y los tickets del ambiente | admin |
-| `GET proximo.php?ambiente=&tipo=&subtipo=&letra=&pv=` | Próximo número según ARCA (último autorizado + 1) | `leer` |
+| `POST arca.php` `{accion: "quitar", ambiente, confirmacion?}` | Elimina el certificado, la clave y los tickets del ambiente (con sesión, reconfirmando la contraseña) | admin |
+| `DELETE arca.php?ambiente={ambiente}` | Ídem, solo con la clave maestra (integraciones) | admin |
+| `GET proximo.php?ambiente=&tipo=&subtipo=&letra=&pv=` | Próximo número según ARCA (último autorizado + 1), solo informativo | `leer` |
 
 `ambiente`: `homologacion` o `produccion`. `tipo`: `factura`, `recibo` o `nota` (`subtipo` `credito` o `debito`). `letra`: `A`, `B` o `C`.
 
-Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que la clave privada (RSA de 2048 bits o más) le corresponda y que el CUIT del titular coincida con el informado. Las respuestas nunca incluyen el certificado ni la clave.
+Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que la clave privada sea **RSA** de 2048 bits o más y le corresponda, y que el CUIT del titular coincida con el informado o, si no se informa, con el del emisor configurado. Las respuestas nunca incluyen el certificado ni la clave, y los mensajes de error de ARCA o de la conexión se informan de forma genérica (el detalle queda en el log del servidor).
 
 ## Auditoría y claves
 
 | Método | Operación | Permiso |
 |---|---|---|
 | `GET claves.php?accion=listar` | Claves de servicio y resumen de uso | admin |
-| `GET claves.php?accion=registro&pagina=&por_pagina=&categoria=` | Auditoría paginada | admin |
+| `GET claves.php?accion=registro&pagina=&por_pagina=&categoria=` | Auditoría paginada (con `usuario_id`) | admin |
+| `GET claves.php?accion=integridad` | Verifica la cadena de hashes de la auditoría | admin |
 | `POST claves.php` `{nombre, permisos}` | Crea una clave y la devuelve una única vez | admin |
 | `POST claves.php` `{id, activa}` | Activa o desactiva | admin |
 | `DELETE claves.php?id={id}` | Elimina | admin |
-| `POST evento.php` `{categoria, accion, detalle?, nivel?}` | La aplicación registra sus propios eventos | `crear` |
+| `POST evento.php` `{evento, id?, detalle?}` | Eventos de la interfaz: `remito_impreso`, `comprobante_impreso`, `prueba_impresa`, `error_interfaz` | `crear` |
 
-Categorías de la auditoría: `remito`, `comprobante`, `cliente`, `cai`, `arca`, `clave`, `usuario`, `acceso`, `error`, `sistema`. Se registran los eventos relevantes, no las lecturas de rutina, y se conservan los últimos 2000.
+- Cada evento guarda el usuario (`usuario_id` y nombre), la IP y el hash del evento anterior: borrar o modificar un registro directamente en la base corta la cadena, y `integridad` informa dónde.
+- La auditoría se conserva **400 días** y se depura solo por antigüedad, nunca por cantidad.
+- `evento.php` no acepta texto libre en la acción: el servidor la arma con los datos guardados del documento. Hay una cuota de 60 eventos cada 10 minutos por usuario y conexión.
+
+Categorías: `remito`, `comprobante`, `cliente`, `cai`, `arca`, `clave`, `usuario`, `acceso`, `error`, `sistema`.
+
+## Operación (línea de comandos)
+
+| Comando | Uso |
+|---|---|
+| `php api/cli/migrar.php` | Aplica las migraciones del esquema. Se corre en cada despliegue: la web no modifica el esquema y responde `503` mientras la base esté desactualizada |
+| `php api/cli/respaldo.php [carpeta] [--conservar=30]` | Respaldo cifrado (AES-256-GCM con una subclave de `app_key`), verificado al generarse; pensado para `cron` diario |
+| `php api/cli/restaurar.php archivo.rmb --verificar` | Prueba que un respaldo se pueda restaurar, sin tocar la base |
+| `php api/cli/restaurar.php archivo.rmb --confirmar` | Restaura en una transacción, después de respaldar el estado actual |
+| `php api/cli/rotar-clave.php --confirmar` | Rota `app_key`: vuelve a cifrar todos los secretos y actualiza `config.php` en una sola operación |
 
 ## Ejemplos
 
@@ -203,7 +276,7 @@ Categorías de la auditoría: `remito`, `comprobante`, `cliente`, `cai`, `arca`,
 curl -X POST https://intellihelp.tech/remitos/api/remitos.php \
   -H "X-API-Key: $REMITOS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"cliente":{"razonSocial":"DISTRIBUIDORA EJEMPLO S.A."},"items":[{"articulo":"1","descripcion":"Servicio técnico","cantidad":"2 hs"}]}'
+  -d '{"id_local":"erp-000123","cliente":{"razonSocial":"DISTRIBUIDORA EJEMPLO S.A."},"items":[{"articulo":"1","descripcion":"Servicio técnico","cantidad":"2 hs"}]}'
 ```
 
 **Python**
@@ -214,8 +287,8 @@ import requests
 
 API = "https://intellihelp.tech/remitos/api/remitos.php"
 
-def crear_remito(cliente: dict, items: list[dict]) -> str:
-    r = requests.post(API, json={"cliente": cliente, "items": items},
+def crear_remito(id_local: str, cliente: dict, items: list[dict]) -> str:
+    r = requests.post(API, json={"id_local": id_local, "cliente": cliente, "items": items},
                       headers={"X-API-Key": os.environ["REMITOS_API_KEY"]}, timeout=15)
     r.raise_for_status()
     return r.json()["url"]
@@ -227,7 +300,7 @@ def crear_remito(cliente: dict, items: list[dict]) -> str:
 const res = await fetch('https://intellihelp.tech/remitos/api/remitos.php', {
   method: 'POST',
   headers: { 'X-API-Key': process.env.REMITOS_API_KEY, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ cliente: { razonSocial: 'DISTRIBUIDORA EJEMPLO S.A.' }, items: [] }),
+  body: JSON.stringify({ id_local: 'erp-000123', cliente: { razonSocial: 'DISTRIBUIDORA EJEMPLO S.A.' }, items: [] }),
 });
 const { url } = await res.json();
 ```
@@ -237,12 +310,15 @@ const { url } = await res.json();
 | Código | Significado |
 |---|---|
 | `200` / `201` | Operación correcta / recurso creado |
-| `400` | Datos inválidos |
-| `401` | Falta la clave o es inválida |
-| `403` | Sin el permiso necesario, clave desactivada, token CSRF ausente, contraseña temporal sin cambiar u operación que exige HTTPS |
+| `400` | Petición mal formada o acción desconocida |
+| `401` | Falta la credencial, es inválida, la sesión venció o el código del segundo factor es incorrecto |
+| `403` | Sin el permiso necesario, clave desactivada, token CSRF ausente, origen no permitido, contraseña temporal sin cambiar, contraseña de confirmación incorrecta u operación que exige HTTPS |
 | `404` | Recurso inexistente |
-| `409` | Conflicto (número repetido, talonario agotado o vencido, rango superpuesto, remito ya autorizado, sin certificado) |
-| `413` | Cuerpo demasiado grande |
-| `422` | Certificado o clave privada rechazados |
-| `429` | Demasiados intentos rechazados (clave o ingreso) desde la misma IP |
-| `502` | ARCA rechazó la operación o no respondió |
+| `405` | Método no permitido |
+| `409` | Conflicto: número repetido, documento autorizado (no se modifica), talonario agotado, vencido o ya usado, rango superpuesto, emisión no activa, sin certificado |
+| `413` | Cuerpo demasiado grande (256 KB) |
+| `415` | La escritura no se envió como `application/json` |
+| `422` | Datos que no superan la validación: fecha, CUIT, importes, contraseña, ajustes, certificado, número fuera de rango o rechazo de ARCA (con `errores` y `observaciones`) |
+| `429` | Demasiados intentos (ingreso, clave, código del segundo factor, reconfirmación) o eventos |
+| `502` | ARCA no respondió o la respuesta no se pudo confirmar |
+| `503` | Base de datos no disponible, esquema pendiente de migración u operación igual en curso |

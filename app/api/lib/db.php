@@ -7,7 +7,9 @@
  *
  * El esquema se versiona en la tabla `app_meta`. Cada migración es idempotente:
  * puede aplicarse sobre una base nueva o sobre una instalación existente sin
- * perder datos. Solo se ejecutan las que todavía no se aplicaron.
+ * perder datos. Las migraciones se ejecutan por consola durante el despliegue
+ * (`php api/cli/migrar.php`): las peticiones web nunca modifican el esquema y,
+ * si la base está desactualizada, responden 503 hasta que se migre.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -16,7 +18,7 @@
 declare(strict_types=1);
 
 /** Versión del esquema que espera este código. */
-const API_SCHEMA_VERSION = 2;
+const API_SCHEMA_VERSION = 3;
 
 /** Zona horaria de la sesión de base de datos (Argentina, UTC−3 todo el año). */
 const API_DB_TIMEZONE = '-03:00';
@@ -49,7 +51,10 @@ function api_db(array $config): PDO
     }
 
     $pdo->exec("SET time_zone = '" . API_DB_TIMEZONE . "'");
-    api_migrate($pdo);
+    if (PHP_SAPI !== 'cli' && api_schema_version($pdo) < API_SCHEMA_VERSION) {
+        error_log('[remitos] La base está en la versión ' . api_schema_version($pdo) . ' y el código espera la ' . API_SCHEMA_VERSION);
+        api_error(503, 'El sistema se está actualizando. Volvé a intentar en unos minutos.');
+    }
 
     return $pdo;
 }
@@ -67,6 +72,7 @@ function api_migrate(PDO $pdo): void
         $migrations = [
             1 => 'api_migration_1',
             2 => 'api_migration_2',
+            3 => 'api_migration_3',
         ];
         foreach ($migrations as $version => $migration) {
             if ($version > $current) {
@@ -316,5 +322,100 @@ function api_migration_2(PDO $pdo): void
     $pdo->exec('ALTER TABLE comprobantes ADD UNIQUE KEY uq_num (tipo, subtipo, letra, pto_vta, numero_int)');
     if (!api_index_exists($pdo, 'comprobantes', 'idx_updated')) {
         $pdo->exec('ALTER TABLE comprobantes ADD INDEX idx_updated (updated)');
+    }
+}
+
+/** Modifica la definición de una columna existente. */
+function api_column_type(PDO $pdo, string $table, string $column): string
+{
+    $st = $pdo->prepare(
+        'SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+    );
+    $st->execute([$table, $column]);
+
+    return strtolower((string) $st->fetchColumn());
+}
+
+/**
+ * Revisión de noviembre de 2026:
+ * - Intentos fallidos en su propia tabla, separados de la auditoría.
+ * - Auditoría con usuario e integridad encadenada (hash de cada evento con el anterior).
+ * - Sesiones invalidables por usuario y segundo factor (TOTP).
+ * - Remitos: el número fiscal solo existe en los autorizados y es único por punto de
+ *   venta; los borradores llevan una referencia interna. Fecha de emisión como DATE.
+ * - Comprobantes: número nulo hasta que se asigna, idempotencia por id_local, estado y fecha.
+ */
+function api_migration_3(PDO $pdo): void
+{
+    $engine = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS intentos (
+        id    BIGINT AUTO_INCREMENT PRIMARY KEY,
+        tipo  VARCHAR(20)  NOT NULL,
+        clave VARCHAR(190) NOT NULL DEFAULT '',
+        ip    VARCHAR(45)  NOT NULL DEFAULT '',
+        fecha DATETIME     NOT NULL,
+        INDEX idx_tipo_clave (tipo, clave, fecha),
+        INDEX idx_tipo_ip (tipo, ip, fecha)
+    ) $engine");
+
+    api_add_column($pdo, 'api_log', 'usuario_id', 'INT DEFAULT NULL AFTER origen');
+    api_add_column($pdo, 'api_log', 'prev_hash', 'CHAR(64) DEFAULT NULL');
+    api_add_column($pdo, 'api_log', 'hash', 'CHAR(64) DEFAULT NULL');
+    audit_rechain($pdo);
+
+    api_add_column($pdo, 'usuarios', 'sesion_version', 'INT NOT NULL DEFAULT 1');
+    api_add_column($pdo, 'usuarios', 'totp_secret', 'TEXT DEFAULT NULL');
+    api_add_column($pdo, 'usuarios', 'totp_activo', 'TINYINT(1) NOT NULL DEFAULT 0');
+    api_add_column($pdo, 'usuarios', 'totp_ultimo', 'BIGINT DEFAULT NULL');
+
+    // Remitos
+    if (str_starts_with(api_column_type($pdo, 'remitos', 'estado'), 'enum')) {
+        $pdo->exec("ALTER TABLE remitos MODIFY estado VARCHAR(12) NOT NULL DEFAULT 'borrador'");
+    }
+    api_add_column($pdo, 'remitos', 'referencia', 'INT UNSIGNED DEFAULT NULL AFTER id_local');
+    api_add_column($pdo, 'remitos', 'fecha_emision', 'DATE DEFAULT NULL');
+    $pdo->exec('UPDATE remitos SET referencia = NULL');
+    $rows = $pdo->query('SELECT id, estado, fecha, data FROM remitos ORDER BY created, id')->fetchAll();
+    $ref = 0;
+    foreach ($rows as $row) {
+        $doc = json_decode((string) $row['data'], true) ?: [];
+        $autorizado = $row['estado'] === 'autorizado';
+        $ref++;
+        if (!$autorizado) {
+            $doc['numero'] = '';
+            $doc['cai'] = '';
+            $doc['caiVto'] = '';
+        }
+        $doc['referencia'] = $ref;
+        $pdo->prepare(
+            'UPDATE remitos SET referencia = ?, data = ?, fecha_emision = ?' .
+            ($autorizado ? '' : ', numero = NULL, numero_int = NULL, punto_venta = NULL') . ' WHERE id = ?'
+        )->execute([$ref, json_encode($doc, JSON_UNESCAPED_UNICODE), api_date_iso((string) $row['fecha']), $row['id']]);
+    }
+    if (!api_index_exists($pdo, 'remitos', 'uq_referencia')) {
+        $pdo->exec('ALTER TABLE remitos ADD UNIQUE KEY uq_referencia (referencia)');
+    }
+    if (!api_index_exists($pdo, 'remitos', 'uq_numero')) {
+        $pdo->exec('ALTER TABLE remitos ADD UNIQUE KEY uq_numero (punto_venta, numero_int)');
+    }
+    if (!api_index_exists($pdo, 'remitos', 'idx_fecha_emision')) {
+        $pdo->exec('ALTER TABLE remitos ADD INDEX idx_fecha_emision (fecha_emision)');
+    }
+
+    // Comprobantes
+    $pdo->exec('ALTER TABLE comprobantes MODIFY numero VARCHAR(8) DEFAULT NULL');
+    $pdo->exec('ALTER TABLE comprobantes MODIFY numero_int INT UNSIGNED DEFAULT NULL');
+    api_add_column($pdo, 'comprobantes', 'id_local', 'VARCHAR(40) DEFAULT NULL AFTER id');
+    api_add_column($pdo, 'comprobantes', 'estado', "VARCHAR(12) NOT NULL DEFAULT 'borrador'");
+    api_add_column($pdo, 'comprobantes', 'fecha_emision', 'DATE DEFAULT NULL');
+    $pdo->exec("UPDATE comprobantes SET numero = NULL, numero_int = NULL WHERE numero = '' OR numero_int = 0");
+    $pdo->exec("UPDATE comprobantes SET estado = 'autorizado' WHERE cae IS NOT NULL AND cae <> ''");
+    foreach ($pdo->query('SELECT id, fecha FROM comprobantes')->fetchAll() as $row) {
+        $pdo->prepare('UPDATE comprobantes SET fecha_emision = ? WHERE id = ?')
+            ->execute([api_date_iso((string) $row['fecha']), $row['id']]);
+    }
+    if (!api_index_exists($pdo, 'comprobantes', 'uq_id_local')) {
+        $pdo->exec('ALTER TABLE comprobantes ADD UNIQUE KEY uq_id_local (id_local)');
     }
 }

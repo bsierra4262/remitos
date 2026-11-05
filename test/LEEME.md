@@ -16,16 +16,39 @@ mysql -u root -p -e "CREATE DATABASE remitos_test CHARACTER SET utf8mb4"
 #            'master_key_hash' => hash('sha256', 'ith_test_master_key_0123456789abcdef'),
 #            'app_key' => str_repeat('ab', 32)];
 
-# 3. Servidor
+# 3. Esquema (la web no migra la base: se hace por consola, igual que en el despliegue)
+REMITOS_CONFIG=/tmp/config.test.php php app/api/cli/migrar.php
+
+# 4. Servidor
 REMITOS_CONFIG=/tmp/config.test.php php -S 127.0.0.1:8765 -t app
 
-# 4. Pruebas
+# 5. Pruebas
 python test/correr.py            # todos los módulos
 python test/correr.py seguridad  # solo los módulos que contengan ese nombre
 python test/correr.py -v         # con el detalle de cada caso
+
+# Pruebas unitarias (no necesitan servidor ni base)
+node --test test/unitarias/calculos.test.js
+php test/unitarias/importes.test.php
 ```
 
-Requisitos: `playwright` (con `playwright install chromium`), `pymupdf` y `cryptography`.
+Requisitos: `playwright` (con `playwright install chromium`), `pymupdf` y `cryptography`; Node 20+ para las unitarias.
+
+### Variables de entorno
+
+Algunas pruebas limpian en la base local datos que la API protege a propósito (remitos autorizados, talonarios usados, intentos fallidos). Para eso usan el cliente de línea de comandos de MariaDB/MySQL:
+
+| Variable | Por defecto | Uso |
+|---|---|---|
+| `REMITOS_MYSQL` | `mariadb` (del PATH) | Ruta del cliente (`mysql` también sirve) |
+| `REMITOS_DB` | `remitos_test` | Base de pruebas |
+| `REMITOS_DB_PORT` | `3307` | Puerto del servidor de pruebas |
+| `REMITOS_DB_PASS` | `testroot` | Contraseña de `root` en el servidor de pruebas |
+| `REMITOS_SIN_RED` | — | `1` omite (y lo informa) el caso que firma contra WSAA de homologación; sin esta variable, la falta de conexión con ARCA hace fallar el caso |
+
+Ejemplo en Linux: `REMITOS_MYSQL=mysql REMITOS_DB_PORT=3306 REMITOS_DB_PASS=secreto python test/correr.py`.
+
+La integración continua (`.github/workflows/ci.yml`) corre todo esto en cada cambio contra MariaDB 11.
 
 Las pruebas de interfaz ingresan con un administrador de pruebas (`admin.pruebas@intellihelp.test`) que se crea solo con la clave maestra del entorno.
 
@@ -48,8 +71,9 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, copias de seguridad, certificado, respaldo, celular |
 | `test_api.py` | Autenticación, permisos y ciclo de vida de las claves, auditoría |
 | `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA), validación de datos, cabeceras, archivos internos |
-| `test_sesion.py` | Ingreso, bloqueo por intentos, cookie y CSRF, roles, datos compartidos entre usuarios, numeración concurrente, traspaso de datos de versiones anteriores |
-| `test_cai.py` | Talonarios, numeración correlativa, C.A.I. vencido y autorización desde la aplicación |
+| `test_sesion.py` | Ingreso, freno por intentos sin revelar cuentas, cookie y CSRF, ingreso desde otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, reconfirmación limitada, segundo factor, traspaso de datos de versiones anteriores |
+| `test_cai.py` | Talonarios, numeración correlativa, autorizaciones simultáneas, inmutabilidad del autorizado, C.A.I. vencido, talonarios usados y autorización desde la aplicación |
+| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, TOTP y XML para ARCA (mismos casos en JS y PHP) |
 
 ## Agregar un caso
 

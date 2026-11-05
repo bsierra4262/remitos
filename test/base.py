@@ -21,7 +21,7 @@ SITIO = os.environ.get("REMITOS_URL", "http://127.0.0.1:8765").rstrip("/")
 CLAVE_MAESTRA_LOCAL = "ith_test_master_key_0123456789abcdef"
 API = SITIO + "/api"
 ADMIN_EMAIL = "admin.pruebas@intellihelp.test"
-ADMIN_CLAVE = "PruebasAdmin2026"
+ADMIN_CLAVE = "Brujula-Norte-58Tq"
 
 _casos = []
 
@@ -144,8 +144,13 @@ _admin_listo = False
 
 
 def asegurar_usuario(email, nombre, rol, clave):
-    """Crea (o restablece) un usuario con contraseña conocida y sin cambio pendiente."""
+    """Crea (o restablece) un usuario con contraseña conocida y sin cambio pendiente.
+
+    En la base local se borran los intentos fallidos acumulados: todas las pruebas
+    salen de 127.0.0.1 y, si no, el freno de ingresos por conexión las cortaría."""
     import http.cookiejar
+    if es_local():
+        _sql("DELETE FROM intentos")
     m = clave_maestra()
     _, lista = pedir("/usuarios.php", clave=m)
     existente = next((u for u in lista.get("usuarios", []) if u["email"] == email), None)
@@ -200,7 +205,7 @@ def limpiar_datos():
 def _sql(sentencia):
     """Ejecuta SQL en la base local de pruebas (solo para limpiar datos que la API protege)."""
     import subprocess
-    cliente = os.environ.get("REMITOS_MYSQL", "C:/Program Files/MariaDB 13.0/bin/mariadb.exe")
+    cliente = os.environ.get("REMITOS_MYSQL", "mariadb")
     subprocess.run([cliente, "-h", "127.0.0.1", "-P", os.environ.get("REMITOS_DB_PORT", "3307"), "-uroot",
                     "-p" + os.environ.get("REMITOS_DB_PASS", "testroot"), os.environ.get("REMITOS_DB", "remitos_test"),
                     "-e", sentencia], check=True, capture_output=True)

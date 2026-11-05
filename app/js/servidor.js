@@ -80,31 +80,49 @@ function avisarError(e, prefijo) {
 const esAdmin = () => !!(sesion.usuario && sesion.usuario.rol === 'admin');
 
 /* ============================ Datos compartidos ============================ */
+/** Trae todas las páginas de un listado (de a 200), para que los listados, el
+    paginador y las búsquedas trabajen siempre sobre el total y no sobre un recorte. */
+async function todasLasPaginas(ruta, campo) {
+  const primera = await api(ruta + '?por_pagina=200&pagina=1');
+  const todos = [...primera[campo]];
+  const paginas = Math.min(primera.paginas || 1, 100);
+  for (let p = 2; p <= paginas; p++) todos.push(...(await api(ruta + '?por_pagina=200&pagina=' + p))[campo]);
+  return { lista: todos, total: primera.total };
+}
+function aplicarClientes(c) {
+  datos.clientes = c.clientes;
+  if (c.completo === false)
+    toast(
+      'La agenda tiene ' + c.total + ' clientes: se muestran los primeros ' + c.clientes.length + '. Usá la búsqueda.',
+      5000,
+      'err'
+    );
+}
 async function cargarDatos() {
   const [c, r, k, a] = await Promise.all([
     api('clientes.php'),
-    api('remitos.php?por_pagina=200'),
-    api('comprobantes.php?por_pagina=200'),
+    todasLasPaginas('remitos.php', 'remitos'),
+    todasLasPaginas('comprobantes.php', 'comprobantes'),
     api('ajustes.php'),
   ]);
-  datos.clientes = c.clientes;
-  datos.remitos = r.remitos;
+  aplicarClientes(c);
+  datos.remitos = r.lista;
   datos.remitosTotal = r.total;
-  datos.comprobantes = k.comprobantes;
+  datos.comprobantes = k.lista;
   datos.comprobantesTotal = k.total;
   datos.ajustes = a.ajustes;
 }
 async function refrescarClientes() {
-  datos.clientes = (await api('clientes.php')).clientes;
+  aplicarClientes(await api('clientes.php'));
 }
 async function refrescarRemitos() {
-  const r = await api('remitos.php?por_pagina=200');
-  datos.remitos = r.remitos;
+  const r = await todasLasPaginas('remitos.php', 'remitos');
+  datos.remitos = r.lista;
   datos.remitosTotal = r.total;
 }
 async function refrescarComprobantes() {
-  const k = await api('comprobantes.php?por_pagina=200');
-  datos.comprobantes = k.comprobantes;
+  const k = await todasLasPaginas('comprobantes.php', 'comprobantes');
+  datos.comprobantes = k.lista;
   datos.comprobantesTotal = k.total;
 }
 
@@ -116,6 +134,14 @@ function actualizarEnLista(lista, item) {
 }
 
 /* ================================ Sesión ================================ */
+/** Un borrador local sin tocar por más de 7 días se descarta (contiene datos de clientes). */
+const BORRADOR_DIAS = 7;
+function borradorVencido(clave) {
+  const b = load(clave, null);
+  if (!b) return false;
+  const fechas = b.updated ? [b.updated] : Object.values(b).map(x => (x && x.updated) || 0);
+  return !fechas.some(t => Date.now() - t < BORRADOR_DIAS * 864e5);
+}
 /** Claves locales por usuario: en un equipo compartido cada uno ve su propio borrador. */
 function aplicarClavesLocales(uid) {
   const propias = { draft: 'remitos_draft_u' + uid, compDraft: 'remitos_compdraft_u' + uid };
@@ -130,12 +156,13 @@ function aplicarClavesLocales(uid) {
   localStorage.removeItem('remitos_compdraft');
   LS.draft = propias.draft;
   LS.compDraft = propias.compDraft;
+  [LS.draft, LS.compDraft].forEach(k => borradorVencido(k) && localStorage.removeItem(k));
 }
 
 async function iniciarSesionApp() {
   try {
     const j = await api('sesion.php', { sinSesion: true });
-    if (!j.usuario) return mostrarAcceso('ingreso');
+    if (!j.usuario) return mostrarAcceso(j.segundo_factor ? 'codigo' : 'ingreso');
     aplicarSesion(j);
   } catch (e) {
     if (e.status === 0)
@@ -171,12 +198,21 @@ function sesionVencida() {
   mostrarAcceso('ingreso', 'La sesión venció. Ingresá de nuevo: el borrador en curso quedó guardado en este equipo.');
 }
 
+/* Al salir se borran del equipo los borradores del usuario (tienen datos de clientes).
+   Si hay trabajo sin guardar, se pide confirmación antes de perderlo. */
 async function cerrarSesion() {
+  const pendiente = sesion.usuario && typeof dirty === 'function' && (doc.pendiente || dirty());
+  if (
+    pendiente &&
+    !confirm('Hay un remito con cambios sin guardar. Si salís, se descarta de este equipo. ¿Salir igual?')
+  )
+    return;
   try {
     await api('sesion.php', { method: 'POST', body: { accion: 'salir' } });
   } catch (e) {
     /* aunque falle la red, la sesión local se descarta */
   }
+  if (sesion.usuario) [LS.draft, LS.compDraft].forEach(k => localStorage.removeItem(k));
   location.replace(location.pathname);
 }
 
@@ -186,19 +222,22 @@ function mostrarAcceso(modo, aviso) {
   panel.hidden = false;
   document.body.classList.add('sin-sesion');
   $('#formIngreso').hidden = modo !== 'ingreso';
+  $('#formCodigo').hidden = modo !== 'codigo';
   $('#formCambio').hidden = modo !== 'cambio';
   const el = $('#accesoAviso');
   el.textContent = aviso || '';
   el.hidden = !aviso;
   setTimeout(() => {
-    const foco = modo === 'cambio' ? $('#cambioActual') : $('#ingresoEmail');
+    const foco = modo === 'cambio' ? $('#cambioActual') : modo === 'codigo' ? $('#ingresoCodigo') : $('#ingresoEmail');
     if (foco) foco.focus();
   }, 50);
 }
 function ocultarAcceso() {
   $('#acceso').hidden = true;
   document.body.classList.remove('sin-sesion');
-  ['#ingresoClave', '#cambioActual', '#cambioNueva', '#cambioRepetir'].forEach(id => ($(id).value = ''));
+  ['#ingresoClave', '#ingresoCodigo', '#cambioActual', '#cambioNueva', '#cambioRepetir'].forEach(
+    id => ($(id).value = '')
+  );
 }
 function avisoAcceso(texto) {
   const el = $('#accesoAviso');
@@ -216,10 +255,34 @@ async function enviarIngreso(e) {
   try {
     const j = await api('sesion.php', { method: 'POST', body: { accion: 'ingresar', email, clave }, sinSesion: true });
     $('#ingresoClave').value = '';
+    if (!j.usuario && j.segundo_factor) return mostrarAcceso('codigo');
     aplicarSesion(j);
   } catch (err) {
     avisoAcceso(err.message);
     $('#ingresoClave').select();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** Segundo paso del ingreso: el código TOTP de la aplicación de autenticación. */
+async function enviarCodigo(e) {
+  e.preventDefault();
+  const btn = $('#codigoEnviar');
+  const codigo = $('#ingresoCodigo').value.replace(/\D/g, '');
+  if (codigo.length !== 6) return avisoAcceso('El código tiene 6 dígitos.');
+  btn.disabled = true;
+  try {
+    const j = await api('sesion.php', {
+      method: 'POST',
+      body: { accion: 'verificar_codigo', codigo },
+      sinSesion: true,
+    });
+    aplicarSesion(j);
+  } catch (err) {
+    $('#ingresoCodigo').value = '';
+    if (err.respuesta && err.respuesta.sesion === false) mostrarAcceso('ingreso', err.message);
+    else avisoAcceso(err.message);
   } finally {
     btn.disabled = false;
   }
@@ -263,7 +326,71 @@ function abrirMiCuenta() {
   $('#cuentaRol').textContent = u.rol === 'admin' ? 'Administrador' : 'Operador';
   ['#cuentaActual', '#cuentaNueva', '#cuentaRepetir'].forEach(id => ($(id).value = ''));
   ocultar('#cuentaAlert');
+  pintarSegundoFactor();
   openPanel($('#cuentaModal'), $('#backdrop6'));
+}
+
+/* ---------------------- Verificación en dos pasos (TOTP) ---------------------- */
+function pintarSegundoFactor(enAlta = false) {
+  const activo = !!sesion.usuario.segundo_factor;
+  $('#tfaEstado').innerHTML = activo
+    ? '<b>Activa.</b> Al ingresar se pide el código de tu aplicación de autenticación.'
+    : 'Pide un código de una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, 1Password…) además de la contraseña.';
+  $('#tfaInicio').hidden = enAlta;
+  $('#tfaAlta').hidden = !enAlta;
+  $('#tfaCodigoFila').hidden = !(enAlta || activo);
+  $('#tfaIniciar').hidden = activo || enAlta;
+  $('#tfaConfirmar').hidden = !enAlta;
+  $('#tfaDesactivar').hidden = !activo;
+  ['#tfaClave', '#tfaCodigo'].forEach(id => ($(id).value = ''));
+  if (!enAlta) $('#tfaQr').innerHTML = '';
+  ocultar('#tfaAlert');
+}
+function actualizarSesion(j) {
+  sesion.usuario = j.usuario;
+  sesion.csrf = j.csrf;
+}
+async function iniciarSegundoFactor() {
+  try {
+    const j = await api('sesion.php', {
+      method: 'POST',
+      body: { accion: 'totp_iniciar', clave: $('#tfaClave').value },
+    });
+    pintarSegundoFactor(true);
+    $('#tfaSecreto').textContent = j.secreto.replace(/(.{4})/g, '$1 ').trim();
+    const q = qrcode(0, 'M');
+    q.addData(j.uri);
+    q.make();
+    $('#tfaQr').innerHTML = `<img src="${q.createDataURL(5, 2)}" alt="Código QR para la aplicación de autenticación">`;
+    $('#tfaCodigo').focus();
+  } catch (err) {
+    avisoCert('err', 'No se pudo activar', ' ' + esc(err.message), '#tfaAlert');
+  }
+}
+async function confirmarSegundoFactor() {
+  try {
+    actualizarSesion(
+      await api('sesion.php', { method: 'POST', body: { accion: 'totp_activar', codigo: $('#tfaCodigo').value } })
+    );
+    pintarSegundoFactor();
+    toast('Verificación en dos pasos activada. Se cerraron tus otras sesiones.', 3000, true);
+  } catch (err) {
+    avisoCert('err', 'El código no es correcto', ' ' + esc(err.message), '#tfaAlert');
+  }
+}
+async function desactivarSegundoFactor() {
+  try {
+    actualizarSesion(
+      await api('sesion.php', {
+        method: 'POST',
+        body: { accion: 'totp_desactivar', clave: $('#tfaClave').value, codigo: $('#tfaCodigo').value },
+      })
+    );
+    pintarSegundoFactor();
+    toast('Verificación en dos pasos desactivada', 2200, true);
+  } catch (err) {
+    avisoCert('err', 'No se pudo desactivar', ' ' + esc(err.message), '#tfaAlert');
+  }
 }
 async function guardarMiClave(e) {
   e.preventDefault();
@@ -293,10 +420,10 @@ async function renderUsuarios() {
       const estado = !u.activo
         ? '<span class="doc-state draft">Desactivado</span>'
         : u.bloqueado
-          ? '<span class="doc-state draft">Bloqueado</span>'
+          ? '<span class="doc-state draft">Ingreso frenado</span>'
           : u.debe_cambiar
             ? '<span class="doc-state saved">Contraseña temporal</span>'
-            : '<span class="doc-state auth">Activo</span>';
+            : `<span class="doc-state auth">Activo${u.segundo_factor ? ' · 2 pasos' : ''}</span>`;
       const propio = u.id === sesion.usuario.id ? ' <span class="note">(vos)</span>' : '';
       return `<div class="user-row" data-id="${escA(String(u.id))}">
         <span class="avatar">${esc(iniciales(u.nombre))}</span>
@@ -323,6 +450,8 @@ function abrirUsuario(id) {
   $('#usrActivo').checked = u ? u.activo : true;
   $('#usrActivoFila').hidden = !u;
   $('#usrAcciones').hidden = !u;
+  $('#usrDesbloquear').hidden = !(u && u.bloqueado);
+  $('#usrQuitar2fa').hidden = !(u && u.segundo_factor);
   $('#usrTemporal').hidden = true;
   ocultar('#usuarioAlert');
   openPanel($('#usuarioModal'), $('#backdrop7'));
@@ -380,6 +509,20 @@ async function restablecerUsuario() {
   }
 }
 
+async function accionUsuario(accion, pregunta, aviso) {
+  const u = usuarioEditando;
+  if (!u || !confirm(pregunta.replace('%s', u.nombre))) return;
+  try {
+    const j = await api('usuarios.php', { method: 'POST', body: { accion, id: u.id } });
+    usuarioEditando = j.usuario;
+    await renderUsuarios();
+    abrirUsuario(u.id);
+    toast(aviso, 2000, true);
+  } catch (err) {
+    avisoCert('err', 'No se pudo completar la acción', ' ' + esc(err.message), '#usuarioAlert');
+  }
+}
+
 async function eliminarUsuario() {
   const u = usuarioEditando;
   if (!u || !confirm('¿Eliminar el usuario de ' + u.nombre + '? Sus documentos se conservan.')) return;
@@ -428,37 +571,37 @@ async function traspasarDatosLocales() {
       await api('clientes.php', { method: 'POST', body: { accion: 'importar', clientes: viejos.clientes } });
       localStorage.removeItem('remitos_clientes');
     }
-    for (const d of viejos.remitos) {
-      // El número local de un borrador puede repetirse entre equipos: lo asigna el servidor.
-      const cuerpo = Object.assign({}, d, {
-        id: undefined,
-        id_local: d.id,
-        numero: d.estado === 'autorizado' ? d.numero : '',
-      });
-      try {
-        await api('remitos.php', { method: 'POST', body: cuerpo });
-      } catch (e) {
-        if (e.status === 0) throw e;
-        fallas++;
+    /* Cada documento lleva su id_local: si el traspaso se corta, el reintento no
+       duplica lo que ya subió. Solo se borra del navegador lo que el servidor
+       confirmó; lo que falló queda para revisarlo y reintentarlo. */
+    const subir = async (lista, ruta, clave, cuerpo) => {
+      const quedan = [];
+      for (const d of lista) {
+        try {
+          await api(ruta, { method: 'POST', body: cuerpo(d) });
+        } catch (e) {
+          if (e.status === 0) throw e;
+          quedan.push(Object.assign({}, d, { error_traspaso: e.message }));
+        }
       }
-    }
-    localStorage.removeItem('remitos_docs');
-    for (const d of viejos.comprobantes) {
-      const cuerpo = Object.assign({}, d, { id: undefined, numero: d.cae ? d.numero : '' });
-      try {
-        await api('comprobantes.php', { method: 'POST', body: cuerpo });
-      } catch (e) {
-        if (e.status === 0) throw e;
-        fallas++;
-      }
-    }
-    localStorage.removeItem('remitos_comprobantes');
-    localStorage.removeItem('remitos_outbox');
+      if (quedan.length) save(clave, quedan);
+      else localStorage.removeItem(clave);
+      return quedan.length;
+    };
+    // El número fiscal y el CAE los asigna el servidor: los documentos suben como borradores.
+    fallas += await subir(viejos.remitos, 'remitos.php', 'remitos_docs', d =>
+      Object.assign({}, d, { id: undefined, id_local: 'local-' + d.id, numero: '', cai: '', caiVto: '' })
+    );
+    fallas += await subir(viejos.comprobantes, 'comprobantes.php', 'remitos_comprobantes', d =>
+      Object.assign({}, d, { id: undefined, id_local: 'local-' + d.id, numero: '', cae: '', caeVto: '' })
+    );
     localStorage.removeItem('remitos_fiscal');
     await cargarDatos();
     toast(
-      fallas ? 'Datos subidos; ' + fallas + ' documentos no se pudieron subir' : 'Datos subidos al servidor',
-      3600,
+      fallas
+        ? 'Datos subidos; ' + fallas + ' documentos no se pudieron subir y quedaron en este equipo para reintentar'
+        : 'Datos subidos al servidor',
+      4200,
       fallas ? 'err' : true
     );
   } catch (e) {
@@ -469,6 +612,21 @@ async function traspasarDatosLocales() {
 /* ================================ Eventos ================================ */
 function wireServidor() {
   $('#formIngreso').addEventListener('submit', enviarIngreso);
+  $('#formCodigo').addEventListener('submit', enviarCodigo);
+  $('#codigoVolver').addEventListener('click', cerrarSesion);
+  $('#tfaIniciar').addEventListener('click', iniciarSegundoFactor);
+  $('#tfaConfirmar').addEventListener('click', confirmarSegundoFactor);
+  $('#tfaDesactivar').addEventListener('click', desactivarSegundoFactor);
+  $('#usrDesbloquear').addEventListener('click', () =>
+    accionUsuario('desbloquear', '¿Borrar los intentos de ingreso fallidos de %s?', 'Ingreso desbloqueado')
+  );
+  $('#usrQuitar2fa').addEventListener('click', () =>
+    accionUsuario(
+      'quitar_segundo_factor',
+      '¿Quitar la verificación en dos pasos de %s? Hacelo solo si perdió el teléfono.',
+      'Verificación en dos pasos quitada'
+    )
+  );
   $('#formCambio').addEventListener('submit', enviarCambio);
   $('#cambioSalir').addEventListener('click', cerrarSesion);
   $('#btnSalir').addEventListener('click', cerrarSesion);

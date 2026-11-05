@@ -7,11 +7,9 @@
 <meta name="description" content="Remitos, facturas, recibos y notas de crédito y débito de Intellihelp.">
 <meta name="robots" content="noindex, nofollow">
 <title>Remitos y Comprobantes · Intellihelp</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Saira:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/fuentes.css?v=220">
 <link rel="icon" href="assets/logos/favicon.png">
-<link rel="stylesheet" href="css/styles.css?v=210">
+<link rel="stylesheet" href="css/styles.css?v=220">
 </head>
 <body data-view="inicio" class="sin-sesion">
 <div class="app">
@@ -101,6 +99,8 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span>PDF</span></button>
         <button class="btn ghost" id="tbCompTest" title="Imprimir una prueba con datos ficticios">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/></svg><span>Prueba</span></button>
+        <button class="btn ghost" id="tbCompEmitir" hidden title="Guarda el comprobante y solicita el CAE a ARCA">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span>Emitir CAE</span></button>
         <button class="btn primary" id="tbCompImprimir" title="Imprimir (Ctrl+P)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg><span>Imprimir</span></button>
       </div>
@@ -135,6 +135,7 @@
     <!-- ================================ Remito ================================ -->
     <section class="view view-remito" id="viewRemito">
       <div class="editor" id="editor">
+        <div class="doc-aviso" id="remBloqueado" hidden>Remito autorizado: el número y el C.A.I. ya fueron asignados y sus datos no se modifican. Para un cambio, emití un remito nuevo.</div>
         <div class="section">
           <h3>Remito</h3>
           <div class="section-body">
@@ -146,13 +147,17 @@
                 </div>
               </div>
               <div class="field"><label for="remPv">Punto de venta</label><input id="remPv" readonly title="Se define en Configuración → Conexión con ARCA"></div>
-              <div class="field"><label for="remNumero">Nº de remito <span class="note-auto">correlativo</span></label><input id="remNumero" data-path="numero" inputmode="numeric" pattern="[0-9]{1,8}(-[0-9]{8})?" maxlength="14" placeholder="Se asigna al guardar"></div>
-              <div class="field"><label for="remCai">C.A.I.</label><input id="remCai" data-path="cai" inputmode="numeric" pattern="[0-9]{14}" maxlength="14" placeholder="14 dígitos"></div>
-              <div class="field"><label for="remCaiVto">Vencimiento del C.A.I.</label><input type="date" id="remCaiVto" data-path="caiVto"></div>
+              <div class="field"><label for="remNumero">Nº de remito <span class="note-auto">lo asigna «Autorizar»</span></label><input id="remNumero" readonly placeholder="Sin autorizar" title="El número fiscal lo asigna la autorización contra el talonario vigente"></div>
+              <div class="field"><label for="remCai">C.A.I.</label><input id="remCai" readonly placeholder="Lo asigna «Autorizar»" title="El C.A.I. sale del talonario cargado en el panel"></div>
+              <div class="field"><label for="remCaiVto">Vencimiento del C.A.I.</label><input id="remCaiVto" readonly placeholder="—"></div>
               <div class="field full"><label for="remCopias">Ejemplares a imprimir</label><select id="remCopias">
                 <option value="2">Original y duplicado (RG 1415)</option>
                 <option value="1">Solo original</option>
               </select></div>
+            </div>
+            <div class="switch" id="remFacturadoFila" hidden>
+              <label for="remFacturado">Facturado<span class="hint">Marcalo cuando el remito ya tiene su factura: sale de «pendientes de facturar».</span></label>
+              <label class="toggle"><input type="checkbox" id="remFacturado"><span class="track"></span></label>
             </div>
             <p class="hint">El número, el C.A.I. y su vencimiento se imprimen en el documento completo. Con un talonario cargado, <b>Autorizar</b> los completa solos.</p>
           </div>
@@ -418,8 +423,8 @@
   </div>
   <div class="calib-body"><div id="savedList"></div></div>
   <div class="calib-foot">
-    <button class="btn sm" id="btnExport">Exportar copia de seguridad</button>
-    <button class="btn sm" id="btnImport">Importar</button>
+    <button class="btn sm solo-admin" id="btnExport" title="Descarga remitos, comprobantes y clientes (queda registrado en la auditoría)">Exportar copia de seguridad</button>
+    <button class="btn sm solo-admin" id="btnImport">Importar</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
   </div>
 </aside>
@@ -513,13 +518,34 @@
     <p class="sub-tit">Cambiar la contraseña</p>
     <div class="grid">
       <div class="field full"><label for="cuentaActual">Contraseña actual</label><input type="password" id="cuentaActual" placeholder="Tu contraseña actual" autocomplete="current-password" required></div>
-      <div class="field full"><label for="cuentaNueva">Contraseña nueva</label><input type="password" id="cuentaNueva" placeholder="Al menos 10 caracteres" autocomplete="new-password" minlength="10" required></div>
-      <div class="field full"><label for="cuentaRepetir">Repetir la contraseña nueva</label><input type="password" id="cuentaRepetir" placeholder="Repetila" autocomplete="new-password" minlength="10" required></div>
+      <div class="field full"><label for="cuentaNueva">Contraseña nueva</label><input type="password" id="cuentaNueva" placeholder="Al menos 12 caracteres" autocomplete="new-password" minlength="12" required></div>
+      <div class="field full"><label for="cuentaRepetir">Repetir la contraseña nueva</label><input type="password" id="cuentaRepetir" placeholder="Repetila" autocomplete="new-password" minlength="12" required></div>
     </div>
-    <p class="hint">Al menos 10 caracteres, con letras y números.</p>
+    <p class="hint">Al menos 12 caracteres, con letras y números, sin palabras comunes ni tu nombre de usuario. Al cambiarla se cierran tus otras sesiones.</p>
     <div class="cfg-alert" id="cuentaAlert" hidden></div>
     <button class="btn primary mt-sm" type="submit">Cambiar contraseña</button>
   </form>
+  <div class="calib-body cuenta-2fa" id="cuenta2fa">
+    <p class="sub-tit">Verificación en dos pasos</p>
+    <p class="hint" id="tfaEstado">Pide un código de una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, 1Password…) además de la contraseña.</p>
+    <div class="grid" id="tfaInicio">
+      <div class="field full"><label for="tfaClave">Tu contraseña</label><input type="password" id="tfaClave" placeholder="Para confirmar que sos vos" autocomplete="current-password"></div>
+    </div>
+    <div id="tfaAlta" hidden>
+      <p class="hint">Escaneá el código con la aplicación de autenticación o cargá la clave a mano. Después escribí el código de 6 dígitos que muestra.</p>
+      <div class="tfa-qr" id="tfaQr"></div>
+      <code class="tfa-secreto" id="tfaSecreto"></code>
+    </div>
+    <div class="grid" id="tfaCodigoFila" hidden>
+      <div class="field full"><label for="tfaCodigo">Código de 6 dígitos</label><input id="tfaCodigo" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>
+    </div>
+    <div class="cfg-alert" id="tfaAlert" hidden></div>
+    <div class="inline-row">
+      <button class="btn sm" type="button" id="tfaIniciar">Activar</button>
+      <button class="btn sm primary" type="button" id="tfaConfirmar" hidden>Confirmar código</button>
+      <button class="btn sm danger" type="button" id="tfaDesactivar" hidden>Desactivar</button>
+    </div>
+  </div>
 </aside>
 
 <!-- ================================= Usuario ================================= -->
@@ -547,6 +573,8 @@
     <div class="cfg-alert" id="usuarioAlert" hidden></div>
     <div class="usr-acciones" id="usrAcciones">
       <button class="btn sm" type="button" id="usrRestablecer">Generar contraseña temporal</button>
+      <button class="btn sm" type="button" id="usrDesbloquear" hidden>Desbloquear ingreso</button>
+      <button class="btn sm" type="button" id="usrQuitar2fa" hidden>Quitar verificación en dos pasos</button>
       <button class="btn sm danger" type="button" id="usrEliminar">Eliminar usuario</button>
     </div>
   </form>
@@ -572,13 +600,21 @@
       <button class="btn primary block" type="submit" id="ingresoEnviar">Ingresar</button>
       <p class="hint">¿Olvidaste la contraseña? Pedile a un administrador que genere una temporal.</p>
     </form>
+    <form class="acceso-form" id="formCodigo" autocomplete="off" hidden>
+      <h2>Verificación en dos pasos</h2>
+      <p class="muted">Escribí el código de 6 dígitos de tu aplicación de autenticación.</p>
+      <div class="field"><label for="ingresoCodigo">Código</label><input id="ingresoCodigo" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required></div>
+      <button class="btn primary block" type="submit" id="codigoEnviar">Verificar</button>
+      <button class="btn ghost block" type="button" id="codigoVolver">Volver</button>
+      <p class="hint">¿Perdiste el teléfono? Un administrador puede quitarte la verificación en dos pasos.</p>
+    </form>
     <form class="acceso-form" id="formCambio" autocomplete="off" hidden>
       <h2>Elegí tu contraseña</h2>
       <p class="muted">Estás usando una contraseña temporal. Reemplazala por una propia para continuar.</p>
       <div class="field"><label for="cambioActual">Contraseña temporal</label><input type="password" id="cambioActual" placeholder="La que te dieron" autocomplete="current-password" required></div>
-      <div class="field"><label for="cambioNueva">Contraseña nueva</label><input type="password" id="cambioNueva" placeholder="Al menos 10 caracteres" autocomplete="new-password" minlength="10" required></div>
-      <div class="field"><label for="cambioRepetir">Repetir la contraseña nueva</label><input type="password" id="cambioRepetir" placeholder="Repetila" autocomplete="new-password" minlength="10" required></div>
-      <p class="hint">Al menos 10 caracteres, con letras y números.</p>
+      <div class="field"><label for="cambioNueva">Contraseña nueva</label><input type="password" id="cambioNueva" placeholder="Al menos 12 caracteres" autocomplete="new-password" minlength="12" required></div>
+      <div class="field"><label for="cambioRepetir">Repetir la contraseña nueva</label><input type="password" id="cambioRepetir" placeholder="Repetila" autocomplete="new-password" minlength="12" required></div>
+      <p class="hint">Al menos 12 caracteres, con letras y números, sin palabras comunes ni tu nombre de usuario.</p>
       <button class="btn primary block" type="submit" id="cambioEnviar">Guardar y continuar</button>
       <button class="btn ghost block" type="button" id="cambioSalir">Salir</button>
     </form>
@@ -588,8 +624,10 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="js/config.js?v=210"></script>
-<script src="js/app.js?v=210"></script>
-<script src="js/servidor.js?v=210"></script>
+<script src="js/config.js?v=220"></script>
+<script src="js/calculos.js?v=220"></script>
+<script src="js/lib/qrcode.js?v=220"></script>
+<script src="js/app.js?v=220"></script>
+<script src="js/servidor.js?v=220"></script>
 </body>
 </html>

@@ -8,6 +8,7 @@
  *
  *   GET    claves.php?accion=listar       Claves y resumen de uso.
  *   GET    claves.php?accion=registro     Auditoría paginada (pagina, por_pagina, categoria).
+ *   GET    claves.php?accion=integridad   Verifica la cadena de hashes de la auditoría.
  *   POST   claves.php {nombre, permisos}  Crea una clave (se devuelve completa una sola vez).
  *   POST   claves.php {id, activa}        Activa o desactiva una clave.
  *   DELETE claves.php?id=N                Elimina una clave.
@@ -56,6 +57,16 @@ function key_name(PDO $pdo, int $id): ?string
 $method = api_method();
 
 if ($method === 'GET') {
+    if (($_GET['accion'] ?? '') === 'integridad') {
+        $result = audit_verify($pdo);
+        if (!$result['ok']) {
+            audit_event($pdo, 'Integridad de la auditoría: falla detectada', [
+                'categoria' => 'sistema', 'nivel' => 'error', 'detalle' => json_encode($result['falla'], JSON_UNESCAPED_UNICODE),
+            ]);
+        }
+        api_respond(200, ['ok' => true, 'integridad' => $result, 'retencion_dias' => AUDIT_RETENTION_DAYS]);
+    }
+
     if (($_GET['accion'] ?? 'listar') === 'registro') {
         $perPage = max(5, min(100, (int) ($_GET['por_pagina'] ?? 25)));
         $page = max(1, (int) ($_GET['pagina'] ?? 1));
@@ -77,7 +88,7 @@ if ($method === 'GET') {
         $offset = ($page - 1) * $perPage;
 
         $st = $pdo->prepare(
-            "SELECT categoria, nivel, origen, clave, accion, detalle, recurso, estado, ip, fecha
+            "SELECT id, categoria, nivel, origen, usuario_id, clave, accion, detalle, recurso, estado, ip, fecha
                FROM api_log $where ORDER BY id DESC LIMIT $perPage OFFSET $offset"
         );
         $st->execute($params);
@@ -128,10 +139,10 @@ if ($method === 'POST') {
         if ($name === null) {
             api_error(404, 'No existe esa clave');
         }
-        $active = !empty($body['activa']);
+        $active = api_bool($body['activa']);
         $pdo->prepare('UPDATE api_keys SET activa = ? WHERE id = ?')->execute([$active ? 1 : 0, $id]);
         audit_event($pdo, ($active ? 'Clave activada: ' : 'Clave desactivada: ') . $name, [
-            'categoria' => 'clave', 'clave' => $auth['nombre'],
+            'categoria' => 'clave',
         ]);
         api_respond(200, ['ok' => true, 'id' => $id, 'activa' => $active]);
     }
@@ -174,7 +185,7 @@ if ($method === 'POST') {
     $newId = (int) $pdo->lastInsertId();
 
     audit_event($pdo, 'Clave creada: ' . $name, [
-        'categoria' => 'clave', 'clave' => $auth['nombre'], 'detalle' => 'permisos: ' . implode(', ', $permissions),
+        'categoria' => 'clave', 'detalle' => 'permisos: ' . implode(', ', $permissions),
     ]);
     api_respond(201, [
         'ok' => true,
@@ -192,7 +203,7 @@ if ($method === 'DELETE') {
         api_error(404, 'No existe esa clave');
     }
     $pdo->prepare('DELETE FROM api_keys WHERE id = ?')->execute([$id]);
-    audit_event($pdo, 'Clave eliminada: ' . $name, ['categoria' => 'clave', 'clave' => $auth['nombre']]);
+    audit_event($pdo, 'Clave eliminada: ' . $name, ['categoria' => 'clave']);
     api_respond(200, ['ok' => true, 'id' => $id]);
 }
 

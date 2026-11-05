@@ -67,12 +67,33 @@ def ctrl_s_por_vista():
     return _con_pagina(prueba)
 
 
-@caso("Después de un remito autorizado el número sigue la correlación")
-def numero_tras_autorizado():
+@caso("Un borrador no muestra número fiscal ni C.A.I. y se imprime SIN AUTORIZAR; el autorizado queda de solo lectura")
+def numero_solo_autorizado():
     def prueba(pg, _):
-        n = pg.evaluate("""() => { datos.remitos = [{ id: 'a1', numero: '00001-00000041', cliente: {}, items: [] }];
-                                   return nextRemitoNumero(); }""")
-        return n == "00000042", f"siguiente={n}"
+        ir_a(pg, "remito")
+        modo_documento(pg, "full")
+        r = pg.evaluate("""() => {
+            nuevo();
+            doc.referencia = 7; doc.numero = '00000042'; doc.cai = '12345678901234';
+            syncFiscalUI(); renderPreview();
+            const textos = () => [...document.querySelectorAll('#template div')].map(e => e.textContent.trim());
+            const borrador = { numero: document.querySelector('#remNumero').value, cai: document.querySelector('#remCai').value,
+                               sello: textos().includes('SIN AUTORIZAR'), nro42: textos().some(t => t.includes('00000042')),
+                               editable: !document.querySelector('[data-path="cliente.razonSocial"]').disabled };
+            doc = Object.assign(emptyRemito(), { id: 'a1', estado: 'autorizado', numero: '00001-00000041',
+                                                 cai: '12345678901234', caiVto: '31/12/2027', referencia: 7 });
+            formFromDoc(); syncFiscalUI(); renderPreview();
+            const autorizado = { numero: document.querySelector('#remNumero').value,
+                                 sello: textos().includes('AUTORIZADO'),
+                                 bloqueado: document.querySelector('[data-path="cliente.razonSocial"]').disabled,
+                                 aviso: !document.querySelector('#remBloqueado').hidden };
+            doc = emptyRemito(); formFromDoc(); syncFiscalUI();
+            return { borrador, autorizado, liberado: !document.querySelector('[data-path="cliente.razonSocial"]').disabled };
+        }""")
+        b, a = r["borrador"], r["autorizado"]
+        ok = (b["numero"] == "Borrador 7" and b["cai"] == "" and b["sello"] and not b["nro42"] and b["editable"]
+              and a["numero"] == "00001-00000041" and a["sello"] and a["bloqueado"] and a["aviso"] and r["liberado"])
+        return ok, f"{r}"
     return _con_pagina(prueba)
 
 
@@ -99,19 +120,62 @@ def ajuste_no_toca_fabrica():
     return _con_pagina(prueba)
 
 
-@caso("El CAE de una factura no aparece en un recibo")
+@caso("El CAE no se carga a mano; sin CAE se imprime SIN AUTORIZAR y con CAE lleva el QR fiscal")
 def cae_por_comprobante():
     def prueba(pg, _):
         ir_a(pg, "factura")
-        pg.fill("#compCae", "12345678901234")
-        pg.wait_for_timeout(500)
-        ir_a(pg, "recibo")
-        cae_recibo = pg.input_value("#compCae")
-        borrador = pg.evaluate("() => !!document.querySelector('#compPage .cmp-borrador')")
+        r = pg.evaluate("""() => {
+            const real = clone(compDoc);
+            compDoc.letra = 'A'; renderComprobanteEditor(); renderComprobante();
+            const sin = { soloLectura: document.querySelector('#compCae').readOnly,
+                          marca: (document.querySelector('#compPage .cmp-borrador') || {}).textContent || '',
+                          qr: !!document.querySelector('#compPage .cmp-qr img') };
+            Object.assign(compDoc, { estado: 'autorizado', cae: '74123456789012', caeVto: '14/11/2026', numero: '00000015',
+                                     items: [{ descripcion: 'x', cantidad: '1', precio: '1.000' }] });
+            renderComprobanteEditor(); renderComprobante();
+            const con = { marca: !!document.querySelector('#compPage .cmp-borrador'),
+                          qr: !!document.querySelector('#compPage .cmp-qr img'),
+                          bloqueado: document.querySelector('[data-cpath="cliente.razonSocial"]').disabled };
+            compDoc = real; renderComprobanteEditor(); renderComprobante();
+            return { sin, con };
+        }""")
+        ok = (r["sin"]["soloLectura"] and r["sin"]["marca"] == "SIN AUTORIZAR" and not r["sin"]["qr"]
+              and not r["con"]["marca"] and r["con"]["qr"] and r["con"]["bloqueado"])
+        return ok, f"{r}"
+    return _con_pagina(prueba)
+
+
+@caso("Los importes en formato argentino dan el total correcto en la factura")
+def importes_formato_argentino():
+    def prueba(pg, _):
         ir_a(pg, "factura")
-        cae_factura = pg.input_value("#compCae")
-        ok = cae_recibo == "" and borrador and cae_factura == "12345678901234"
-        return ok, f"recibo={cae_recibo!r} borrador={borrador} factura={cae_factura!r}"
+        total = pg.evaluate("""() => {
+            const real = clone(compDoc);
+            Object.assign(compDoc, { letra: 'A', alicuota: '21', items: [{ descripcion: 'x', cantidad: '2', precio: '1.234,56' }] });
+            renderComprobante();
+            const t = document.querySelector('#compPage .cmp-totes .row.total .n').textContent;
+            compDoc = real; renderComprobante();
+            return t;
+        }""")
+        return "2.987,64" in total, f"total={total!r}"
+    return _con_pagina(prueba)
+
+
+@caso("Guardar dos veces seguidas un comprobante crea uno solo")
+def comprobante_sin_doble_guardado():
+    def prueba(pg, _):
+        ir_a(pg, "factura")
+        r = pg.evaluate("""async () => {
+            nuevoComprobante('factura');
+            compDoc.letra = 'X';
+            compDoc.cliente.razonSocial = 'DOBLE GUARDADO';
+            compDoc.items = [{ descripcion: 'x', cantidad: '1', precio: '10' }];
+            await Promise.all([guardarComprobante(), guardarComprobante()]);
+            const lista = (await api('comprobantes.php?buscar=DOBLE%20GUARDADO')).comprobantes;
+            for (const c of lista) await api('comprobantes.php?id=' + c.id, { method: 'DELETE' });
+            return { creados: lista.length };
+        }""")
+        return r["creados"] == 1, f"{r}"
     return _con_pagina(prueba)
 
 

@@ -10,10 +10,14 @@
  *                                                         (admin) Valida y guarda cifrado.
  *   POST   arca.php {accion: 'probar', ambiente}          (crear) Verifica servidores y acceso.
  *   POST   arca.php {accion: 'quitar', ambiente, confirmacion?}  (admin) Elimina las credenciales.
- *   DELETE arca.php?ambiente=…                            (admin) Ídem, con clave de API.
+ *   DELETE arca.php?ambiente=…                            (clave maestra) Ídem, para integraciones.
  *
  * Con sesión de usuario, cargar o quitar el certificado exige reconfirmar la
- * contraseña en «confirmacion».
+ * contraseña en «confirmacion»; cinco intentos fallidos cierran la sesión. El
+ * método DELETE es solo para la clave maestra: la aplicación usa la acción 'quitar'.
+ *
+ * Si no se indica `cuit`, el certificado debe corresponder al CUIT del emisor
+ * configurado en los ajustes (cuando hay uno).
  *
  * Las respuestas nunca incluyen el certificado ni la clave: solo sus datos
  * públicos (titular, CUIT, vigencia y huella SHA-256). La carga exige rol de
@@ -35,16 +39,8 @@ $pdo = api_db($config);
  */
 function arca_confirm_identity(PDO $pdo, array $auth, mixed $password): void
 {
-    if (!isset($auth['usuario'])) {
-        return;
-    }
-    $st = $pdo->prepare('SELECT clave_hash FROM usuarios WHERE id = ?');
-    $st->execute([$auth['usuario']['id']]);
-    if (!is_string($password) || !password_verify($password, (string) $st->fetchColumn())) {
-        audit_event($pdo, 'Confirmación de identidad rechazada (certificado de ARCA)', [
-            'categoria' => 'arca', 'nivel' => 'error', 'clave' => $auth['nombre'], 'estado' => 403,
-        ]);
-        api_error(403, 'La contraseña de confirmación no es correcta');
+    if (isset($auth['usuario'])) {
+        user_confirm_password($pdo, $auth['usuario'], $password, 'certificado de ARCA');
     }
 }
 
@@ -88,13 +84,13 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
             );
         } catch (InvalidArgumentException $e) {
             audit_event($pdo, 'Certificado de ARCA rechazado (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
-                'categoria' => 'arca', 'nivel' => 'error', 'clave' => $auth['nombre'],
-                'detalle' => $e->getMessage(), 'estado' => 422,
+                'categoria' => 'arca', 'nivel' => 'error', 'detalle' => $e->getMessage(), 'estado' => 422,
             ]);
             api_error(422, $e->getMessage());
         }
 
-        $expectedCuit = preg_replace('/\D/', '', (string) ($body['cuit'] ?? ''));
+        $expectedCuit = preg_replace('/\D/', '', (string) ($body['cuit'] ?? ''))
+            ?: preg_replace('/\D/', '', (string) (settings_get($pdo, 'emisor')['cuit'] ?? ''));
         if ($expectedCuit !== '' && $expectedCuit !== $data['cuit']) {
             api_error(422, 'El certificado pertenece al CUIT ' . $data['cuit'] . ', no al ' . $expectedCuit);
         }
@@ -102,7 +98,6 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
         arca_save_credentials($pdo, $config, $environment, $data, $auth['nombre']);
         audit_event($pdo, 'Certificado de ARCA cargado (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
             'categoria' => 'arca',
-            'clave' => $auth['nombre'],
             'detalle' => 'CUIT ' . $data['cuit'] . ' · vence ' . date('d/m/Y', (int) strtotime($data['valido_hasta']))
                 . ' · huella ' . substr($data['huella'], 0, 16) . '…',
         ]);
@@ -123,14 +118,13 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
             $ticket = arca_ticket($pdo, $config, $environment);
         } catch (ArcaException $e) {
             audit_event($pdo, 'Conexión con ARCA fallida (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
-                'categoria' => 'arca', 'nivel' => 'error', 'clave' => $auth['nombre'],
-                'detalle' => $e->getMessage(), 'estado' => 502,
+                'categoria' => 'arca', 'nivel' => 'error', 'detalle' => $e->getMessage(), 'estado' => 502,
             ]);
             api_error(502, $e->getMessage());
         }
 
         audit_event($pdo, 'Conexión con ARCA verificada (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
-            'categoria' => 'arca', 'clave' => $auth['nombre'], 'detalle' => 'CUIT ' . $ticket['cuit'],
+            'categoria' => 'arca', 'detalle' => 'CUIT ' . $ticket['cuit'],
         ]);
         api_respond(200, [
             'ok' => true,
@@ -146,13 +140,16 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
 
 if ($method === 'DELETE' || ($method === 'POST' && ($body['accion'] ?? '') === 'quitar')) {
     $auth = auth_require($pdo, $config, 'admin', 'arca');
+    if ($method === 'DELETE' && isset($auth['usuario'])) {
+        api_error(405, 'Con sesión de usuario, el certificado se quita con POST {accion: "quitar"} y la contraseña de confirmación');
+    }
     arca_confirm_identity($pdo, $auth, $body['confirmacion'] ?? null);
     $environment = arca_environment_param($method === 'DELETE' ? ($_GET['ambiente'] ?? null) : ($body['ambiente'] ?? null));
     if (!arca_delete_credentials($pdo, $environment)) {
         api_error(404, 'No hay credenciales cargadas para ' . ARCA_ENVIRONMENT_NAMES[$environment]);
     }
     audit_event($pdo, 'Certificado de ARCA eliminado (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
-        'categoria' => 'arca', 'clave' => $auth['nombre'],
+        'categoria' => 'arca',
     ]);
     api_respond(200, ['ok' => true, 'ambiente' => $environment]);
 }

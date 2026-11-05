@@ -4,7 +4,8 @@
  * Remitos y Comprobantes — Intellihelp
  *
  * Estado de seguimiento (solo lectura): cuántos remitos hay, cuántos son del día
- * y cuáles quedan pendientes de facturar. No expone importes, ítems, CUIT ni
+ * y cuáles quedan pendientes de facturar (remitos autorizados que todavía no se
+ * marcaron como facturados desde la aplicación o con remitos.php). No expone importes, ítems, CUIT ni
  * domicilios, por lo que puede consultarse desde tableros o integraciones.
  *
  *   GET estado.php                 (leer) Resumen y pendientes en JSON.
@@ -24,15 +25,14 @@ if (api_method() !== 'GET') {
 $pdo = api_db($config);
 auth_require($pdo, $config, 'leer', 'estado');
 
-$today = date('d/m/Y');
 $total = (int) $pdo->query('SELECT COUNT(*) FROM remitos')->fetchColumn();
-$st = $pdo->prepare('SELECT COUNT(*) FROM remitos WHERE fecha = ?');
-$st->execute([$today]);
-$ofToday = (int) $st->fetchColumn();
-$pendingCount = (int) $pdo->query('SELECT COUNT(*) FROM remitos WHERE facturado = 0')->fetchColumn();
+$authorized = (int) $pdo->query("SELECT COUNT(*) FROM remitos WHERE estado = 'autorizado'")->fetchColumn();
+$ofToday = (int) $pdo->query('SELECT COUNT(*) FROM remitos WHERE fecha_emision = CURDATE()')->fetchColumn();
+$pendingWhere = "estado = 'autorizado' AND facturado = 0";
+$pendingCount = (int) $pdo->query("SELECT COUNT(*) FROM remitos WHERE $pendingWhere")->fetchColumn();
 
 $rows = $pdo->query(
-    'SELECT numero, fecha, cliente FROM remitos WHERE facturado = 0 ORDER BY updated DESC LIMIT 50'
+    "SELECT numero, fecha, cliente FROM remitos WHERE $pendingWhere ORDER BY fecha_emision, numero_int LIMIT 50"
 )->fetchAll();
 
 $now = new DateTimeImmutable('today');
@@ -41,7 +41,7 @@ foreach ($rows as $row) {
     $date = DateTimeImmutable::createFromFormat('!d/m/Y', (string) $row['fecha']);
     $pending[] = [
         'tipo' => 'remito',
-        'numero' => $row['numero'] ?: '(sin número)',
+        'numero' => (string) $row['numero'],
         'fecha' => $row['fecha'],
         'cliente' => $row['cliente'] ?: '(sin cliente)',
         'estado' => 'Pendiente de facturar',
@@ -54,7 +54,7 @@ $generated = date('d/m/Y H:i');
 if (($_GET['formato'] ?? '') === 'texto') {
     header('Content-Type: text/plain; charset=utf-8');
     $text = "ESTADO INTELLIHELP · {$generated}\n"
-        . "Remitos totales: {$total} · De hoy: {$ofToday} · Pendientes de facturar: {$pendingCount}\n";
+        . "Remitos totales: {$total} · Autorizados: {$authorized} · De hoy: {$ofToday} · Pendientes de facturar: {$pendingCount}\n";
     if ($pending) {
         $text .= "\nPendientes de facturar:\n";
         foreach (array_slice($pending, 0, 15) as $p) {
@@ -79,6 +79,7 @@ api_respond(200, [
     'aviso' => 'Solo seguimiento. No incluye importes ni datos confidenciales.',
     'resumen' => [
         'remitos_totales' => $total,
+        'remitos_autorizados' => $authorized,
         'remitos_de_hoy' => $ofToday,
         'pendientes_facturar' => $pendingCount,
     ],

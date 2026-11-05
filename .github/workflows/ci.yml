@@ -1,0 +1,118 @@
+# Remitos y Comprobantes — Intellihelp
+# Integración continua: estilo, sintaxis, dependencias, pruebas unitarias y la
+# batería completa (API e interfaz) contra MariaDB y php -S.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  calidad:
+    name: Estilo, sintaxis y dependencias
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, openssl, curl, dom, pdo_mysql
+          tools: php-cs-fixer:3.64
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Sintaxis PHP
+        run: find app/api test -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Estilo PHP (PSR-12)
+        run: php-cs-fixer fix --dry-run --diff --config=.php-cs-fixer.dist.php
+
+      - name: Estilo JavaScript y CSS (Prettier)
+        run: npx --yes prettier@3.3.3 --check "app/**/*.{js,css}" "test/**/*.js"
+
+      - name: Sintaxis JavaScript
+        run: for f in app/js/*.js test/unitarias/*.js; do node --check "$f"; done
+
+      - name: Integridad de las dependencias incluidas
+        run: sha256sum -c test/dependencias.sha256
+
+      - name: Sin secretos en el repositorio
+        run: |
+          ! git ls-files | grep -E '(^|/)config\.php$|\.(key|pem|p12|crt)$'
+          ! git grep -nE '^-----BEGIN (RSA |EC |ENCRYPTED )?PRIVATE KEY-----$' -- ':!test/*'
+
+      - name: Pruebas unitarias (cálculos de la interfaz y del servidor)
+        run: |
+          node --test test/unitarias/calculos.test.js
+          php test/unitarias/importes.test.php
+
+  pruebas:
+    name: Batería completa (API e interfaz)
+    runs-on: ubuntu-24.04
+    needs: calidad
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: testroot
+          MARIADB_DATABASE: remitos_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      REMITOS_CONFIG: /tmp/config.test.php
+      REMITOS_MYSQL: mariadb
+      REMITOS_DB_PORT: '3306'
+      REMITOS_DB_PASS: testroot
+      REMITOS_DB: remitos_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, openssl, curl, dom, pdo_mysql
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Dependencias de las pruebas
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq mariadb-client
+          pip install playwright==1.47.0 pymupdf==1.24.10 cryptography==43.0.1
+          python -m playwright install --with-deps chromium
+
+      - name: Configuración y esquema de pruebas
+        run: |
+          cat > /tmp/config.test.php <<'PHP'
+          <?php
+          return [
+              'app_url' => 'http://127.0.0.1:8765',
+              'db' => ['host' => '127.0.0.1', 'port' => 3306, 'name' => 'remitos_test', 'user' => 'root', 'pass' => 'testroot'],
+              'master_key_hash' => hash('sha256', 'ith_test_master_key_0123456789abcdef'),
+              'app_key' => str_repeat('ab', 32),
+          ];
+          PHP
+          php app/api/cli/migrar.php
+
+      - name: Servidor
+        run: |
+          php -S 127.0.0.1:8765 -t app > /tmp/php-server.log 2>&1 &
+          for i in $(seq 1 20); do curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null && break; sleep 1; done
+
+      - name: Pruebas
+        run: python test/correr.py
+
+      - name: Errores del servidor
+        if: always()
+        run: |
+          ! grep -E 'PHP (Fatal|Warning|Notice|Deprecated)' /tmp/php-server.log

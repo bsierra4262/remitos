@@ -2413,6 +2413,38 @@ body.es-admin .solo-operador {
   color: #161922;
   font-size: 2.8mm;
 }
+.cmp-qr img {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+.cmp-recibo .big-total {
+  text-align: right;
+  margin-top: 8mm;
+}
+.cmp-items .c-cod {
+  width: 13mm;
+}
+.cmp-items .c-cant {
+  width: 16mm;
+}
+.cmp-items .c-um {
+  width: 18mm;
+}
+.cmp-items .c-precio {
+  width: 26mm;
+}
+.cmp-items .c-bonif {
+  width: 17mm;
+}
+.cmp-items .c-sub {
+  width: 28mm;
+}
+.cmp-totes .row.transparencia {
+  width: 110mm;
+  font-size: 2.3mm;
+  color: #5b5769;
+}
 .cmp-qr {
   width: 22mm;
   height: 22mm;
@@ -2430,9 +2462,9 @@ body.es-admin .solo-operador {
   top: 44%;
   left: 50%;
   transform: translate(-50%, -50%) rotate(-24deg);
-  font-size: 24mm;
+  font-size: 19mm;
   font-weight: 800;
-  color: rgba(154, 34, 34, 0.08);
+  color: rgba(154, 34, 34, 0.13);
   letter-spacing: 0.04em;
   pointer-events: none;
   white-space: nowrap;
@@ -2816,4 +2848,53 @@ body.es-admin .solo-operador {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* ======================= Documentos de solo lectura ======================= */
+.doc-aviso {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid #b9dcc4;
+  border-radius: 10px;
+  background: #eef8f1;
+  color: #1f5e33;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.doc-bloqueado input:disabled,
+.doc-bloqueado select:disabled,
+.doc-bloqueado textarea:disabled {
+  background: #f6f4f9;
+  color: #3b3650;
+  cursor: not-allowed;
+}
+.btn.cargando {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* ===================== Verificación en dos pasos (TOTP) ===================== */
+.cuenta-2fa {
+  border-top: 1px solid var(--line, #e6e1ee);
+}
+.tfa-qr {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+}
+.tfa-qr img {
+  width: 180px;
+  height: 180px;
+  image-rendering: pixelated;
+  border: 1px solid #e6e1ee;
+  border-radius: 8px;
+  background: #fff;
+}
+.tfa-secreto {
+  display: block;
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  word-break: break-all;
+  margin-bottom: 10px;
 }

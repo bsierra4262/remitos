@@ -1,0 +1,56 @@
+{
+  "_descripcion": "Casos compartidos por las pruebas unitarias de app/js/calculos.js y api/lib/importes.php: los dos tienen que dar exactamente lo mismo.",
+  "numeros": [
+    ["1.234,56", 1234.56],
+    ["1234,56", 1234.56],
+    ["1234.56", 1234.56],
+    ["1.500", 1500],
+    ["1.500.000", 1500000],
+    ["0,5", 0.5],
+    ["$ 2.000,00", 2000],
+    ["", 0],
+    ["12a", null],
+    ["1,2,3", null],
+    ["-5", null]
+  ],
+  "totales": [
+    {
+      "nombre": "Factura A con miles y coma",
+      "doc": { "letra": "A", "alicuota": "21", "items": [{ "cantidad": "2", "precio": "1.234,56" }] },
+      "centavos": { "neto": 246912, "iva": 51852, "total": 298764 }
+    },
+    {
+      "nombre": "Factura B: IVA incluido, se discrimina solo para ARCA",
+      "doc": { "letra": "B", "alicuota": "21", "items": [{ "cantidad": "1", "precio": "121" }] },
+      "centavos": { "neto": 10000, "iva": 2100, "total": 12100 }
+    },
+    {
+      "nombre": "Factura C sin IVA",
+      "doc": { "letra": "C", "alicuota": "21", "items": [{ "cantidad": "3", "precio": "1.000" }] },
+      "centavos": { "neto": 300000, "iva": 0, "total": 300000 }
+    },
+    {
+      "nombre": "Redondeo por renglón (0,333 × 3)",
+      "doc": { "letra": "A", "alicuota": "10.5", "items": [{ "cantidad": "3", "precio": "0,333" }, { "cantidad": "1,5", "precio": "10,01" }] },
+      "centavos": { "neto": 1601, "iva": 168, "total": 1769 }
+    },
+    {
+      "nombre": "Recibo con monto en formato argentino",
+      "doc": { "tipo": "recibo", "letra": "X", "monto": "158.750,50" },
+      "centavos": { "neto": 15875050, "iva": 0, "total": 15875050 }
+    },
+    {
+      "nombre": "Alícuota 27 % con decimales",
+      "doc": { "letra": "A", "alicuota": "27", "items": [{ "cantidad": "1", "precio": "999,99" }] },
+      "centavos": { "neto": 99999, "iva": 27000, "total": 126999 }
+    }
+  ],
+  "cuit": [
+    ["20-12345678-6", true],
+    ["30-50001091-2", true],
+    ["30-71140975-7", true],
+    ["30-12345678-0", false],
+    ["2012345678", false],
+    ["", false]
+  ]
+}

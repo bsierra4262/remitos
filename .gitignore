@@ -16,3 +16,4 @@ node_modules/
 Thumbs.db
 .vscode/
 .idea/
+.php-cs-fixer.cache

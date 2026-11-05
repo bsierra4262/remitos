@@ -5,9 +5,9 @@ Escriben en la base del entorno bajo prueba (por defecto, la local) y limpian
 lo que crean.
 """
 import datetime
-import urllib.parse
 import os
 import tempfile
+import urllib.parse
 
 from base import SITIO, caso, clave_maestra, es_local, pedir
 
@@ -102,14 +102,17 @@ def arca_solo_maestra():
 @caso("ARCA: la conexión firma con el certificado guardado y traduce el rechazo")
 def arca_probar_conexion():
     """Con un certificado autofirmado, WSAA debe rechazarlo como no confiable: eso
-    prueba que el pedido se firmó y llegó bien formado. Requiere salida a internet."""
+    prueba que el pedido se firmó y llegó bien formado. Requiere salida a internet:
+    sin conexión el caso falla, salvo que se pida omitirlo con REMITOS_SIN_RED=1."""
+    if os.environ.get("REMITOS_SIN_RED") == "1":
+        return True, "omitido a pedido (REMITOS_SIN_RED=1): no se verificó la firma contra ARCA"
     cert, clave = _certificado()
     try:
         _cargar(cert, clave)
         s, d = pedir("/arca.php", "POST", clave_maestra(), {"accion": "probar", "ambiente": AMBIENTE}, timeout=60)
         error = d.get("error", "")
         if "No se pudo conectar" in error:
-            return True, "sin salida a internet: se omite la verificación con ARCA"
+            return False, "sin conexión con ARCA: el caso no se pudo verificar (REMITOS_SIN_RED=1 para omitirlo)"
         return s == 502 and "no reconoce el certificado" in error, f"status={s} error={error!r}"
     finally:
         pedir(f"/arca.php?ambiente={AMBIENTE}", "DELETE", clave_maestra())
@@ -142,21 +145,29 @@ def remito_respaldo_sin_duplicar():
         pedir(f"/remitos.php?id={d1.get('id')}", "DELETE", m)
 
 
-@caso("Remitos: los datos se recortan y no se aceptan campos extra")
+@caso("Remitos: los datos se recortan, no se aceptan campos extra y las fechas y el CUIT se validan")
 def remito_sanitiza():
     m = clave_maestra()
+    malos = {
+        "fecha": pedir("/remitos.php", "POST", m, {"fecha": "no es fecha"})[0],
+        "31/02": pedir("/remitos.php", "POST", m, {"fecha": "31/02/2026"})[0],
+        "cuit": pedir("/remitos.php", "POST", m, {"cliente": {"cuit": "30-12345678-0"}})[0],
+        "hora": pedir("/remitos.php", "POST", m, {"transporte": {"hora": "25:99"}})[0],
+    }
     s, d = pedir("/remitos.php", "POST", m, {
-        "cliente": {"razonSocial": "A" * 5000, "<script>": "x"},
+        "cliente": {"razonSocial": "A" * 5000, "<script>": "x", "cuit": "20123456786"},
         "items": [{"descripcion": "x"}] * 500, "recibi": {"tipoDoc": "Cualquiera"},
-        "fecha": "no es fecha", "admin": True,
+        "admin": True, "cai": "12345678901234", "numero": "00001-00000001",
     })
     try:
         _, r = pedir(f"/remitos.php?id={d.get('id')}", clave=m)
         rem = r.get("remito", {})
-        ok = (len(rem["cliente"]["razonSocial"]) == 160 and "<script>" not in rem["cliente"]
+        ok = (set(malos.values()) == {422} and len(rem["cliente"]["razonSocial"]) == 160 and "<script>" not in rem["cliente"]
               and len(rem["items"]) == 60 and rem["recibi"]["tipoDoc"] == "" and "admin" not in rem
-              and len(rem["fecha"]) == 10)
-        return ok, f"razon={len(rem['cliente']['razonSocial'])} items={len(rem['items'])} fecha={rem['fecha']}"
+              and len(rem["fecha"]) == 10 and rem["cai"] == "" and rem["numero"] == ""
+              and rem["cliente"]["cuit"] == "20-12345678-6")
+        return ok, (f"rechazos={malos} razon={len(rem['cliente']['razonSocial'])} items={len(rem['items'])} "
+                    f"cai={rem.get('cai')!r} numero={rem.get('numero')!r} cuit={rem['cliente'].get('cuit')}")
     finally:
         pedir(f"/remitos.php?id={d.get('id')}", "DELETE", m)
 

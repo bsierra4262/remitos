@@ -97,14 +97,13 @@ function crypto_purpose(string $context): string
     return strtok($context, ':') ?: 'general';
 }
 
-/** Compara la clave recibida con la maestra configurada (en claro o como SHA-256). */
+/**
+ * Compara la clave recibida con la maestra configurada. config.php guarda solo su
+ * SHA-256 (`master_key_hash`): la clave en claro no se acepta en la configuración.
+ */
 function crypto_matches_master(array $config, string $key): bool
 {
     $hash = strtolower((string) ($config['master_key_hash'] ?? ''));
-    if (preg_match('/^[0-9a-f]{64}$/', $hash)) {
-        return hash_equals($hash, hash('sha256', $key));
-    }
-    $plain = (string) ($config['master_key'] ?? '');
 
-    return $plain !== '' && strlen($plain) >= 24 && hash_equals($plain, $key);
+    return preg_match('/^[0-9a-f]{64}$/', $hash) === 1 && hash_equals($hash, hash('sha256', $key));
 }

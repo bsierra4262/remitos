@@ -23,10 +23,11 @@ def tipos_de_dato():
         b, pg, errs = abrir(pw)
         try:
             faltan = []
-            for vista, esperado in [("remito", {"date": 3, "time": 1, "email": 1, "tel": 1}),
-                                    ("factura", {"date": 2}),
-                                    ("recibo", {"date": 2}),
-                                    ("nota", {"date": 2})]:
+            # El vencimiento del C.A.I. y del CAE ya no se cargan a mano: los asigna la autorización.
+            for vista, esperado in [("remito", {"date": 2, "time": 1, "email": 1, "tel": 1}),
+                                    ("factura", {"date": 1}),
+                                    ("recibo", {"date": 1}),
+                                    ("nota", {"date": 1})]:
                 ir_a(pg, vista)
                 r = pg.evaluate("""() => {
                     const v = [...document.querySelectorAll('.view')]

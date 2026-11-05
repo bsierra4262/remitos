@@ -5,14 +5,20 @@
  *
  * Remitos compartidos.
  *
- *   GET    remitos.php?pagina=1&por_pagina=50   (leer)   Remitos completos, del más reciente al más antiguo.
- *   GET    remitos.php?id=…                     (leer)   Un remito.
- *   POST   remitos.php {id?, id_local?, …}      (crear)  Alta o edición. Sin número, el servidor asigna el
- *                                                        siguiente correlativo.
- *   DELETE remitos.php?id=…                     (borrar) Baja (no aplica a remitos autorizados).
+ *   GET    remitos.php?pagina=1&por_pagina=50&buscar=… (leer)  Remitos, del más reciente al más antiguo.
+ *   GET    remitos.php?id=…                           (leer)   Un remito.
+ *   POST   remitos.php {id?, id_local?, …}            (crear)  Alta o edición de un borrador.
+ *   POST   remitos.php {accion: 'facturado', id, facturado} (crear) Marca el remito como facturado.
+ *   DELETE remitos.php?id=…                           (borrar) Baja de un borrador.
  *
- * Un remito autorizado conserva su número, C.A.I. y vencimiento: esos datos solo
- * los asigna la autorización (talonarios.php).
+ * Numeración (RG 1415/2003): el número fiscal (punto de venta y correlativo), el
+ * C.A.I. y su vencimiento los asigna únicamente la autorización contra un
+ * talonario (talonarios.php). Hasta entonces el remito es un borrador con una
+ * referencia interna («Borrador 12»), que no se confunde con un número fiscal y
+ * se imprime como «SIN AUTORIZAR». Los datos que envía el cliente en `numero`,
+ * `cai` o `caiVto` se ignoran.
+ *
+ * Un remito autorizado no se modifica ni se elimina; solo admite la marca de facturado.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -26,9 +32,10 @@ $pdo = api_db($config);
 
 const REMITO_MAX_ITEMS = 60;
 const REMITO_DOC_TYPES = ['', 'DNI', 'CI', 'Pasaporte', 'Otro'];
+const REMITO_LOCK = 'remitos_numero';
 
 /**
- * Arma un remito con forma y longitudes controladas a partir del cuerpo recibido.
+ * Arma un remito con forma, longitudes y formatos controlados a partir del cuerpo recibido.
  *
  * @return array<string, mixed>
  */
@@ -62,48 +69,66 @@ function remito_from_input(array $body): array
         $recibi['tipoDoc'] = '';
     }
 
-    $fecha = api_str($body['fecha'] ?? '', 10);
-    if (!preg_match('#^\d{2}/\d{2}/\d{4}$#', $fecha)) {
+    $fecha = trim((string) (is_scalar($body['fecha'] ?? null) ? $body['fecha'] : ''));
+    if ($fecha === '') {
         $fecha = date('d/m/Y');
+    } elseif (api_date_dmy($fecha) === '') {
+        api_error(422, 'La fecha del remito no es válida (dd/mm/aaaa)');
     }
-    $caiVto = api_str($body['caiVto'] ?? '', 10);
+
+    $cliente = $section($body['cliente'] ?? [], [
+        'senores' => 160, 'razonSocial' => 160, 'cuit' => 13, 'domicilio' => 160, 'localidad' => 80,
+        'telefono' => 40, 'cp' => 10, 'mail' => 120, 'nombre' => 120, 'otrosDatos' => 160,
+    ]);
+    $cliente['cuit'] = api_require_cuit($cliente['cuit'], 'CUIT del cliente', true);
+
+    $transporte = $section($body['transporte'] ?? [], [
+        'nombre' => 120, 'vehiculo' => 120, 'chofer' => 120, 'lugarEntrega' => 160,
+        'fecha' => 10, 'hora' => 5, 'observaciones' => 600,
+    ]);
+    if ($transporte['fecha'] !== '' && api_date_dmy($transporte['fecha']) === '') {
+        api_error(422, 'La fecha de entrega no es válida (dd/mm/aaaa)');
+    }
+    if ($transporte['hora'] !== '' && !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $transporte['hora'])) {
+        api_error(422, 'La hora de entrega no es válida (hh:mm)');
+    }
 
     return [
-        'numero' => api_str($body['numero'] ?? '', 14),
         'fecha' => $fecha,
-        'cai' => preg_replace('/\D/', '', api_str($body['cai'] ?? '', 14)),
-        'caiVto' => preg_match('#^\d{2}/\d{2}/\d{4}$#', $caiVto) ? $caiVto : '',
-        'cliente' => $section($body['cliente'] ?? [], [
-            'senores' => 160, 'razonSocial' => 160, 'cuit' => 13, 'domicilio' => 160, 'localidad' => 80,
-            'telefono' => 40, 'cp' => 10, 'mail' => 120, 'nombre' => 120, 'otrosDatos' => 160,
-        ]),
+        'cliente' => $cliente,
         'items' => $items,
         'recibi' => $recibi,
-        'transporte' => $section($body['transporte'] ?? [], [
-            'nombre' => 120, 'vehiculo' => 120, 'chofer' => 120, 'lugarEntrega' => 160,
-            'fecha' => 10, 'hora' => 5, 'observaciones' => 600,
-        ]),
+        'transporte' => $transporte,
     ];
 }
 
-/** Correlativo de un número de remito («00000012» o «00001-00000012»). */
-function remito_correlativo(string $numero): int
-{
-    $parts = explode('-', $numero);
-
-    return (int) preg_replace('/\D/', '', (string) end($parts));
-}
-
-/** Remito guardado, listo para responder. */
+/** Remito guardado, listo para responder. Los datos fiscales salen de las columnas, no del JSON. */
 function remito_public(array $row): array
 {
     $doc = json_decode((string) $row['data'], true) ?: [];
+    $authorized = ($row['estado'] ?? '') === 'autorizado';
     $doc['id'] = $row['id'];
-    $doc['estado'] = $row['estado'] ?? ($doc['estado'] ?? 'borrador');
+    $doc['tipo'] = 'remito';
+    $doc['estado'] = $authorized ? 'autorizado' : 'borrador';
+    $doc['referencia'] = $row['referencia'] !== null ? (int) $row['referencia'] : null;
+    $doc['punto_venta'] = $authorized ? (int) $row['punto_venta'] : null;
+    $doc['numero'] = $authorized ? (string) $row['numero'] : '';
+    if (!$authorized) {
+        $doc['cai'] = '';
+        $doc['caiVto'] = '';
+    }
     $doc['facturado'] = (bool) (int) ($row['facturado'] ?? 0);
+    $doc['id_local'] = $row['id_local'];
+    $doc['creado_por'] = $row['creado_por'] ?? null;
     $doc['actualizado_por'] = $row['actualizado_por'] ?? null;
 
     return $doc;
+}
+
+/** Nombre del remito para mensajes y auditoría. */
+function remito_label(array $row): string
+{
+    return ($row['estado'] ?? '') === 'autorizado' ? 'Nº ' . $row['numero'] : 'borrador ' . $row['referencia'];
 }
 
 /** Remito por id, o null. */
@@ -132,90 +157,117 @@ if ($method === 'GET') {
 
     $perPage = max(1, min(200, (int) ($_GET['por_pagina'] ?? 50)));
     $page = max(1, (int) ($_GET['pagina'] ?? 1));
-    $total = (int) $pdo->query('SELECT COUNT(*) FROM remitos')->fetchColumn();
+    $where = '';
+    $params = [];
+    $search = api_str($_GET['buscar'] ?? '', 80);
+    if ($search !== '') {
+        $where = 'WHERE cliente LIKE ? OR numero LIKE ? OR referencia = ?';
+        $like = '%' . addcslashes($search, '%_\\') . '%';
+        $params = [$like, $like, ctype_digit($search) ? (int) $search : -1];
+    }
+    $st = $pdo->prepare("SELECT COUNT(*) FROM remitos $where");
+    $st->execute($params);
+    $total = (int) $st->fetchColumn();
     $offset = ($page - 1) * $perPage;
-    $rows = $pdo->query("SELECT * FROM remitos ORDER BY updated DESC LIMIT $perPage OFFSET $offset")->fetchAll();
+    $st = $pdo->prepare("SELECT * FROM remitos $where ORDER BY updated DESC, id LIMIT $perPage OFFSET $offset");
+    $st->execute($params);
     api_respond(200, [
         'ok' => true,
         'total' => $total,
         'pagina' => $page,
         'paginas' => max(1, (int) ceil($total / $perPage)),
-        'remitos' => array_map('remito_public', $rows),
+        'remitos' => array_map('remito_public', $st->fetchAll()),
     ]);
 }
 
 if ($method === 'POST') {
     $auth = auth_require($pdo, $config, 'crear', 'remitos');
     $body = api_body();
-    $remito = remito_from_input($body);
-    $now = (int) round(microtime(true) * 1000);
     $by = $auth['nombre'];
+    $now = (int) round(microtime(true) * 1000);
 
-    $existing = null;
-    $requestedId = (string) ($body['id'] ?? '');
-    if ($requestedId !== '') {
-        $existing = remito_find($pdo, $requestedId);
-        if ($existing === null) {
+    if (($body['accion'] ?? '') === 'facturado') {
+        $row = remito_find($pdo, (string) ($body['id'] ?? ''));
+        if ($row === null) {
             api_error(404, 'Remito no encontrado');
         }
+        $value = api_bool($body['facturado'] ?? true, true);
+        $pdo->prepare('UPDATE remitos SET facturado = ?, updated = ?, actualizado_por = ? WHERE id = ?')
+            ->execute([$value ? 1 : 0, $now, $by, $row['id']]);
+        audit_event($pdo, 'Remito ' . remito_label($row) . ($value ? ' marcado como facturado' : ' marcado como pendiente de facturar'), [
+            'categoria' => 'remito', 'detalle' => mb_substr((string) $row['cliente'], 0, 120),
+        ]);
+        api_respond(200, ['ok' => true, 'remito' => remito_public(remito_find($pdo, $row['id']))]);
     }
+
+    $remito = remito_from_input($body);
+    $requestedId = (string) ($body['id'] ?? '');
     $localId = api_str($body['id_local'] ?? '', 40);
     $localId = preg_match('/^[A-Za-z0-9_-]{4,40}$/', $localId) ? $localId : '';
-    if ($existing === null && $localId !== '') {
-        $st = $pdo->prepare('SELECT * FROM remitos WHERE id_local = ?');
-        $st->execute([$localId]);
-        $existing = $st->fetch() ?: null;
-    }
 
-    $pdo->query("SELECT GET_LOCK('remitos_numero', 10)");
+    // Todo el alta ocurre bajo el bloqueo: la búsqueda por id_local (reintentos) y la
+    // referencia correlativa no pueden competir con otra petición simultánea.
+    api_lock($pdo, REMITO_LOCK);
     try {
-        $estado = $existing['estado'] ?? 'borrador';
-        if ($estado === 'autorizado') {
-            // Los datos fiscales de un remito autorizado no se modifican.
-            $previous = json_decode((string) $existing['data'], true) ?: [];
-            foreach (['numero', 'cai', 'caiVto'] as $field) {
-                $remito[$field] = (string) ($previous[$field] ?? '');
+        $existing = null;
+        if ($requestedId !== '') {
+            $existing = remito_find($pdo, $requestedId);
+            if ($existing === null) {
+                api_error(404, 'Remito no encontrado');
             }
-        } elseif ($remito['numero'] === '') {
-            $last = (int) $pdo->query('SELECT COALESCE(MAX(numero_int), 0) FROM remitos')->fetchColumn();
-            $remito['numero'] = str_pad((string) ($last + 1), 8, '0', STR_PAD_LEFT);
+        } elseif ($localId !== '') {
+            $st = $pdo->prepare('SELECT * FROM remitos WHERE id_local = ?');
+            $st->execute([$localId]);
+            $existing = $st->fetch() ?: null;
         }
-        $numeroInt = remito_correlativo($remito['numero']);
-
-        $st = $pdo->prepare('SELECT COUNT(*) FROM remitos WHERE numero = ? AND id <> ?');
-        $st->execute([$remito['numero'], $existing['id'] ?? '']);
-        if ((int) $st->fetchColumn() > 0) {
-            api_error(409, 'Ya existe el remito Nº ' . $remito['numero'] . '. Dejá el número vacío para asignar el siguiente.');
+        if ($existing !== null && $existing['estado'] === 'autorizado') {
+            api_error(409, 'El remito ' . remito_label($existing) . ' ya está autorizado y no se puede modificar.', [
+                'remito' => remito_public($existing),
+            ]);
         }
 
         $id = $existing['id'] ?? bin2hex(random_bytes(8));
+        $previous = $existing ? (json_decode((string) $existing['data'], true) ?: []) : [];
+        $reference = $existing
+            ? (int) $existing['referencia']
+            : (int) $pdo->query('SELECT COALESCE(MAX(referencia), 0) + 1 FROM remitos')->fetchColumn();
         $created = isset($existing['created']) ? (int) $existing['created'] : $now;
         $origin = $existing['origen'] ?? (isset($auth['usuario']) ? 'app' : 'api');
-        $document = ['id' => $id, 'tipo' => 'remito'] + $remito
-            + ['estado' => $estado, 'origen' => $origin, 'created' => $created, 'updated' => $now];
+        $document = ['id' => $id, 'tipo' => 'remito', 'numero' => '', 'cai' => '', 'caiVto' => '', 'referencia' => $reference]
+            + $remito
+            + ['estado' => 'borrador', 'origen' => $origin, 'created' => $created, 'updated' => $now];
         $client = $remito['cliente']['razonSocial'] ?: $remito['cliente']['senores'];
         $json = json_encode($document, JSON_UNESCAPED_UNICODE);
 
         if ($existing) {
             $pdo->prepare(
-                'UPDATE remitos SET numero = ?, numero_int = ?, fecha = ?, cliente = ?, data = ?, updated = ?, actualizado_por = ?
-                 WHERE id = ?'
-            )->execute([$remito['numero'], $numeroInt, $remito['fecha'], $client, $json, $now, $by, $id]);
+                'UPDATE remitos SET fecha = ?, fecha_emision = ?, cliente = ?, data = ?, updated = ?, actualizado_por = ? WHERE id = ?'
+            )->execute([$remito['fecha'], api_date_iso($remito['fecha']), $client, $json, $now, $by, $id]);
+            $changed = array_keys(array_filter(
+                ['cliente' => 'cliente', 'fecha' => 'fecha', 'items' => 'ítems', 'recibi' => 'recepción', 'transporte' => 'transporte'],
+                static fn (string $label, string $key): bool => ($previous[$key] ?? null) != $remito[$key],
+                ARRAY_FILTER_USE_BOTH
+            ));
+            if ($changed !== []) {
+                audit_event($pdo, 'Remito modificado (borrador ' . $reference . ')', [
+                    'categoria' => 'remito', 'detalle' => 'cambios en: ' . implode(', ', $changed),
+                ]);
+            }
         } else {
             $pdo->prepare(
-                'INSERT INTO remitos (id, id_local, numero, numero_int, fecha, cliente, data, origen, estado,
-                                      created, updated, creado_por, actualizado_por)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                'INSERT INTO remitos (id, id_local, referencia, numero, numero_int, punto_venta, fecha, fecha_emision, cliente, data,
+                                      origen, estado, created, updated, creado_por, actualizado_por)
+                 VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, \'borrador\', ?, ?, ?, ?)'
             )->execute([
-                $id, $localId ?: null, $remito['numero'], $numeroInt, $remito['fecha'], $client, $json, $origin,
-                'borrador', $now, $now, $by, $by,
+                $id, $localId ?: null, $reference, $remito['fecha'], api_date_iso($remito['fecha']), $client, $json, $origin,
+                $now, $now, $by, $by,
             ]);
-            audit_event($pdo, 'Remito guardado Nº ' . $remito['numero'], [
-                'categoria' => 'remito', 'clave' => $by, 'detalle' => mb_substr($client, 0, 120),
+            audit_event($pdo, 'Remito guardado (borrador ' . $reference . ')', [
+                'categoria' => 'remito', 'detalle' => mb_substr($client, 0, 120),
             ]);
         }
     } finally {
-        $pdo->query("SELECT RELEASE_LOCK('remitos_numero')");
+        api_unlock($pdo, REMITO_LOCK);
     }
 
     api_respond($existing ? 200 : 201, [
@@ -228,7 +280,7 @@ if ($method === 'POST') {
 }
 
 if ($method === 'DELETE') {
-    $auth = auth_require($pdo, $config, 'borrar', 'remitos');
+    auth_require($pdo, $config, 'borrar', 'remitos');
     $id = (string) ($_GET['id'] ?? '');
     if (!preg_match('/^[0-9a-f]{16}$/', $id)) {
         api_error(400, 'Identificador de remito inválido');
@@ -237,12 +289,12 @@ if ($method === 'DELETE') {
     if ($row === null) {
         api_error(404, 'Remito no encontrado');
     }
-    if (($row['estado'] ?? '') === 'autorizado') {
+    if ($row['estado'] === 'autorizado') {
         api_error(409, 'Un remito autorizado no se elimina: su número y C.A.I. ya fueron asignados.');
     }
     $pdo->prepare('DELETE FROM remitos WHERE id = ?')->execute([$id]);
-    audit_event($pdo, 'Remito eliminado' . ($row['numero'] ? ' Nº ' . $row['numero'] : ''), [
-        'categoria' => 'remito', 'clave' => $auth['nombre'], 'detalle' => $row['cliente'],
+    audit_event($pdo, 'Remito eliminado (' . remito_label($row) . ')', [
+        'categoria' => 'remito', 'detalle' => mb_substr((string) $row['cliente'], 0, 120),
     ]);
     api_respond(200, ['ok' => true, 'id' => $id]);
 }

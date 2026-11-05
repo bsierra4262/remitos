@@ -14,7 +14,7 @@
  *   GET    talonarios.php?accion=listar               (admin) Talonarios y uso.
  *   GET    talonarios.php?accion=vigente&pv=1&tipo=91 (leer)  Talonario activo, sin consumir número.
  *   POST   talonarios.php {punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento}  (admin) Alta.
- *   POST   talonarios.php {accion: 'autorizar', pv, tipo, fecha, confirmar?}             (crear) Asigna número.
+ *   POST   talonarios.php {accion: 'autorizar', remito_id, pv, tipo, fecha, confirmar?}  (crear) Asigna número.
  *   POST   talonarios.php {id, activa}                (admin) Activa o desactiva.
  *   DELETE talonarios.php?id=N                        (admin) Elimina.
  *
@@ -30,6 +30,9 @@ $pdo = api_db($config);
 
 /** Remito R (tabla de comprobantes de ARCA). */
 const TIPO_REMITO = 91;
+
+/** Tipos de comprobante admitidos en un talonario (tabla de comprobantes de ARCA). */
+const TIPOS_CAI = [1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 15, 91];
 
 /** Avisar cuando queden pocos números en el talonario. */
 const AVISO_RESTANTES = 20;
@@ -75,6 +78,12 @@ function talonario_public(array $t): array
     ];
 }
 
+/** ¿Es una fecha aaaa-mm-dd válida en el calendario? */
+function talonario_iso_valid(string $date): bool
+{
+    return (bool) preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m) && checkdate((int) $m[2], (int) $m[3], (int) $m[1]);
+}
+
 /** Talonario activo con números disponibles para un punto de venta y tipo. */
 function talonario_vigente(PDO $pdo, int $pointOfSale, int $type, bool $lock = false): ?array
 {
@@ -109,10 +118,7 @@ if ($method === 'GET') {
         'talonario_public',
         $pdo->query('SELECT * FROM cai_talonarios ORDER BY activa DESC, punto_venta, numero_desde')->fetchAll()
     );
-    // Cada número consumido de un talonario es un remito autorizado.
-    $authorized = (int) $pdo->query(
-        'SELECT COALESCE(SUM(proximo_numero - numero_desde), 0) FROM cai_talonarios'
-    )->fetchColumn();
+    $authorized = (int) $pdo->query("SELECT COUNT(*) FROM remitos WHERE estado = 'autorizado'")->fetchColumn();
 
     api_respond(200, [
         'ok' => true,
@@ -135,40 +141,35 @@ if ($method === 'POST') {
         $pointOfSale = (int) ($body['pv'] ?? 1);
         $type = (int) ($body['tipo'] ?? TIPO_REMITO);
         $date = (string) ($body['fecha'] ?? '');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !DateTimeImmutable::createFromFormat('!Y-m-d', $date)) {
+        if (!talonario_iso_valid($date)) {
             $date = date('Y-m-d');
         }
-        $confirm = !empty($body['confirmar']);
+        $confirm = api_bool($body['confirmar'] ?? false);
         $remitoId = (string) ($body['remito_id'] ?? '');
-        if ($remitoId !== '' && !preg_match('/^[0-9a-f]{16}$/', $remitoId)) {
-            api_error(400, 'Identificador de remito inválido');
+        // Cada número se asigna a un remito concreto: nunca se consumen números sueltos.
+        if (!preg_match('/^[0-9a-f]{16}$/', $remitoId)) {
+            api_error(400, 'Indicá el remito a autorizar (remito_id). Guardalo antes de autorizarlo.');
         }
 
         // Bloqueo de filas: dos pedidos simultáneos nunca reciben el mismo número, y el
-        // número queda escrito en el remito dentro de la misma transacción.
+        // número queda escrito en el remito dentro de la misma transacción. La clave única
+        // (punto_venta, numero_int) de la tabla es la última barrera.
         $pdo->beginTransaction();
         try {
-            $remito = null;
-            if ($remitoId !== '') {
-                $st = $pdo->prepare('SELECT * FROM remitos WHERE id = ? FOR UPDATE');
-                $st->execute([$remitoId]);
-                $remito = $st->fetch() ?: null;
-                if ($remito === null) {
-                    $pdo->rollBack();
-                    api_error(404, 'Remito no encontrado. Guardalo antes de autorizarlo.');
-                }
-                if (($remito['estado'] ?? '') === 'autorizado') {
-                    $pdo->rollBack();
-                    api_error(409, 'Este remito ya está autorizado con el Nº ' . $remito['numero']);
-                }
+            $st = $pdo->prepare('SELECT * FROM remitos WHERE id = ? FOR UPDATE');
+            $st->execute([$remitoId]);
+            $remito = $st->fetch() ?: null;
+            if ($remito === null) {
+                api_error(404, 'Remito no encontrado. Guardalo antes de autorizarlo.');
+            }
+            if (($remito['estado'] ?? '') === 'autorizado') {
+                api_error(409, 'Este remito ya está autorizado con el Nº ' . $remito['numero']);
             }
             $t = talonario_vigente($pdo, $pointOfSale, $type, true);
             if ($t === null) {
-                $pdo->rollBack();
                 api_error(409, 'No hay un talonario activo con números disponibles. Cargá el próximo C.A.I.');
             }
             if ($date > $t['cai_vencimiento'] && !$confirm) {
-                $pdo->rollBack();
                 api_error(
                     409,
                     'El C.A.I. venció el ' . date('d/m/Y', (int) strtotime($t['cai_vencimiento']))
@@ -179,21 +180,20 @@ if ($method === 'POST') {
             $number = (int) $t['proximo_numero'];
             $pdo->prepare('UPDATE cai_talonarios SET proximo_numero = proximo_numero + 1 WHERE id = ?')
                 ->execute([$t['id']]);
-            if ($remito !== null) {
-                $doc = json_decode((string) $remito['data'], true) ?: [];
-                $doc['numero'] = fmt_numero($pointOfSale, $number);
-                $doc['estado'] = 'autorizado';
-                $doc['cai'] = $t['cai'];
-                $doc['caiVto'] = date('d/m/Y', (int) strtotime($t['cai_vencimiento']));
-                $doc['updated'] = (int) round(microtime(true) * 1000);
-                $pdo->prepare(
-                    "UPDATE remitos SET numero = ?, numero_int = ?, punto_venta = ?, estado = 'autorizado', data = ?,
-                            updated = ?, actualizado_por = ? WHERE id = ?"
-                )->execute([
-                    $doc['numero'], $number, $pointOfSale, json_encode($doc, JSON_UNESCAPED_UNICODE),
-                    $doc['updated'], $auth['nombre'], $remitoId,
-                ]);
-            }
+            $doc = json_decode((string) $remito['data'], true) ?: [];
+            $doc['numero'] = fmt_numero($pointOfSale, $number);
+            $doc['estado'] = 'autorizado';
+            $doc['cai'] = $t['cai'];
+            $doc['caiVto'] = date('d/m/Y', (int) strtotime($t['cai_vencimiento']));
+            $doc['fecha'] = date('d/m/Y', (int) strtotime($date));
+            $doc['updated'] = (int) round(microtime(true) * 1000);
+            $pdo->prepare(
+                "UPDATE remitos SET numero = ?, numero_int = ?, punto_venta = ?, estado = 'autorizado', data = ?,
+                        fecha = ?, fecha_emision = ?, updated = ?, actualizado_por = ? WHERE id = ?"
+            )->execute([
+                $doc['numero'], $number, $pointOfSale, json_encode($doc, JSON_UNESCAPED_UNICODE),
+                $doc['fecha'], $date, $doc['updated'], $auth['nombre'], $remitoId,
+            ]);
             $pdo->commit();
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -202,9 +202,8 @@ if ($method === 'POST') {
             throw $e;
         }
 
-        audit_event($pdo, 'Remito autorizado Nº ' . fmt_numero($pointOfSale, $number), [
+        audit_event($pdo, 'Remito autorizado Nº ' . fmt_numero($pointOfSale, $number) . ' (borrador ' . $remito['referencia'] . ')', [
             'categoria' => 'remito',
-            'clave' => $auth['nombre'],
             'detalle' => 'C.A.I. ' . $t['cai'] . ' · vence ' . $t['cai_vencimiento'] . ($confirm ? ' · confirmado vencido' : ''),
         ]);
         api_respond(200, [
@@ -216,7 +215,7 @@ if ($method === 'POST') {
             'cai' => $t['cai'],
             'cai_vencimiento' => $t['cai_vencimiento'],
             'restantes' => max(0, (int) $t['numero_hasta'] - $number),
-            'remito_id' => $remitoId !== '' ? $remitoId : null,
+            'remito_id' => $remitoId,
         ]);
     }
 
@@ -224,16 +223,14 @@ if ($method === 'POST') {
 
     if (isset($body['id'], $body['activa'])) {
         $id = (int) $body['id'];
-        $active = !empty($body['activa']);
+        $active = api_bool($body['activa']);
         $st = $pdo->prepare('SELECT id FROM cai_talonarios WHERE id = ?');
         $st->execute([$id]);
         if ($st->fetchColumn() === false) {
             api_error(404, 'No existe ese talonario');
         }
         $pdo->prepare('UPDATE cai_talonarios SET activa = ? WHERE id = ?')->execute([$active ? 1 : 0, $id]);
-        audit_event($pdo, $active ? 'Talonario activado' : 'Talonario desactivado', [
-            'categoria' => 'cai', 'clave' => $auth['nombre'],
-        ]);
+        audit_event($pdo, ($active ? 'Talonario activado' : 'Talonario desactivado') . ' #' . $id, ['categoria' => 'cai']);
         api_respond(200, ['ok' => true, 'id' => $id, 'activa' => $active]);
     }
 
@@ -245,6 +242,9 @@ if ($method === 'POST') {
     $type = (int) ($body['tipo_comprobante'] ?? TIPO_REMITO);
 
     // ARCA no ofrece un servicio para validar el C.A.I.: se controla la coherencia de los datos.
+    if (!in_array($type, TIPOS_CAI, true)) {
+        api_error(400, 'Tipo de comprobante inválido (91 para remitos R)');
+    }
     if ($pointOfSale < 1 || $pointOfSale > 99998) {
         api_error(400, 'Punto de venta inválido (1 a 99998)');
     }
@@ -257,7 +257,7 @@ if ($method === 'POST') {
     if (strlen($cai) !== 14) {
         api_error(400, 'El C.A.I. debe tener 14 dígitos');
     }
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiry) || !DateTimeImmutable::createFromFormat('!Y-m-d', $expiry)) {
+    if (!talonario_iso_valid($expiry)) {
         api_error(400, 'Fecha de vencimiento inválida');
     }
     if ($expiry < date('Y-m-d')) {
@@ -281,7 +281,6 @@ if ($method === 'POST') {
 
     audit_event($pdo, 'C.A.I. cargado · PV ' . str_pad((string) $pointOfSale, 5, '0', STR_PAD_LEFT), [
         'categoria' => 'cai',
-        'clave' => $auth['nombre'],
         'detalle' => 'rango ' . fmt_numero($pointOfSale, $from) . ' a ' . fmt_numero($pointOfSale, $to) . ' · vence ' . $expiry,
     ]);
     api_respond(201, [
@@ -295,18 +294,27 @@ if ($method === 'POST') {
 if ($method === 'DELETE') {
     $auth = auth_require($pdo, $config, 'admin', 'talonarios');
     $id = (int) ($_GET['id'] ?? 0);
-    $st = $pdo->prepare('SELECT numero_desde, proximo_numero, activa FROM cai_talonarios WHERE id = ?');
+    $st = $pdo->prepare('SELECT * FROM cai_talonarios WHERE id = ?');
     $st->execute([$id]);
     $t = $st->fetch();
     if (!$t) {
         api_error(404, 'No existe ese talonario');
     }
-    // Un talonario activo que ya emitió no se borra: primero se desactiva, para no perderlo de vista.
-    if ((int) $t['activa'] && (int) $t['proximo_numero'] > (int) $t['numero_desde']) {
-        api_error(409, 'Este talonario está activo y ya emitió comprobantes. Desactivalo primero.');
+    // Un talonario con remitos autorizados es respaldo de esos comprobantes: no se borra
+    // (se desactiva). Solo se elimina uno cargado por error y nunca usado.
+    $st = $pdo->prepare(
+        "SELECT COUNT(*) FROM remitos WHERE estado = 'autorizado' AND punto_venta = ? AND numero_int BETWEEN ? AND ?"
+    );
+    $st->execute([$t['punto_venta'], $t['numero_desde'], $t['numero_hasta']]);
+    if ((int) $st->fetchColumn() > 0 || (int) $t['proximo_numero'] > (int) $t['numero_desde']) {
+        api_error(409, 'Este talonario ya se usó para autorizar remitos y no se puede eliminar. Podés desactivarlo.');
     }
     $pdo->prepare('DELETE FROM cai_talonarios WHERE id = ?')->execute([$id]);
-    audit_event($pdo, 'Talonario eliminado', ['categoria' => 'cai', 'clave' => $auth['nombre']]);
+    audit_event($pdo, 'Talonario eliminado #' . $id, [
+        'categoria' => 'cai',
+        'detalle' => 'C.A.I. ' . $t['cai'] . ' · rango ' . fmt_numero((int) $t['punto_venta'], (int) $t['numero_desde'])
+            . ' a ' . fmt_numero((int) $t['punto_venta'], (int) $t['numero_hasta']),
+    ]);
     api_respond(200, ['ok' => true, 'id' => $id]);
 }
 
