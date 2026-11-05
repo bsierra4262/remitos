@@ -79,6 +79,7 @@ function emptyRemito() {
       senores: '',
       razonSocial: '',
       cuit: '',
+      condIVA: '',
       domicilio: '',
       localidad: '',
       telefono: '',
@@ -89,7 +90,18 @@ function emptyRemito() {
     },
     items: [{ articulo: '', descripcion: '', cantidad: '' }],
     recibi: { tipoDoc: '', nombre: '', documentoNro: '', sector: '', puesto: '' },
-    transporte: { nombre: '', vehiculo: '', chofer: '', lugarEntrega: '', fecha: '', hora: '', observaciones: '' },
+    transporte: {
+      tipo: '',
+      nombre: '',
+      cuit: '',
+      domicilio: '',
+      vehiculo: '',
+      chofer: '',
+      lugarEntrega: '',
+      fecha: '',
+      hora: '',
+      observaciones: '',
+    },
     updated: Date.now(),
   };
 }
@@ -195,7 +207,7 @@ function bindForm() {
 /* El CUIT se guarda siempre como 99-99999999-9: se arman los guiones mientras
    se tipea, así entra igual desde el teclado que desde la agenda o el CSV. */
 function wireFormatos() {
-  $$('[data-path="cliente.cuit"], #cliCuit, #apiCuit').forEach(el => {
+  $$('[data-path="cliente.cuit"], [data-path="transporte.cuit"], #cliCuit, #apiCuit').forEach(el => {
     el.addEventListener('blur', () => {
       const p = problemaCuit(el.value);
       el.setCustomValidity(p);
@@ -679,6 +691,8 @@ function buildRemitoTemplate(opts = {}) {
   /* Solo un remito autorizado tiene número fiscal («00001-00000002»). */
   const nroStr = !blanco && remitoAutorizado(doc) ? String(doc.numero).replace('-', ' - ') : '';
   const copia = t.dataset.copia || 'ORIGINAL';
+  /* Remito digital (RG 5678/2025): sin leyendas ORIGINAL/DUPLICADO y con el QR de conformidad. */
+  const digital = !blanco && _remitoDigital && _remitoDigital.id === doc.id ? _remitoDigital : null;
   let h = '';
   /* Geometría medida sobre el remito original escaneado.
      Mapeo verificado: la línea del encabezado de ítems cae en ITEMS_REGION.yTop
@@ -719,6 +733,7 @@ function buildRemitoTemplate(opts = {}) {
   /* bloque derecho */
   h += lab(64.66, 3.4, 'DOCUMENTO NO VÁLIDO COMO FACTURA', { size: 2.25, color: '#000' });
   h += lab(64.66, 5.1, 'REMITO', { size: 5.5, color: '#000' });
+  h += lab(64.66, 7.55, C.condIVA, { size: 2.1, bold: true, color: '#000' });
   h += lab(64.66, 9.1, 'Nro:', { size: 2.95, bold: true, color: '#000' });
   h += lab(69.9, 9.1, esc(nroStr), { size: 2.95, color: '#000' });
   h += campo(64.66, 11.1, 'Fecha:', D.fecha, { size: 2.95, w: 30, gap: 2 });
@@ -740,6 +755,7 @@ function buildRemitoTemplate(opts = {}) {
   h += campo(65.5, 22.77, 'C.P.:', D.cliente.cp, { w: 29 });
   h += campo(65.5, 25.36, 'Mail:', D.cliente.mail, { w: 29 });
   h += campo(65.5, 28.05, 'Nombre:', D.cliente.nombre, { w: 29 });
+  h += campo(65.5, 30.86, 'IVA:', LEYENDAS_IVA[D.cliente.condIVA] || '', { w: 29, vsize: 2.6 });
 
   /* ============ TABLA DE ÍTEMS ============ */
   const iy = ITEMS_REGION.yTop,
@@ -764,7 +780,8 @@ function buildRemitoTemplate(opts = {}) {
      se imprime al pie de cada ejemplar. */
   /* Medido en el escaneo: ocupa y 41.1%..59.2% (centro 50.2%), cuerpo ~2,8 mm.
      Con rotate(-90) y origen arriba-izquierda, el texto crece HACIA ARRIBA desde el ancla. */
-  h += `<div style="position:absolute;left:${X(2.4)};top:${Y(59.2)};transform:rotate(-90deg);transform-origin:left top;font-size:2.8mm;font-weight:700;color:#000;white-space:nowrap">ORIGINAL BLANCO - DUPLICADO BEIGE</div>`;
+  const leyendaVertical = digital ? 'REMITO DIGITAL - RG 5678/2025' : 'ORIGINAL BLANCO - DUPLICADO BEIGE';
+  h += `<div style="position:absolute;left:${X(2.4)};top:${Y(59.2)};transform:rotate(-90deg);transform-origin:left top;font-size:2.8mm;font-weight:700;color:#000;white-space:nowrap">${leyendaVertical}</div>`;
 
   /* ============ RECIBÍ CONFORME ============ */
   h += box(L, 67.66, Wb, 11.53, { c: '#000', th: 0.3, r: 1.6 });
@@ -781,14 +798,56 @@ function buildRemitoTemplate(opts = {}) {
   h += campo(8.05, 72.5, 'Documento Nro.:', D.recibi.documentoNro, { w: 40 });
   h += campo(8.05, 74.55, 'Sector:', D.recibi.sector, { w: 40 });
   h += campo(8.05, 76.6, 'Puesto:', D.recibi.puesto, { w: 40 });
-  h += `<div style="position:absolute;left:${X(47)};top:${Y(75.6)};width:${X(35)};border-top:.35mm dashed #000"></div>`;
-  h += lab(47, 76.2, 'FIRMA Y SELLO', { size: 2.5, bold: true, align: 'center', w: 35, color: '#000' });
+  const conf = !blanco && doc.conformidad && doc.conformidad.conformado ? doc.conformidad : null;
+  if (conf) {
+    /* Conformidad digital registrada (RG 5678/2025): reemplaza a la firma. */
+    h += lab(47, 70.4, 'RECEPCIÓN CONFORMADA DIGITALMENTE', {
+      size: 2.4,
+      bold: true,
+      align: 'center',
+      w: 35,
+      color: '#2e8b45',
+    });
+    h += lab(47, 72.2, esc(fmtFechaHora(conf.conformado) + ' ' + String(conf.conformado).slice(11, 16)), {
+      size: 2.3,
+      align: 'center',
+      w: 35,
+      color: '#000',
+    });
+    h += lab(47, 73.8, esc(conf.nombre + ' · Doc. ' + conf.documento), {
+      size: 2.3,
+      align: 'center',
+      w: 35,
+      color: '#000',
+    });
+  } else if (digital) {
+    if (digital.qr)
+      h += `<img src="${digital.qr}" alt="" style="position:absolute;left:${X(84.6)};top:${Y(68.15)};width:${X(9.6)};height:auto">`;
+    h += lab(47, 71.2, 'CONFORMIDAD DIGITAL', { size: 2.5, bold: true, align: 'center', w: 35, color: '#000' });
+    h += lab(47, 73.0, 'Escaneá el código para confirmar la recepción', {
+      size: 2.1,
+      align: 'center',
+      w: 35,
+      color: '#000',
+    });
+  } else {
+    h += `<div style="position:absolute;left:${X(47)};top:${Y(75.6)};width:${X(35)};border-top:.35mm dashed #000"></div>`;
+    h += lab(47, 76.2, 'FIRMA Y SELLO', { size: 2.5, bold: true, align: 'center', w: 35, color: '#000' });
+  }
 
   /* ============ DATOS DEL TRANSPORTISTA ============ */
   /* Medido sobre el escaneo: rótulos en x=8.05%, encabezado 2.6mm en negrita,
      rótulos 2.4mm en peso NORMAL (en el original no son negrita). */
   h += box(L, 80.16, Wb, 13.44, { c: '#000', th: 0.3, r: 1.6 });
   h += lab(8.05, 80.55, 'DATOS DEL TRANSPORTISTA', { size: 3.15, bold: true, color: '#000' });
+  const tercero = D.transporte.tipo === 'tercero';
+  if (D.transporte.tipo === 'propio') h += lab(48, 80.75, 'Transporte propio', { size: 2.7, color: '#000' });
+  h += campo(48, tercero ? 80.75 : 82.2, 'C.U.I.T.:', tercero ? D.transporte.cuit : '', {
+    size: 2.7,
+    bold: false,
+    w: 44,
+  });
+  if (tercero) h += campo(48, 82.2, 'Domicilio:', D.transporte.domicilio, { size: 2.7, bold: false, w: 44 });
   h += campo(8.05, 81.9, 'Nombre:', D.transporte.nombre, { size: 2.7, bold: false, w: 38 });
   h += campo(8.05, 83.35, 'Datos del Vehículo:', D.transporte.vehiculo, { size: 2.7, bold: false, w: 38 });
   h += campo(8.05, 84.8, 'Chofer:', D.transporte.chofer, { size: 2.7, bold: false, w: 38 });
@@ -819,10 +878,14 @@ function buildRemitoTemplate(opts = {}) {
     bold: true,
     color: '#000',
   });
-  h += lab(13.2, 97.3, C.mail + ' - ' + C.telefono + '   ·   ' + copia, { size: 1.65, bold: true, color: '#000' });
-  /* Textos EXACTOS del remito original: "C.A.I." y "VTO." (sin "Nº" ni "Fecha") */
-  h += lab(52, 94.9, 'C.A.I. ' + esc(F.cai || '—'), { size: 2.4, align: 'right', w: 42.5, color: '#000' });
-  h += lab(52, 96.4, 'VTO. ' + esc(F.caiVto || '—'), { size: 3.9, align: 'right', w: 42.5, color: '#000' });
+  h += lab(13.2, 97.3, C.mail + ' - ' + C.telefono + '   ·   ' + (digital ? 'REMITO DIGITAL' : copia), {
+    size: 1.65,
+    bold: true,
+    color: '#000',
+  });
+  /* RG 1415, Anexo V, I.a.12-13: «C.A.I. Nº …» y «Fecha de Vto. …» */
+  h += lab(52, 94.9, 'C.A.I. Nº ' + esc(F.cai || '—'), { size: 2.4, align: 'right', w: 42.5, color: '#000' });
+  h += lab(52, 96.4, 'Fecha de Vto. ' + esc(F.caiVto || '—'), { size: 3.9, align: 'right', w: 42.5, color: '#000' });
 
   /* Sello translúcido sobre el área de ítems: AUTORIZADO, PRUEBA o SIN AUTORIZAR
      (un remito sin número ni C.A.I. no es un comprobante válido). */
@@ -1880,6 +1943,7 @@ const CLIENTE_REMITO = [
   'senores',
   'razonSocial',
   'cuit',
+  'condIVA',
   'domicilio',
   'localidad',
   'telefono',
@@ -2966,6 +3030,10 @@ async function autorizarRemito() {
   if (doc.estado === 'autorizado') {
     return toast('Este remito ya está autorizado · Nº ' + (doc.numero || ''), 2200);
   }
+  const faltan = faltantesRemito(doc);
+  if (faltan.length) {
+    return toast('Para autorizar el remito falta: ' + faltan.join(', ') + ' (RG 1415, Anexo V).', 6000, 'err');
+  }
   const btn = $('#btnAutorizar');
   btn.disabled = true;
   try {
@@ -2976,15 +3044,8 @@ async function autorizarRemito() {
     const fecha = doc.fecha || currentFecha(); // dd/mm/aaaa → aaaa-mm-dd
     const iso = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha) ? fecha.split('/').reverse().join('-') : '';
     const pedido = { accion: 'autorizar', pv, tipo: 91, fecha: iso, remito_id: doc.id };
-    let j;
-    try {
-      j = await api('talonarios.php', { method: 'POST', body: pedido });
-    } catch (e) {
-      if (!(e.respuesta && e.respuesta.vencido && confirm(e.message + '\n\n¿Autorizar igual con este C.A.I.?'))) {
-        return avisarError(e, 'No se autorizó');
-      }
-      j = await api('talonarios.php', { method: 'POST', body: Object.assign(pedido, { confirmar: true }) });
-    }
+    // Un C.A.I. vencido no autoriza: el comprobante no sería válido (el servidor responde 409).
+    const j = await api('talonarios.php', { method: 'POST', body: pedido });
     doc = (await api('remitos.php?id=' + encodeURIComponent(doc.id))).remito;
     actualizarEnLista(datos.remitos, clone(doc));
     save(LS.draft, doc);
@@ -2999,6 +3060,147 @@ async function autorizarRemito() {
   } finally {
     btn.disabled = false;
   }
+}
+
+/* ======================= Remito digital (RG 5678/2025) =======================
+   Un remito autorizado puede viajar sin imprimirse: se genera el PDF (un solo ejemplar,
+   sin leyendas ORIGINAL/DUPLICADO) con un QR que lleva al enlace de conformidad, donde
+   el destinatario confirma la recepción con nombre y documento. El enlace no se guarda
+   en el servidor (solo su hash): se conserva en esta pestaña mientras esté abierta. */
+let _remitoDigital = null;
+const enlacesDigitales = (() => {
+  try {
+    return JSON.parse(sessionStorage.getItem('remitos_enlaces') || '{}');
+  } catch {
+    return {};
+  }
+})();
+function guardarEnlace(id, url) {
+  enlacesDigitales[id] = url;
+  try {
+    sessionStorage.setItem('remitos_enlaces', JSON.stringify(enlacesDigitales));
+  } catch {
+    /* sin sessionStorage: el enlace vale igual mientras la pestaña esté abierta */
+  }
+}
+function qrDe(texto, escala = 4) {
+  const q = qrcode(0, 'M');
+  q.addData(texto);
+  q.make();
+  return q.createDataURL(escala, 0);
+}
+async function generarEnlaceDigital() {
+  const j = await api('remitos.php', { method: 'POST', body: { accion: 'conformidad', id: doc.id } });
+  doc = j.remito;
+  actualizarEnLista(datos.remitos, clone(doc));
+  save(LS.draft, doc);
+  guardarEnlace(doc.id, j.url);
+  return j.url;
+}
+function pintarDigital() {
+  const c = doc.conformidad || {};
+  const url = enlacesDigitales[doc.id] || '';
+  $('#digitalEstado').innerHTML = c.conformado
+    ? `<div class="doc-aviso">Recepción confirmada el ${esc(fmtFechaHora(c.conformado))} a las ${esc(String(c.conformado).slice(11, 16))} por <b>${esc(c.nombre)}</b> (doc. ${esc(c.documento)})${c.observaciones ? ' · «' + esc(c.observaciones) + '»' : ''}.</div>`
+    : c.enlace_activo && !url
+      ? '<div class="cfg-alert warn">Hay un enlace activo enviado antes, pero por seguridad el sistema no lo guarda. Si lo necesitás de nuevo, generá uno nuevo (el anterior deja de funcionar).</div>'
+      : '<p class="hint">Pendiente de confirmación del destinatario.</p>';
+  $('#digitalUrl').value = url;
+  $('#digitalQr').innerHTML = url ? `<img src="${qrDe(url, 5)}" alt="Código QR del enlace de conformidad">` : '';
+  ['#digitalCopiar', '#digitalCompartir', '#digitalCorreo'].forEach(id => $(id).classList.toggle('is-disabled', !url));
+  $('#digitalRenovar').hidden = !!c.conformado;
+  const asunto = 'Remito Nº ' + doc.numero + ' de ' + COMPANY.nombre;
+  const cuerpo = 'Te enviamos el remito Nº ' + doc.numero + '. Al recibir los bienes, confirmá la recepción en: ' + url;
+  $('#digitalCorreo').href = url
+    ? 'mailto:' +
+      encodeURIComponent(doc.cliente.mail || '') +
+      '?subject=' +
+      encodeURIComponent(asunto) +
+      '&body=' +
+      encodeURIComponent(cuerpo)
+    : '#';
+}
+async function abrirDigital() {
+  if (!remitoAutorizado(doc)) {
+    return toast(
+      'Primero autorizá el remito: solo un remito con número y C.A.I. puede viajar en formato digital',
+      4200,
+      'err'
+    );
+  }
+  try {
+    doc = (await api('remitos.php?id=' + encodeURIComponent(doc.id))).remito; // estado de conformidad al día
+    actualizarEnLista(datos.remitos, clone(doc));
+    const c = doc.conformidad || {};
+    if (!c.conformado && !c.enlace_activo && !enlacesDigitales[doc.id]) await generarEnlaceDigital();
+  } catch (e) {
+    return avisarError(e, 'No se pudo preparar el remito digital');
+  }
+  pintarDigital();
+  openPanel($('#digitalModal'), $('#backdrop8'));
+}
+async function renovarDigital() {
+  if (!confirm('¿Generar un enlace nuevo? El anterior deja de funcionar.')) return;
+  try {
+    await generarEnlaceDigital();
+    pintarDigital();
+    toast('Enlace nuevo generado', 1600, true);
+  } catch (e) {
+    avisarError(e, 'No se pudo generar el enlace');
+  }
+}
+/* PDF del remito digital: documento completo, un solo ejemplar y el QR de conformidad. */
+function pdfDigital() {
+  const url = enlacesDigitales[doc.id] || '';
+  if (!url && !(doc.conformidad || {}).conformado) {
+    return toast('Generá el enlace de conformidad antes de descargar el PDF', 3200, 'err');
+  }
+  const modoAnterior = calib.docMode;
+  if (modoAnterior !== 'full') setDocMode('full');
+  _remitoDigital = { id: doc.id, qr: url ? qrDe(url, 6) : '' };
+  closePanels();
+  dibujarPlantilla();
+  applyCalib();
+  document.title = 'Remito digital ' + doc.numero + ' ' + (doc.cliente.razonSocial || doc.cliente.senores || '');
+  auditar('remito_impreso', { id: doc.id });
+  toast('Elegí «Guardar como PDF» en el diálogo de impresión', 3000);
+  window.print();
+  alTerminarDeImprimir(() => {
+    _remitoDigital = null;
+    document.title = APP_TITLE;
+    if (modoAnterior !== 'full') setDocMode(modoAnterior);
+    else dibujarPlantilla();
+  });
+}
+function wireDigital() {
+  $('#btnDigital').addEventListener('click', abrirDigital);
+  $('#digitalClose').addEventListener('click', closePanels);
+  $('#digitalCancelar').addEventListener('click', closePanels);
+  $('#backdrop8').addEventListener('click', closePanels);
+  $('#digitalRenovar').addEventListener('click', renovarDigital);
+  $('#digitalPdf').addEventListener('click', pdfDigital);
+  $('#digitalCopiar').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText($('#digitalUrl').value);
+      toast('Enlace copiado', 1400, true);
+    } catch {
+      $('#digitalUrl').select();
+      toast('Copialo manualmente', 1600);
+    }
+  });
+  $('#digitalCompartir').addEventListener('click', async () => {
+    const url = $('#digitalUrl').value;
+    if (!url) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Remito Nº ' + doc.numero, text: 'Confirmá la recepción del remito', url });
+      } catch {
+        /* el usuario canceló */
+      }
+    } else {
+      $('#digitalCopiar').click();
+    }
+  });
 }
 
 function imprimirTestRemito() {
@@ -3454,6 +3656,7 @@ function wireAuditoriaErrores() {
 async function init() {
   wireAuditoriaErrores();
   wire();
+  wireDigital();
   wireServidor();
   bindForm();
   wireFormatos();

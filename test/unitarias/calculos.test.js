@@ -70,3 +70,20 @@ test('CUIT con dígito verificador', () => {
   assert.equal(c.cuitConGuiones('20123456786'), '20-12345678-6');
   assert.equal(c.formatoCuitODni('12345678'), '12345678');
 });
+
+test('contenido obligatorio del remito (RG 1415, Anexo V)', () => {
+  const completo = {
+    fecha: '05/11/2026',
+    cliente: { razonSocial: 'X', condIVA: 'Responsable Inscripto', cuit: '20-12345678-6', domicilio: 'Calle 1' },
+    items: [{ descripcion: 'Bien', cantidad: '1' }],
+    transporte: { tipo: 'propio' },
+  };
+  assert.deepEqual(c.faltantesRemito(completo), []);
+  const cf = structuredClone(completo);
+  Object.assign(cf.cliente, { condIVA: 'Consumidor Final', cuit: '', domicilio: '' });
+  assert.deepEqual(c.faltantesRemito(cf), []);
+  const tercero = structuredClone(completo);
+  tercero.transporte = { tipo: 'tercero' };
+  assert.equal(c.faltantesRemito(tercero).length, 3);
+  assert.equal(c.LEYENDAS_IVA['Consumidor Final'], 'A CONSUMIDOR FINAL');
+});

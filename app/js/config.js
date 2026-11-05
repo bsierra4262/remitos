@@ -317,6 +317,7 @@ const COMPANY = {
   localidad: 'CABA',
   mail: 'info@intellihelp.tech',
   ingBrutos: '901-30-71140975-7', // Ing. Brutos C.M. Nº
+  condIVA: 'IVA RESPONSABLE INSCRIPTO', // Leyenda obligatoria del emisor (RG 1415, Anexo V, I.a.5)
   inicioAct: '10/03/2010', // Fecha inicio de actividades
   codigo: '091', // Código de comprobante (Remito R)
   logo: 'assets/logos/ITH-logo-139x75.png',

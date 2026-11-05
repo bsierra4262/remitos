@@ -73,6 +73,7 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA), validación de datos, cabeceras, archivos internos |
 | `test_sesion.py` | Ingreso, freno por intentos sin revelar cuentas, cookie y CSRF, ingreso desde otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, reconfirmación limitada, segundo factor, traspaso de datos de versiones anteriores |
 | `test_cai.py` | Talonarios, numeración correlativa, autorizaciones simultáneas, inmutabilidad del autorizado, C.A.I. vencido, talonarios usados y autorización desde la aplicación |
+| `test_normativa.py` | Contenido obligatorio del remito (Anexo V), talonario sin constatar, conformidad del remito digital por API y desde la página pública en celular, PDF digital con QR |
 | `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, TOTP y XML para ARCA (mismos casos en JS y PHP) |
 
 ## Agregar un caso

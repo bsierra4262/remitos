@@ -1,0 +1,155 @@
+/*
+ * Remitos y Comprobantes — Intellihelp
+ * Página pública de conformidad de recepción (remito digital). Misma identidad visual
+ * que la aplicación: Saira · #663399 · #9f88b1 · #fff6ff · #fffade.
+ */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #fff6ff;
+  color: #161922;
+  font-family: 'Saira', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+.conf {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+.conf-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.conf-head h1 {
+  margin: 0;
+  font-size: 22px;
+  color: #663399;
+}
+.conf-head p {
+  margin: 0;
+  color: #6b6478;
+  font-size: 14px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #e6dcef;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 2px rgba(60, 30, 90, 0.05);
+}
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+}
+.card.err {
+  border-color: #f0c6c0;
+  background: #fff4f2;
+  color: #9b2c20;
+}
+.card.ok {
+  border-color: #b9dcc4;
+  background: #eef8f1;
+  color: #1f5e33;
+}
+.fila {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1ebf6;
+}
+.fila:last-child {
+  border-bottom: 0;
+}
+.fila span {
+  color: #6b6478;
+}
+.fila b {
+  text-align: right;
+}
+.items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.items th,
+.items td {
+  text-align: left;
+  padding: 6px 4px;
+  border-bottom: 1px solid #f1ebf6;
+  vertical-align: top;
+}
+.items th {
+  color: #6b6478;
+  font-weight: 600;
+}
+.obs {
+  font-size: 14px;
+  color: #3b3650;
+}
+label {
+  display: block;
+  margin: 12px 0 4px;
+  font-weight: 600;
+  font-size: 14px;
+}
+input,
+textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #d9cde6;
+  border-radius: 10px;
+  font: inherit;
+  background: #fff;
+}
+input:focus,
+textarea:focus {
+  outline: 2px solid #9f88b1;
+  border-color: #9f88b1;
+}
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-weight: 500;
+}
+.check input {
+  width: auto;
+  margin-top: 4px;
+}
+.btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 13px;
+  border: 0;
+  border-radius: 12px;
+  background: #663399;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.muted {
+  color: #6b6478;
+  font-weight: 400;
+}
+.aviso {
+  margin: 12px 0 0;
+  color: #9b2c20;
+}
+.conf-pie {
+  text-align: center;
+  color: #8a8296;
+  font-size: 12.5px;
+  margin-top: 20px;
+}

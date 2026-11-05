@@ -28,6 +28,8 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 | Fuerza bruta de contraseñas | Desde internet o con una sesión robada (reconfirmación) | Freno por correo y conexión, por conexión y por cuenta; reconfirmación limitada a 5 intentos; mensaje único que no revela si la cuenta existe |
 | Planilla manipulada al importar clientes | Excel diseñado para atacar el lector | SheetJS 0.20.3 (sin CVE conocidas), validación del CUIT y recorte de cada campo en el servidor |
 | Suplantación de HTTPS | Cabecera `X-Forwarded-Proto` falsificada | Solo se acepta desde `trusted_proxies`; HSTS |
+| Talonario con C.A.I. inválido o mal tipeado | Se imprimen remitos con un código que ARCA no reconoce | Constatación con WSCDC al cargar el talonario (CUIT, punto de venta, tipo, rango y fecha); un rechazo impide cargarlo |
+| Conformidad falsa de un remito digital | Un tercero confirma la recepción en nombre del destinatario | Enlace con token de 256 bits (solo se guarda el hash) que se entrega al destinatario; vence a los 60 días, se invalida al generar otro, es de un solo uso y registra nombre, documento, fecha e IP; freno de tokens inválidos por conexión |
 | Respuesta manipulada de ARCA | XML con entidades externas | `LIBXML_NONET`, rechazo de `DOCTYPE` y `ENTITY`, TLS verificado contra URLs fijas |
 
 ## 3. Respaldos
@@ -70,6 +72,7 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 | Auditoría | 400 días (depuración automática) | Evidencia de seguridad de al menos un ejercicio completo |
 | Intentos fallidos | 2 días | Solo para los frenos de fuerza bruta |
 | Borradores en el navegador | Se borran al cerrar sesión y a los 7 días sin uso | Equipos compartidos |
+| Copia digital de remitos no impresos (RG 5678/2025) | Al menos 2 años (los remitos autorizados no se eliminan) | Exigencia de la norma |
 | Respaldos | 30 en el servidor; las copias externas, según el plazo de los comprobantes | Recuperación |
 
 Los titulares pueden ejercer sus derechos de acceso, rectificación y supresión pidiéndolo a la empresa; un administrador corrige o elimina los datos de la agenda. Los comprobantes autorizados no se eliminan antes del plazo legal.

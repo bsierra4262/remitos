@@ -109,6 +109,8 @@ El número fiscal de un remito (punto de venta y correlativo, `00001-00000012`),
 
 Un remito autorizado no se modifica ni se elimina; solo admite la marca de facturado.
 
+**Contenido obligatorio (RG 1415, Anexo V).** Cada borrador devuelve `faltantes`, la lista de lo que le falta para poder autorizarse: condición del destinatario frente al IVA (`cliente.condIVA`), su CUIT y domicilio salvo que sea consumidor final, descripción y cantidad de los bienes, y el tipo de traslado (`transporte.tipo`: `propio` o `tercero`; con un tercero, `transporte.nombre`, `transporte.cuit` y `transporte.domicilio`). Ver [`normativa.md`](normativa.md).
+
 ### `POST remitos.php` — crear o editar un borrador · permiso `crear`
 
 ```json
@@ -118,6 +120,7 @@ Un remito autorizado no se modifica ni se elimina; solo admite la marca de factu
   "cliente": {
     "razonSocial": "DISTRIBUIDORA EJEMPLO S.A.",
     "cuit": "30-50001091-2",
+    "condIVA": "Responsable Inscripto",
     "domicilio": "Av. Corrientes 1234",
     "localidad": "CABA",
     "cp": "C1043",
@@ -127,7 +130,10 @@ Un remito autorizado no se modifica ni se elimina; solo admite la marca de factu
     { "articulo": "1", "descripcion": "Servicio técnico en sitio", "cantidad": "2 hs" }
   ],
   "recibi": { "tipoDoc": "DNI", "nombre": "María Gómez", "documentoNro": "30.123.456" },
-  "transporte": { "nombre": "Transportes Ejemplo", "hora": "14:30", "observaciones": "Entregar en recepción" }
+  "transporte": {
+    "tipo": "tercero", "nombre": "Transportes Ejemplo", "cuit": "20-12345678-6", "domicilio": "Ruta 3 km 40",
+    "hora": "14:30", "observaciones": "Entregar en recepción"
+  }
 }
 ```
 
@@ -150,14 +156,27 @@ Respuesta `201`:
 
 | Objeto | Campos |
 |---|---|
-| `cliente` | `senores`, `razonSocial`, `cuit`, `domicilio`, `localidad`, `telefono`, `cp`, `mail`, `nombre`, `otrosDatos` |
+| `cliente` | `senores`, `razonSocial`, `cuit`, `condIVA` (`Responsable Inscripto`, `Monotributo`, `Exento`, `No Responsable`, `Consumidor Final`, `Sujeto no categorizado`), `domicilio`, `localidad`, `telefono`, `cp`, `mail`, `nombre`, `otrosDatos` |
 | `items[]` | `articulo`, `descripcion`, `cantidad` |
 | `recibi` | `tipoDoc` (`DNI`, `CI`, `Pasaporte`, `Otro`), `nombre`, `documentoNro`, `sector`, `puesto` |
-| `transporte` | `nombre`, `vehiculo`, `chofer`, `lugarEntrega`, `fecha`, `hora`, `observaciones` |
+| `transporte` | `tipo` (`propio` o `tercero`), `nombre`, `cuit`, `domicilio`, `vehiculo`, `chofer`, `lugarEntrega`, `fecha`, `hora`, `observaciones` |
 
 ### `POST remitos.php` `{accion: "facturado", id, facturado}` — marca de facturado · permiso `crear`
 
 Marca o desmarca un remito como facturado; los autorizados sin marcar son los «pendientes de facturar» de `estado.php`.
+
+### `POST remitos.php` `{accion: "conformidad", id}` — remito digital · permiso `crear`
+
+RG 5678/2025: un remito autorizado puede viajar en formato digital si el destinatario puede confirmar la recepción. Devuelve `url` (`…/conformidad.html#<token>`), el enlace que se le envía al destinatario o se imprime como QR en el PDF digital. El token tiene 256 bits, se guarda solo su SHA-256, vence a los 60 días y queda invalidado si se genera uno nuevo. Responde `409` si el remito no está autorizado o si la recepción ya se confirmó. El remito informa en `conformidad` si hay un enlace activo y, una vez confirmado, quién lo recibió (`nombre`, `documento`, `observaciones`) y cuándo (`conformado`).
+
+### `POST conformidad.php` — conformidad del destinatario · público (con el token)
+
+| Cuerpo | Operación |
+|---|---|
+| `{accion: "ver", token}` | Datos de la copia del remito: número, fecha, C.A.I., destinatario, bienes, lugar de entrega y estado de la conformidad |
+| `{accion: "conformar", token, nombre, documento, observaciones?, conforme: true}` | Registra la recepción con fecha, hora y conexión (una sola vez: después `409`) |
+
+No usa sesión ni clave: la credencial es el token. Solo se acepta como JSON desde el propio sitio. Un token inválido o vencido responde `404` y, tras 20 en 15 minutos desde la misma conexión, `429`.
 
 ### `GET remitos.php?id={id}` — leer · permiso `leer`
 
@@ -204,7 +223,7 @@ Campos para la emisión: `conceptoTipo` (1 productos, 2 servicios, 3 ambos), `se
 
 ### `GET estado.php` — seguimiento · permiso `leer`
 
-Remitos totales, autorizados, del día y **pendientes de facturar** (autorizados sin la marca de facturado). No incluye importes, ítems, CUIT ni domicilios. Con `?formato=texto` devuelve el mismo resumen en texto plano.
+Remitos totales, autorizados, del día, **pendientes de facturar** (autorizados sin la marca de facturado) y **pendientes de conformidad** (remitos digitales enviados sin confirmación del destinatario). No incluye importes, ítems, CUIT ni domicilios. Con `?formato=texto` devuelve el mismo resumen en texto plano.
 
 ## Exportación
 
@@ -218,12 +237,22 @@ Remitos, comprobantes y clientes en JSON, para la copia descargable de la aplica
 |---|---|---|
 | `GET talonarios.php?accion=listar` | Talonarios con restantes, vencimiento y alertas; `remitos_autorizados` cuenta los remitos autorizados reales | admin |
 | `GET talonarios.php?accion=vigente&pv=1&tipo=91` | Talonario activo, sin consumir número | `leer` |
-| `POST talonarios.php` `{punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, tipo_comprobante?}` | Alta (valida tipo de comprobante, rango, superposición, C.A.I. de 14 dígitos y una fecha de vencimiento real y vigente) | admin |
-| `POST talonarios.php` `{accion: "autorizar", remito_id, pv, tipo, fecha, confirmar?}` | Asigna el próximo número y el C.A.I. al remito, en una transacción con bloqueo de fila | `crear` |
+| `POST talonarios.php` `{punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, tipo_comprobante?, sin_verificar?}` | Alta (valida tipo de comprobante, rango, superposición, C.A.I. de 14 dígitos y una fecha de vencimiento real y vigente) y **constata el C.A.I. con ARCA** | admin |
+| `POST talonarios.php` `{accion: "verificar", id}` | Vuelve a constatar un talonario con ARCA | admin |
+| `POST talonarios.php` `{accion: "autorizar", remito_id, pv, tipo, fecha}` | Asigna el próximo número y el C.A.I. al remito, en una transacción con bloqueo de fila | `crear` |
 | `POST talonarios.php` `{id, activa}` | Activar o desactivar | admin |
 | `DELETE talonarios.php?id={id}` | Elimina un talonario cargado por error y nunca usado. Uno que ya autorizó remitos es respaldo de esos comprobantes: se desactiva (`409`) | admin |
 
-`autorizar` exige `remito_id`: cada número se asigna a un remito concreto y nunca se consumen números sueltos. Si el C.A.I. está vencido a la fecha de emisión, responde `409` con `"vencido": true` y solo continúa con `"confirmar": true`.
+**Constatación (WSCDC).** ARCA no ofrece un servicio para pedir el C.A.I., pero sí para constatarlo. Al dar de alta un talonario, el servidor llama a `ComprobanteConstatar` en modo `CAI` con el primer y el último número del rango, el CUIT del emisor, el punto de venta, el tipo y la fecha del día, usando el certificado de **producción** (los C.A.I. reales solo existen ahí) con el servicio `wscdc` asociado. La respuesta incluye `verificacion.estado`:
+
+| `estado` | Resultado |
+|---|---|
+| `verificado` | ARCA lo aprobó; el talonario queda con `verificado_arca` |
+| `rechazado` | `422` con los mensajes de ARCA: no se carga |
+| `error` | ARCA no respondió o el certificado no tiene `wscdc`: `502` con `puede_cargar_sin_verificar`; con `"sin_verificar": true` se carga marcado «sin constatar» |
+| `sin_credenciales` | No hay certificado de producción: se carga marcado «sin constatar» |
+
+**Autorizar.** Exige `remito_id`: cada número se asigna a un remito concreto y nunca se consumen números sueltos. Responde `422` con `faltan` si el remito no tiene los datos del Anexo V, y `409` con `"vencido": true` si el C.A.I. está vencido a la fecha de emisión: un comprobante con C.A.I. vencido no es válido, así que no hay forma de forzarlo.
 
 ## ARCA
 

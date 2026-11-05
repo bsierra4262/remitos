@@ -15,7 +15,7 @@ def guia_formato():
         return False, "no está el PDF de la guía"
     d = fitz.open(GUIA)
     mm = [round(v / 2.834, 1) for v in (d[0].rect.width, d[0].rect.height)]
-    ok = 3 <= d.page_count <= 4 and abs(mm[0] - 210) < 2 and abs(mm[1] - 297) < 2
+    ok = 3 <= d.page_count <= 5 and abs(mm[0] - 210) < 2 and abs(mm[1] - 297) < 2
     return ok, f"{d.page_count} páginas de {mm[0]}×{mm[1]} mm"
 
 
@@ -49,7 +49,7 @@ def guia_sin_titulos_cortados():
     for i in range(d.page_count):
         alto = d[i].rect.height
         for b in d[i].get_text("blocks"):
-            x0, y0, x1, y1, txt = b[0], b[1], b[2], b[3], b[4].strip()
+            y0, y1, txt = b[1], b[3], b[4].strip()
             if not txt:
                 continue
             # un bloque que arranca a menos de 12 pt del borde inferior quedó cortado

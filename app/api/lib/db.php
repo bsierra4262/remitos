@@ -18,7 +18,7 @@
 declare(strict_types=1);
 
 /** Versión del esquema que espera este código. */
-const API_SCHEMA_VERSION = 3;
+const API_SCHEMA_VERSION = 4;
 
 /** Zona horaria de la sesión de base de datos (Argentina, UTC−3 todo el año). */
 const API_DB_TIMEZONE = '-03:00';
@@ -73,6 +73,7 @@ function api_migrate(PDO $pdo): void
             1 => 'api_migration_1',
             2 => 'api_migration_2',
             3 => 'api_migration_3',
+            4 => 'api_migration_4',
         ];
         foreach ($migrations as $version => $migration) {
             if ($version > $current) {
@@ -417,5 +418,28 @@ function api_migration_3(PDO $pdo): void
     }
     if (!api_index_exists($pdo, 'comprobantes', 'uq_id_local')) {
         $pdo->exec('ALTER TABLE comprobantes ADD UNIQUE KEY uq_id_local (id_local)');
+    }
+}
+
+/**
+ * Noviembre de 2026, normativa de remitos:
+ * - Talonarios verificados con ARCA (WSCDC, constatación de comprobantes con C.A.I.).
+ * - Remito digital (RG 5678/2025): enlace de conformidad para el destinatario y registro
+ *   de quién confirmó la recepción, cuándo y desde dónde.
+ */
+function api_migration_4(PDO $pdo): void
+{
+    api_add_column($pdo, 'cai_talonarios', 'verificado_arca', 'DATETIME DEFAULT NULL');
+    api_add_column($pdo, 'cai_talonarios', 'verificacion', 'VARCHAR(255) DEFAULT NULL');
+
+    api_add_column($pdo, 'remitos', 'conformidad_hash', 'CHAR(64) DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'conformidad_desde', 'DATETIME DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'conformado', 'DATETIME DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'conformado_nombre', 'VARCHAR(120) DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'conformado_doc', 'VARCHAR(20) DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'conformado_obs', 'VARCHAR(300) DEFAULT NULL');
+    api_add_column($pdo, 'remitos', 'conformado_ip', 'VARCHAR(45) DEFAULT NULL');
+    if (!api_index_exists($pdo, 'remitos', 'uq_conformidad')) {
+        $pdo->exec('ALTER TABLE remitos ADD UNIQUE KEY uq_conformidad (conformidad_hash)');
     }
 }

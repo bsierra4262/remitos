@@ -2898,3 +2898,7 @@ body.es-admin .solo-operador {
   word-break: break-all;
   margin-bottom: 10px;
 }
+.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}

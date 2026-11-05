@@ -29,6 +29,7 @@ $total = (int) $pdo->query('SELECT COUNT(*) FROM remitos')->fetchColumn();
 $authorized = (int) $pdo->query("SELECT COUNT(*) FROM remitos WHERE estado = 'autorizado'")->fetchColumn();
 $ofToday = (int) $pdo->query('SELECT COUNT(*) FROM remitos WHERE fecha_emision = CURDATE()')->fetchColumn();
 $pendingWhere = "estado = 'autorizado' AND facturado = 0";
+$toConfirm = (int) $pdo->query('SELECT COUNT(*) FROM remitos WHERE conformidad_hash IS NOT NULL AND conformado IS NULL')->fetchColumn();
 $pendingCount = (int) $pdo->query("SELECT COUNT(*) FROM remitos WHERE $pendingWhere")->fetchColumn();
 
 $rows = $pdo->query(
@@ -80,6 +81,7 @@ api_respond(200, [
     'resumen' => [
         'remitos_totales' => $total,
         'remitos_autorizados' => $authorized,
+        'pendientes_conformidad' => $toConfirm,
         'remitos_de_hoy' => $ofToday,
         'pendientes_facturar' => $pendingCount,
     ],

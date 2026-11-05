@@ -22,7 +22,8 @@
 **Remitos y Comprobantes de Intellihelp**: aplicación interna para emitir **remitos**, **facturas**, **recibos** y **notas de crédito y débito** con el diseño del talonario de la empresa, imprimirlos y guardarlos en PDF.
 
 - El **remito** se imprime **sobre el talonario pre-impreso**, con cada dato calibrado al milímetro, o como **documento completo** en papel en blanco o PDF, con original y duplicado.
-- Se **autoriza** con el **C.A.I.** del talonario vigente: número correlativo, código y vencimiento se asignan solos. Hasta entonces es un borrador que se imprime «SIN AUTORIZAR».
+- Se **autoriza** con el **C.A.I.** del talonario vigente: número correlativo, código y vencimiento se asignan solos. Hasta entonces es un borrador que se imprime «SIN AUTORIZAR». Cada talonario se **constata con ARCA** (WSCDC) al cargarlo.
+- **Remito digital** (RG 5678/2025): el remito autorizado puede viajar como PDF en el celular, con un QR para que el destinatario **confirme la recepción** desde su teléfono.
 - Las **facturas, recibos y notas** se **emiten con CAE** a través de los web services de **ARCA** (WSFEv1), con número asignado por ARCA y **QR fiscal**.
 - **Datos compartidos**: clientes, remitos, comprobantes y ajustes viven en el servidor; todo el equipo trabaja sobre la misma información, con **usuarios y roles**.
 - Si se corta la conexión, el documento en curso se sigue guardando en el equipo y se sube solo al volver la red.
@@ -133,6 +134,9 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 - Ejemplares **original y duplicado** (RG 1415, art. 14); el duplicado se imprime en beige, como el talonario.
 - **Autorización** con el C.A.I.: número correlativo dentro del rango, código y vencimiento; bloqueo si el C.A.I. está vencido y avisos por pocos números o vencimiento próximo.
 - El número fiscal solo existe en los remitos autorizados (único por punto de venta en la base); los borradores llevan una referencia interna. Un remito autorizado no se modifica y se marca como **facturado** cuando tiene su factura.
+- **Contenido obligatorio de la RG 1415 (Anexo V)**: condición frente al IVA del emisor y del destinatario, CUIT y domicilio del destinatario, bienes con su cantidad, y razón social, CUIT y domicilio del transportista cuando el traslado lo hace un tercero. El sistema no autoriza un remito incompleto ni con un C.A.I. vencido.
+- **Constatación del C.A.I.** con el web service de ARCA (WSCDC) al cargar cada talonario: CUIT, punto de venta, tipo, rango y vigencia. ARCA no ofrece un servicio para *pedir* el C.A.I.: se tramita con Clave Fiscal y el sistema avisa con tiempo cuando hace falta el próximo.
+- **Remito digital** (RG 5678/2025): PDF de un solo ejemplar sin leyendas ORIGINAL/DUPLICADO, con el QR del enlace de conformidad; el destinatario confirma con nombre y documento y queda registrado con fecha y hora. Detalle de cada requisito en [`docs/normativa.md`](docs/normativa.md).
 - Fecha automática en hora de Buenos Aires tomada del reloj del servidor; editable.
 - Impresión de prueba con datos ficticios, hoja con grilla en milímetros y prueba de posiciones para calibrar.
 
@@ -193,7 +197,8 @@ flowchart LR
 | **WSFEv1 · FECompUltimoAutorizado** | Último número autorizado por punto de venta y tipo: el comprobante toma el siguiente |
 | **WSFEv1 · FECAESolicitar** | Emisión: CAE y vencimiento de facturas, notas y recibos A, B y C |
 | **WSFEv1 · FECompConsultar** | Recupera el CAE de un comprobante cuya respuesta se perdió, antes de pedir otro número |
-| **C.A.I.** | ARCA no ofrece web service: se tramita con Clave Fiscal y se carga en el panel una vez por rango |
+| **WSCDC · ComprobanteConstatar** | Constata cada talonario de C.A.I. (CUIT, punto de venta, tipo, rango y vigencia) al cargarlo |
+| **C.A.I.** | ARCA no ofrece web service para solicitarlo: se tramita con Clave Fiscal y se carga en el panel una vez por rango |
 
 Ambientes de **homologación** y **producción**, cada uno con su propio certificado. El instructivo paso a paso para obtener el certificado está en [`app/docs/guia-credenciales-arca.pdf`](app/docs/guia-credenciales-arca.pdf) y la referencia de la API en [`docs/api.md`](docs/api.md).
 
@@ -205,6 +210,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 ├── app/                     # Se publica tal cual en public_html/remitos
 │   ├── index.html           # Aplicación
 │   ├── panel.html           # Panel de administración de la API
+│   ├── conformidad.html     # Página pública para confirmar la recepción de un remito digital
 │   ├── css/                 # Estilos de la aplicación y del panel, y la fuente autoalojada
 │   ├── js/
 │   │   ├── config.js        # Papel, posición de cada campo, calibración de fábrica, datos del emisor
@@ -216,7 +222,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   ├── api/
 │   │   ├── bootstrap.php    # Arranque común y manejo de errores
 │   │   ├── lib/             # http · db (migraciones) · session · users · totp · auth · audit · crypto
-│   │   │                    # · importes · ajustes · arca
+│   │   │                    # · importes · ajustes · normativa · arca (WSAA, WSFEv1, WSCDC)
 │   │   ├── sesion.php       # Ingreso, segundo factor, salida y cambio de contraseña
 │   │   ├── usuarios.php     # Administración de usuarios
 │   │   ├── clientes.php     # Agenda de clientes
@@ -228,13 +234,14 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   │   ├── proximo.php      # Próximo número según ARCA
 │   │   ├── estado.php       # Seguimiento sin datos confidenciales
 │   │   ├── claves.php       # Claves de servicio y auditoría
+│   │   ├── conformidad.php  # Conformidad del destinatario de un remito digital (público, con token)
 │   │   ├── evento.php       # Eventos de la interfaz (catálogo cerrado)
 │   │   ├── exportar.php     # Copia de los datos (solo administradores, auditada)
 │   │   ├── cli/             # migrar · usuario · respaldo · restaurar · rotar-clave
 │   │   └── config.sample.php
 │   ├── docs/                # Instructivo de alta en ARCA (HTML y PDF)
 │   └── assets/              # Logos y fuente Saira
-├── docs/                    # API, seguridad, dependencias, remediación, banner y capturas
+├── docs/                    # API, normativa, seguridad, dependencias, remediación, banner y capturas
 ├── test/                    # Batería (Playwright) y pruebas unitarias (Node y PHP)
 ├── tools/                   # Generación del instructivo en PDF
 └── .github/workflows/       # Integración continua
@@ -332,7 +339,7 @@ node --test test/unitarias/calculos.test.js   # unitarias de la interfaz
 php test/unitarias/importes.test.php          # unitarias del servidor
 ```
 
-**91 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, usuarios, sesión, segundo factor y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
+**97 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, sesión, segundo factor y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 

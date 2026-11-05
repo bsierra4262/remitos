@@ -2,42 +2,13 @@
 
 Crean un talonario y una clave de prueba, y limpian al terminar.
 """
+import concurrent.futures
 from datetime import date, timedelta
 
 from playwright.sync_api import sync_playwright
 
-import concurrent.futures
-
-from base import _sql, abrir, caso, clave_maestra, es_local, ir_a, modo_documento, pedir
-
-VTO = (date.today() + timedelta(days=200)).isoformat()
-
-
-def _talonario(desde=1, hasta=50, cai="75041234567890", vto=VTO, pv=1):
-    if es_local() and desde == 1:  # restos de una corrida interrumpida en ese punto de venta
-        _sql(f"DELETE FROM remitos WHERE punto_venta = {int(pv)}")
-        _sql(f"DELETE FROM cai_talonarios WHERE punto_venta = {int(pv)}")
-    return pedir("/talonarios.php", "POST", clave_maestra(), {
-        "punto_venta": pv, "numero_desde": desde, "numero_hasta": hasta,
-        "cai": cai, "cai_vencimiento": vto})
-
-
-def _borrar_talonario(tid):
-    """Un talonario usado no se puede borrar por la API (es respaldo de los remitos
-    autorizados): en la base local de pruebas se limpian directo con SQL."""
-    if not tid:
-        return
-    if es_local():
-        _sql(f"DELETE r FROM remitos r JOIN cai_talonarios t ON r.punto_venta = t.punto_venta "
-             f"AND r.numero_int BETWEEN t.numero_desde AND t.numero_hasta WHERE t.id = {int(tid)}")
-        _sql(f"DELETE FROM cai_talonarios WHERE id = {int(tid)}")
-    else:
-        pedir("/talonarios.php", "POST", clave_maestra(), {"id": tid, "activa": False})
-
-
-def _remito(nombre="PARA AUTORIZAR"):
-    return pedir("/remitos.php", "POST", clave_maestra(), {"cliente": {"razonSocial": nombre}})[1]["id"]
-
+from base import (DOC_COMPLETO_JS, REMITO_COMPLETO, VTO, _borrar_talonario, _remito, _talonario, abrir, caso,
+                  clave_maestra, ir_a, modo_documento, pedir)
 
 def _autorizar(pv, **extra):
     cuerpo = {"accion": "autorizar", "pv": pv, "tipo": 91, "remito_id": _remito()}
@@ -91,7 +62,7 @@ def numeracion_correlativa():
         _borrar_talonario(tid)
 
 
-@caso("Un C.A.I. vencido a la fecha de emisión no autoriza sin confirmar")
+@caso("Un C.A.I. vencido a la fecha de emisión no autoriza, ni siquiera confirmando")
 def cai_vencido_bloquea():
     m = clave_maestra()
     if not m:
@@ -105,9 +76,9 @@ def cai_vencido_bloquea():
         cuerpo = {"accion": "autorizar", "pv": 92, "tipo": 91, "fecha": futuro, "remito_id": rid}
         s, d = pedir("/talonarios.php", "POST", m, cuerpo)
         bloqueo = s == 409 and d.get("vencido")
-        s, d = pedir("/talonarios.php", "POST", m, dict(cuerpo, confirmar=True))
-        con_confirmar = d.get("ok")
-        return bloqueo and con_confirmar, f"bloqueó={bloqueo} confirmar_permite={con_confirmar}"
+        s2, d2 = pedir("/talonarios.php", "POST", m, dict(cuerpo, confirmar=True))
+        sigue = s2 == 409
+        return bloqueo and sigue, f"bloqueó={bloqueo} con_confirmar={s2}"
     finally:
         _borrar_talonario(tid)
 
@@ -152,7 +123,7 @@ def remito_autoriza_solo():
             b, pg, errs = abrir(pw)
             try:
                 ir_a(pg, "remito")
-                pg.evaluate("() => { nuevo(); doc.cliente.razonSocial = 'CLIENTE AUTORIZADO'; doc.fecha = '21/07/2026'; formFromDoc(); renderPreview(); }")
+                pg.evaluate("() => { nuevo(); " + DOC_COMPLETO_JS + " doc.fecha = '21/07/2026'; formFromDoc(); renderPreview(); }")
                 pg.click("#btnAutorizar")
                 pg.wait_for_timeout(2500)
                 est = pg.evaluate("() => ({estado: doc.estado, numero: doc.numero, cai: doc.cai, id: doc.id})")
@@ -184,7 +155,7 @@ def autorizado_protegido():
     s, d = _talonario(desde=1, hasta=5, pv=96)
     tid = d.get("id")
     try:
-        _, r = pedir("/remitos.php", "POST", m, {"cliente": {"razonSocial": "PROTEGIDO"}})
+        _, r = pedir("/remitos.php", "POST", m, dict(REMITO_COMPLETO, cliente=dict(REMITO_COMPLETO["cliente"], razonSocial="PROTEGIDO")))
         rid = r["id"]
         s1, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 96, "tipo": 91, "remito_id": rid})
         s2, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 96, "tipo": 91, "remito_id": rid})
@@ -226,7 +197,7 @@ def autorizar_sin_talonario():
             b, pg, errs = abrir(pw)
             try:
                 ir_a(pg, "remito")
-                pg.evaluate("() => { nuevo(); doc.cliente.razonSocial = 'SIN TALONARIO'; formFromDoc(); }")
+                pg.evaluate("() => { nuevo(); " + DOC_COMPLETO_JS + " doc.cliente.razonSocial = 'SIN TALONARIO'; formFromDoc(); }")
                 pg.click("#btnAutorizar")
                 pg.wait_for_timeout(1500)
                 aviso = pg.evaluate("""() => { const t = document.querySelector('.toast');

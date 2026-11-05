@@ -697,3 +697,81 @@ function arca_cae_lookup(PDO $pdo, array $config, string $environment, int $poin
         'fecha' => arca_wsfe_value($doc, 'CbteFch'),
     ];
 }
+
+/* --------------------- WSCDC · Constatación de comprobantes --------------------- */
+
+const ARCA_WSCDC_URL = [
+    'homologacion' => 'https://wswhomo.afip.gob.ar/WSCDC/service.asmx',
+    'produccion' => 'https://servicios1.arca.gob.ar/WSCDC/service.asmx',
+];
+
+const ARCA_WSCDC_NS = 'http://servicios1.afip.gob.ar/wscdc/';
+
+/**
+ * Pedido de ComprobanteConstatar para un comprobante con C.A.I. Los remitos no tienen
+ * importe: se informa en cero, como indica el manual de WSCDC (validación 110).
+ */
+function arca_constatar_request(array $ticket, string $cuitEmisor, int $pointOfSale, int $cbteTipo, int $number, string $dateYmd, string $cai): string
+{
+    $x = static fn (string|int $v): string => htmlspecialchars((string) $v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+    return '<?xml version="1.0" encoding="UTF-8"?>'
+        . '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsf="' . ARCA_WSCDC_NS . '">'
+        . '<soap:Body><wsf:ComprobanteConstatar>'
+        . '<wsf:Auth><wsf:Token>' . $x($ticket['token']) . '</wsf:Token><wsf:Sign>' . $x($ticket['sign']) . '</wsf:Sign>'
+        . '<wsf:Cuit>' . $x($ticket['cuit']) . '</wsf:Cuit></wsf:Auth>'
+        . '<wsf:CmpReq><wsf:CbteModo>CAI</wsf:CbteModo><wsf:CuitEmisor>' . $x($cuitEmisor) . '</wsf:CuitEmisor>'
+        . '<wsf:PtoVta>' . $pointOfSale . '</wsf:PtoVta><wsf:CbteTipo>' . $cbteTipo . '</wsf:CbteTipo>'
+        . '<wsf:CbteNro>' . $number . '</wsf:CbteNro><wsf:CbteFch>' . $x($dateYmd) . '</wsf:CbteFch>'
+        . '<wsf:ImpTotal>0</wsf:ImpTotal><wsf:CodAutorizacion>' . $x($cai) . '</wsf:CodAutorizacion></wsf:CmpReq>'
+        . '</wsf:ComprobanteConstatar></soap:Body></soap:Envelope>';
+}
+
+/**
+ * Resultado de ComprobanteConstatar. Se busca por nombre local: el servicio no siempre
+ * califica los elementos de la respuesta con su espacio de nombres.
+ *
+ * @return array{resultado: string, observaciones: string[], errores: string[]}
+ */
+function arca_constatar_result(DOMDocument $doc): array
+{
+    $xpath = new DOMXPath($doc);
+    $value = static fn (string $name): string => trim((string) $xpath->query('//*[local-name()="' . $name . '"]')->item(0)?->textContent);
+    $messages = static function (string $container, string $item) use ($xpath): array {
+        $out = [];
+        foreach ($xpath->query('//*[local-name()="' . $container . '"]/*[local-name()="' . $item . '"]') as $entry) {
+            $code = trim((string) $xpath->query('./*[local-name()="Code"]', $entry)->item(0)?->textContent);
+            $msg = preg_replace('/\s+/', ' ', trim((string) $xpath->query('./*[local-name()="Msg"]', $entry)->item(0)?->textContent));
+            $out[] = ($code !== '' ? '[' . $code . '] ' : '') . mb_substr((string) $msg, 0, 300);
+        }
+
+        return $out;
+    };
+
+    return [
+        'resultado' => $value('Resultado'),
+        'observaciones' => $messages('Observaciones', 'Obs'),
+        'errores' => $messages('Errors', 'Err'),
+    ];
+}
+
+/**
+ * Constata en ARCA (WSCDC) que un C.A.I. corresponde al CUIT, al punto de venta, al tipo
+ * de comprobante, a un número y a una fecha: es la forma de validar un talonario antes
+ * de usarlo. ARCA no ofrece un servicio para solicitar el C.A.I., solo para constatarlo.
+ *
+ * Requiere un certificado con el servicio «wscdc» asociado en ARCA.
+ *
+ * @return array{resultado: string, observaciones: string[], errores: string[]}
+ */
+function arca_cai_constatar(PDO $pdo, array $config, string $environment, string $cuitEmisor, int $pointOfSale, int $cbteTipo, int $number, string $dateYmd, string $cai): array
+{
+    $ticket = arca_ticket($pdo, $config, $environment, 'wscdc');
+    $doc = arca_soap(
+        ARCA_WSCDC_URL[$environment],
+        arca_constatar_request($ticket, $cuitEmisor, $pointOfSale, $cbteTipo, $number, $dateYmd, $cai),
+        ARCA_WSCDC_NS . 'ComprobanteConstatar'
+    );
+
+    return arca_constatar_result($doc);
+}

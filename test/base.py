@@ -209,3 +209,51 @@ def _sql(sentencia):
     subprocess.run([cliente, "-h", "127.0.0.1", "-P", os.environ.get("REMITOS_DB_PORT", "3307"), "-uroot",
                     "-p" + os.environ.get("REMITOS_DB_PASS", "testroot"), os.environ.get("REMITOS_DB", "remitos_test"),
                     "-e", sentencia], check=True, capture_output=True)
+
+
+# --------------------------------------------------------------------------- #
+#  Talonarios y remitos completos (compartidos por test_cai y test_normativa)
+# --------------------------------------------------------------------------- #
+from datetime import date, timedelta  # noqa: E402
+
+VTO = (date.today() + timedelta(days=200)).isoformat()
+
+
+def _talonario(desde=1, hasta=50, cai="75041234567890", vto=VTO, pv=1):
+    if es_local() and desde == 1:  # restos de una corrida interrumpida en ese punto de venta
+        _sql(f"DELETE FROM remitos WHERE punto_venta = {int(pv)}")
+        _sql(f"DELETE FROM cai_talonarios WHERE punto_venta = {int(pv)}")
+    return pedir("/talonarios.php", "POST", clave_maestra(), {
+        "punto_venta": pv, "numero_desde": desde, "numero_hasta": hasta,
+        "cai": cai, "cai_vencimiento": vto})
+
+
+def _borrar_talonario(tid):
+    """Un talonario usado no se puede borrar por la API (es respaldo de los remitos
+    autorizados): en la base local de pruebas se limpian directo con SQL."""
+    if not tid:
+        return
+    if es_local():
+        _sql(f"DELETE r FROM remitos r JOIN cai_talonarios t ON r.punto_venta = t.punto_venta "
+             f"AND r.numero_int BETWEEN t.numero_desde AND t.numero_hasta WHERE t.id = {int(tid)}")
+        _sql(f"DELETE FROM cai_talonarios WHERE id = {int(tid)}")
+    else:
+        pedir("/talonarios.php", "POST", clave_maestra(), {"id": tid, "activa": False})
+
+
+# Remito con todos los datos que exige la RG 1415 (Anexo V) para poder autorizarse.
+REMITO_COMPLETO = {
+    "cliente": {"razonSocial": "PARA AUTORIZAR", "cuit": "30-50001091-2", "condIVA": "Responsable Inscripto",
+                "domicilio": "Av. Montes de Oca 1450"},
+    "items": [{"articulo": "1", "descripcion": "Servicio técnico", "cantidad": "2 hs"}],
+    "transporte": {"tipo": "propio"},
+}
+DOC_COMPLETO_JS = """Object.assign(doc.cliente, { razonSocial: 'CLIENTE AUTORIZADO', cuit: '30-50001091-2',
+    condIVA: 'Responsable Inscripto', domicilio: 'Av. Montes de Oca 1450' });
+    doc.items = [{ articulo: '1', descripcion: 'Servicio técnico', cantidad: '2 hs' }];
+    doc.transporte.tipo = 'propio';"""
+
+
+def _remito(nombre="PARA AUTORIZAR"):
+    cuerpo = dict(REMITO_COMPLETO, cliente=dict(REMITO_COMPLETO["cliente"], razonSocial=nombre))
+    return pedir("/remitos.php", "POST", clave_maestra(), cuerpo)[1]["id"]

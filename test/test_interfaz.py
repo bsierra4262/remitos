@@ -9,7 +9,7 @@ import uuid
 
 from playwright.sync_api import sync_playwright
 
-from base import ADMIN_CLAVE, abrir, caso, clave_maestra, es_local, ir_a, limpiar_datos, modo_documento, pedir
+from base import ADMIN_CLAVE, abrir, caso, clave_maestra, es_local, ir_a, modo_documento, pedir
 
 
 def _con_pagina(fn, ancho=1440, alto=900):

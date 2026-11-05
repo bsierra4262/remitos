@@ -22,6 +22,7 @@ require $api . '/http.php';
 require $api . '/importes.php';
 require $api . '/totp.php';
 require $api . '/arca.php';
+require $api . '/normativa.php';
 
 $fallas = 0;
 $total = 0;
@@ -79,6 +80,34 @@ verificar(str_contains($xml, '<ar:ImpTotal>2987.64</ar:ImpTotal>') && str_contai
 verificar(strpos($xml, 'FchServDesde') < strpos($xml, 'MonId') && strpos($xml, 'CbtesAsoc') < strpos($xml, '<ar:Iva>'), 'orden del esquema WSFEv1');
 verificar(!str_contains($xml, '<ar:CbteFch></ar:CbteFch>'), 'fecha del asociado vacía se omite');
 verificar(arca_xml('<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>') === null, 'XML con DOCTYPE rechazado');
+
+// WSCDC: pedido de constatación de un remito con C.A.I. (importe en cero) y lectura de la
+// respuesta de ejemplo del manual de ARCA (validación 108, fecha fuera del rango del C.A.I.).
+$pedido = arca_constatar_request(['token' => 'T', 'sign' => 'S', 'cuit' => '30711409757'], '30711409757', 1, 91, 25, '20261105', '75041234567890');
+verificar(str_contains($pedido, '<wsf:CbteModo>CAI</wsf:CbteModo>') && str_contains($pedido, '<wsf:CbteTipo>91</wsf:CbteTipo>')
+    && str_contains($pedido, '<wsf:ImpTotal>0</wsf:ImpTotal>') && str_contains($pedido, 'xmlns:wsf="http://servicios1.afip.gob.ar/wscdc/"'), 'pedido WSCDC');
+$respuesta = arca_xml('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
+    . '<ComprobanteConstatarResponse xmlns="http://servicios1.afip.gob.ar/wscdc/"><ComprobanteConstatarResult>'
+    . '<CmpResp><CbteModo>CAI</CbteModo></CmpResp><Resultado>R</Resultado><Observaciones><Obs><Code>108</Code>'
+    . '<Msg>La fecha consignada no se encuentra dentro del rango de fechas habilitadas para el CAI ingresado</Msg></Obs>'
+    . '</Observaciones><FchProceso>20130912110834</FchProceso></ComprobanteConstatarResult></ComprobanteConstatarResponse>'
+    . '</soap:Body></soap:Envelope>');
+$r = arca_constatar_result($respuesta);
+verificar($r['resultado'] === 'R' && str_starts_with($r['observaciones'][0] ?? '', '[108] La fecha consignada'), 'respuesta WSCDC rechazada');
+$ok = arca_constatar_result(arca_xml('<a><Resultado>A</Resultado></a>'));
+verificar($ok['resultado'] === 'A' && $ok['observaciones'] === [] && $ok['errores'] === [], 'respuesta WSCDC aprobada');
+
+// Contenido obligatorio del remito (RG 1415, Anexo V).
+$completo = [
+    'fecha' => '05/11/2026',
+    'cliente' => ['razonSocial' => 'X', 'condIVA' => 'Responsable Inscripto', 'cuit' => '20-12345678-6', 'domicilio' => 'Calle 1'],
+    'items' => [['descripcion' => 'Bien', 'cantidad' => '1']],
+    'transporte' => ['tipo' => 'propio'],
+];
+verificar(remito_faltantes($completo) === [], 'remito completo');
+verificar(remito_faltantes(array_replace_recursive($completo, ['cliente' => ['condIVA' => 'Consumidor Final', 'cuit' => '', 'domicilio' => '']])) === [], 'consumidor final sin CUIT');
+verificar(count(remito_faltantes(array_replace_recursive($completo, ['transporte' => ['tipo' => 'tercero']]))) === 3, 'transportista tercero');
+verificar(in_array('la cantidad del ítem 1', remito_faltantes(array_replace($completo, ['items' => [['descripcion' => 'Bien']]])), true), 'cantidad obligatoria');
 
 echo $fallas === 0 ? "Pruebas unitarias del servidor: los $total casos pasaron\n" : "$fallas de $total casos fallaron\n";
 exit($fallas === 0 ? 0 : 1);

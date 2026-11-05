@@ -156,10 +156,13 @@ openssl req -new -key intellihelp.key \
   confirmar. ARCA devuelve un certificado X.509 en formato PEM. Guardarlo como
   <code>intellihelp.crt</code>.</p>
 
-  <div class="paso-tit"><span class="n">4</span><h2>Autorizar el servicio de facturación</h2></div>
+  <div class="paso-tit"><span class="n">4</span><h2>Autorizar los servicios</h2></div>
   <p>En <b>Crear Autorización a Servicio</b>: elegir el certificado recién creado, indicar el
   <b>CUIT emisor</b> y seleccionar el servicio <code>wsfe – Facturación Electrónica</code>. Con esto
   el certificado queda habilitado para solicitar CAE.</p>
+  <p>Repetir la autorización con el servicio <code>wscdc – Constatación de Comprobantes</code>. Es el
+  que usa el sistema para <b>verificar con ARCA el C.A.I. de los remitos</b> al cargar cada talonario
+  (paso 8).</p>
 
   <div class="paso-tit"><span class="n">5</span><h2>Cargar las credenciales en el sistema</h2></div>
   <p>Lo hace un usuario <b>administrador</b>, una sola vez por ambiente. El certificado y la clave
@@ -201,7 +204,9 @@ openssl req -new -key intellihelp.key \
   <ol>
     <li>Generar el certificado productivo desde <b>Administrador de Relaciones de Clave Fiscal</b>
       (Computador Fiscal → WSAA). Para producción no se usa WSASS.</li>
-    <li>Asociar el servicio <b>Facturación Electrónica</b> a ese certificado.</li>
+    <li>Asociar a ese certificado los servicios <b>Facturación Electrónica</b> (wsfe) y
+      <b>Constatación de Comprobantes</b> (wscdc). Los C.A.I. reales solo existen en producción: la
+      constatación de los talonarios usa siempre el certificado productivo.</li>
     <li>Dar de alta el <b>punto de venta</b> de tipo Web Services.</li>
     <li>En Configuración → Conexión con ARCA, elegir el ambiente <b>Producción</b> y cargar el
       certificado productivo con su clave privada, igual que en el paso 5.</li>
@@ -249,9 +254,37 @@ openssl req -new -key intellihelp.key \
   <div class="sub"><span class="n">2</span><p>En la pestaña <b>C.A.I.</b>, cargar el talonario:
     <b>punto de venta</b>, <b>número desde/hasta</b> (el rango que autorizó ARCA), el <b>C.A.I.</b>
     de 14 dígitos y su <b>vencimiento</b>.</p></div>
-  <div class="sub"><span class="n">3</span><p>Listo. Al cargar un remito, el botón <b>Autorizar</b>
+  <div class="sub"><span class="n">3</span><p>Al cargarlo, el sistema lo <b>constata con ARCA</b>
+    (servicio de constatación de comprobantes): verifica que el C.A.I. corresponda al CUIT, al punto
+    de venta, al tipo de comprobante y al primer y último número del rango. Si ARCA lo rechaza, no se
+    carga. Si ARCA no responde o todavía no hay certificado de producción, se puede cargar igual: queda
+    marcado <b>«sin constatar»</b> y se constata después con un clic.</p></div>
+  <div class="sub"><span class="n">4</span><p>Listo. Al cargar un remito, el botón <b>Autorizar</b>
     le pone el próximo número, el C.A.I. y el vencimiento, y lo marca como <b>AUTORIZADO</b>.
-    El sistema avisa cuando quedan pocos números o el C.A.I. está por vencer.</p></div>
+    El sistema avisa cuando quedan pocos números o el C.A.I. está por vencer, y nunca autoriza con un
+    C.A.I. vencido.</p></div>
+  <div class="sub"><span class="n">5</span><p>Para autorizar, el remito tiene que tener los datos que
+    exige la RG 1415 (Anexo V): condición del destinatario frente al IVA, su CUIT y domicilio (salvo
+    consumidor final), descripción y cantidad de los bienes, y si el traslado lo hace un tercero, su
+    razón social, CUIT y domicilio. Si falta algo, el sistema indica qué.</p></div>
+
+  <div class="paso-tit"><span class="n">9</span><h2>Remito digital, sin imprimir</h2></div>
+  <p>Desde la RG 5678/2025, un remito autorizado puede viajar en formato digital (por ejemplo, el PDF
+  en el celular del chofer) en lugar de impreso. Sigue llevando el C.A.I., y hay que darle al
+  destinatario un medio para confirmar la recepción.</p>
+  <div class="sub"><span class="n">1</span><p>Con el remito autorizado abierto, presionar
+    <b>Digital</b>. El sistema genera un enlace de conformidad y su código QR.</p></div>
+  <div class="sub"><span class="n">2</span><p>Presionar <b>Descargar PDF digital</b>: sale un solo
+    ejemplar, sin las leyendas ORIGINAL y DUPLICADO, con el QR de conformidad en el recuadro «Recibí
+    conforme». Ese PDF es el que acompaña el traslado.</p></div>
+  <div class="sub"><span class="n">3</span><p>Quien recibe escanea el QR (o abre el enlace, que se
+    puede compartir o mandar por correo), escribe su nombre y documento y confirma. Queda registrado
+    con fecha, hora y conexión, y se ve en el remito.</p></div>
+  <div class="aviso">
+    <p><span class="tt">Es optativo.</span> Si el remito se imprime y se firma el «Recibí conforme» en
+    papel, sigue siendo válido como siempre. La copia digital se conserva en el sistema (la norma pide
+    al menos dos años).</p>
+  </div>
 
   <div class="aviso verde">
     <p><span class="tt">La numeración no se pisa ni se saltea.</span> El sistema asigna el número de

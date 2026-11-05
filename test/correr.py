@@ -27,7 +27,7 @@ except Exception:
 import base  # noqa: E402
 
 MODULOS_INTERFAZ = ["test_impresion", "test_formulario", "test_documentos", "test_inicio", "test_interfaz"]
-MODULOS_API = ["test_api", "test_seguridad", "test_sesion", "test_cai"]
+MODULOS_API = ["test_api", "test_seguridad", "test_sesion", "test_cai", "test_normativa"]
 MODULOS = MODULOS_INTERFAZ + MODULOS_API
 
 VERDE, ROJO, GRIS, AMAR, FIN = "\033[32m", "\033[31m", "\033[90m", "\033[33m", "\033[0m"

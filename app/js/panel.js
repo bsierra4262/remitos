@@ -375,6 +375,11 @@
     else if (t.por_vencer) alertas.push(`<span class="pill">vence en ${esc(t.dias_para_vto)} días</span>`);
     if (t.agotado) alertas.push('<span class="pill bad">agotado</span>');
     else if (t.pocos_numeros) alertas.push(`<span class="pill">quedan ${esc(t.restantes)}</span>`);
+    alertas.push(
+      t.verificado_arca
+        ? `<span class="pill on" title="${esc(t.verificacion || '')}">constatado con ARCA</span>`
+        : `<span class="pill bad" title="${esc(t.verificacion || '')}">sin constatar con ARCA</span>`
+    );
     return `<div class="trow">
       <div>
         <div class="tname"><span class="sem ${semaforo(t)}"></span>Punto de venta ${pad(t.punto_venta, 5)} · Remito R</div>
@@ -384,6 +389,7 @@
       </div>
       <span class="pill ${t.activa ? 'on' : 'off'}">${t.activa ? 'Activo' : 'Inactivo'}</span>
       <span class="kacc">
+        ${t.verificado_arca ? '' : `<button class="btn sm sec" data-tverificar="${esc(t.id)}">Constatar con ARCA</button>`}
         <button class="btn sm sec" data-tactiva="${esc(t.id)}" data-a="${t.activa ? 0 : 1}">${t.activa ? 'Desactivar' : 'Activar'}</button>
         <button class="btn sm dang" data-tborrar="${esc(t.id)}">Eliminar</button>
       </span>
@@ -411,7 +417,7 @@
       <div class="stat d"><div class="v">${esc(r.vencidos)}</div><div class="l">Vencidos</div></div>
     </div>
     <div class="panel">
-      <h2>Cargar un C.A.I. <span class="hint">Se tramita en ARCA con Clave Fiscal, una vez por rango</span></h2>
+      <h2>Cargar un C.A.I. <span class="hint">Se tramita en ARCA con Clave Fiscal («Autorización de Impresión de Comprobantes») y al cargarlo se constata con ARCA (WSCDC)</span></h2>
       <div class="talta">
         <div class="grid">
           <div><label for="tPv">Punto de venta</label><input id="tPv" inputmode="numeric" value="1"></div>
@@ -443,6 +449,24 @@
         })
       );
     $('#cont')
+      .querySelectorAll('[data-tverificar]')
+      .forEach(b =>
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          const { d: r2 } = await api('api/talonarios.php', {
+            method: 'POST',
+            body: JSON.stringify({ accion: 'verificar', id: +b.dataset.tverificar }),
+          });
+          const v = (r2 && r2.verificacion) || {};
+          if (r2 && r2.ok)
+            avisar('Talonario constatado con ARCA: el C.A.I. corresponde al CUIT, punto de venta y rango.', 'okmsg');
+          else avisar(v.detalle || (r2 && r2.error) || 'No se pudo constatar el talonario');
+          cache.clear();
+          ultimoRender.cai = null;
+          verCai();
+        })
+      );
+    $('#cont')
       .querySelectorAll('[data-tborrar]')
       .forEach(b =>
         b.addEventListener('click', async () => {
@@ -464,8 +488,30 @@
       cai: $('#tCai').value.replace(/\D/g, ''),
       cai_vencimiento: $('#tVto').value,
     };
-    const { d } = await api('api/talonarios.php', { method: 'POST', body: JSON.stringify(cuerpo) });
+    let { d } = await api('api/talonarios.php', { method: 'POST', body: JSON.stringify(cuerpo) });
+    if (d && d.puede_cargar_sin_verificar) {
+      if (
+        !confirm(
+          d.error +
+            '\n\n¿Cargarlo igual sin constatar? Quedará marcado «sin constatar» y podés constatarlo después desde esta lista.'
+        )
+      )
+        return;
+      ({ d } = await api('api/talonarios.php', {
+        method: 'POST',
+        body: JSON.stringify(Object.assign(cuerpo, { sin_verificar: true })),
+      }));
+    }
     if (!d.ok) return avisar(d.error || 'No se pudo cargar el talonario');
+    const v = d.verificacion || {};
+    avisar(
+      v.estado === 'verificado'
+        ? 'Talonario cargado y constatado con ARCA.'
+        : 'Talonario cargado sin constatar: ' + (v.detalle || 'no se pudo consultar a ARCA') + '.',
+      v.estado === 'verificado' ? 'okmsg' : 'err'
+    );
+    cache.clear();
+    ultimoRender.cai = null;
     verCai();
   }
 

@@ -224,6 +224,43 @@ function problemaCuit(v) {
   return cuitValido(d) ? '' : 'El CUIT no es válido: el dígito verificador no coincide';
 }
 
+/* ---- Remitos: contenido obligatorio (RG 1415, Anexo V) ----
+   Mismas reglas que api/lib/normativa.php: el servidor no autoriza un remito incompleto. */
+
+/** Condición del destinatario frente al IVA → leyenda que se imprime en el remito. */
+const LEYENDAS_IVA = {
+  'Responsable Inscripto': 'IVA RESPONSABLE INSCRIPTO',
+  Exento: 'IVA EXENTO',
+  'No Responsable': 'NO RESPONSABLE IVA',
+  Monotributo: 'RESPONSABLE MONOTRIBUTO',
+  'Consumidor Final': 'A CONSUMIDOR FINAL',
+  'Sujeto no categorizado': 'SUJETO NO CATEGORIZADO',
+};
+
+/** Lo que le falta a un remito para poder autorizarse (vacío si está completo). */
+function faltantesRemito(d) {
+  const faltan = [];
+  const c = d.cliente || {},
+    t = d.transporte || {};
+  const vacio = v => !String(v || '').trim();
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(d.fecha || '')) faltan.push('la fecha de emisión');
+  if (vacio(c.razonSocial) && vacio(c.senores)) faltan.push('el nombre o la razón social del destinatario');
+  if (!LEYENDAS_IVA[c.condIVA]) faltan.push('la condición del destinatario frente al IVA');
+  else if (c.condIVA !== 'Consumidor Final') {
+    if (!cuitValido(c.cuit)) faltan.push('el CUIT del destinatario');
+    if (vacio(c.domicilio)) faltan.push('el domicilio comercial del destinatario');
+  }
+  const items = (d.items || []).filter(i => !vacio(i.descripcion));
+  if (!items.length) faltan.push('la descripción de los bienes que se trasladan');
+  items.forEach((i, n) => vacio(i.cantidad) && faltan.push('la cantidad del ítem ' + (n + 1)));
+  if (t.tipo === 'tercero') {
+    if (vacio(t.nombre)) faltan.push('el nombre o la razón social del transportista');
+    if (!cuitValido(t.cuit)) faltan.push('el CUIT del transportista');
+    if (vacio(t.domicilio)) faltan.push('el domicilio comercial del transportista');
+  } else if (t.tipo !== 'propio') faltan.push('si el traslado es con transporte propio o de un tercero');
+  return faltan;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     numeroAR,
@@ -238,5 +275,7 @@ if (typeof module !== 'undefined' && module.exports) {
     cuitConGuiones,
     formatoCuitODni,
     problemaCuit,
+    LEYENDAS_IVA,
+    faltantesRemito,
   };
 }

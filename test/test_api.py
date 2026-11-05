@@ -2,7 +2,7 @@
 
 Trabajan contra el entorno bajo prueba. Crean una clave de prueba y la borran al final.
 """
-from base import API, caso, clave_maestra, pedir
+from base import caso, clave_maestra, pedir
 
 RECURSOS = ["/estado.php", "/claves.php?accion=listar", "/remitos.php", "/proximo.php?tipo=factura"]
 

@@ -9,6 +9,8 @@
  *   GET    remitos.php?id=…                           (leer)   Un remito.
  *   POST   remitos.php {id?, id_local?, …}            (crear)  Alta o edición de un borrador.
  *   POST   remitos.php {accion: 'facturado', id, facturado} (crear) Marca el remito como facturado.
+ *   POST   remitos.php {accion: 'conformidad', id}    (crear)  Enlace para que el destinatario confirme la
+ *                                                     recepción (remito digital, RG 5678/2025).
  *   DELETE remitos.php?id=…                           (borrar) Baja de un borrador.
  *
  * Numeración (RG 1415/2003): el número fiscal (punto de venta y correlativo), el
@@ -19,6 +21,15 @@
  * `cai` o `caiVto` se ignoran.
  *
  * Un remito autorizado no se modifica ni se elimina; solo admite la marca de facturado.
+ *
+ * Contenido (RG 1415, Anexo V): `faltantes` lista lo que le falta a un borrador para
+ * poder autorizarse (condición IVA y CUIT del destinatario, bienes y cantidades,
+ * transportista cuando el traslado lo hace un tercero).
+ *
+ * Remito digital (RG 5678/2025): un remito autorizado puede no imprimirse si se exhibe en
+ * formato digital y el destinatario puede confirmar la recepción. `conformidad` genera un
+ * enlace de un solo destinatario (token de 256 bits; se guarda solo su SHA-256) que se
+ * abre en conformidad.html.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -33,6 +44,7 @@ $pdo = api_db($config);
 const REMITO_MAX_ITEMS = 60;
 const REMITO_DOC_TYPES = ['', 'DNI', 'CI', 'Pasaporte', 'Otro'];
 const REMITO_LOCK = 'remitos_numero';
+const REMITO_CONFORMIDAD_DIAS = 60;
 
 /**
  * Arma un remito con forma, longitudes y formatos controlados a partir del cuerpo recibido.
@@ -77,15 +89,22 @@ function remito_from_input(array $body): array
     }
 
     $cliente = $section($body['cliente'] ?? [], [
-        'senores' => 160, 'razonSocial' => 160, 'cuit' => 13, 'domicilio' => 160, 'localidad' => 80,
+        'senores' => 160, 'razonSocial' => 160, 'cuit' => 13, 'condIVA' => 40, 'domicilio' => 160, 'localidad' => 80,
         'telefono' => 40, 'cp' => 10, 'mail' => 120, 'nombre' => 120, 'otrosDatos' => 160,
     ]);
     $cliente['cuit'] = api_require_cuit($cliente['cuit'], 'CUIT del cliente', true);
+    if ($cliente['condIVA'] !== '' && !isset(REMITO_LEYENDAS_IVA[$cliente['condIVA']])) {
+        $cliente['condIVA'] = '';
+    }
 
     $transporte = $section($body['transporte'] ?? [], [
-        'nombre' => 120, 'vehiculo' => 120, 'chofer' => 120, 'lugarEntrega' => 160,
-        'fecha' => 10, 'hora' => 5, 'observaciones' => 600,
+        'tipo' => 10, 'nombre' => 120, 'cuit' => 13, 'domicilio' => 160, 'vehiculo' => 120, 'chofer' => 120,
+        'lugarEntrega' => 160, 'fecha' => 10, 'hora' => 5, 'observaciones' => 600,
     ]);
+    if (!in_array($transporte['tipo'], REMITO_TRANSPORTES, true)) {
+        $transporte['tipo'] = '';
+    }
+    $transporte['cuit'] = api_require_cuit($transporte['cuit'], 'CUIT del transportista');
     if ($transporte['fecha'] !== '' && api_date_dmy($transporte['fecha']) === '') {
         api_error(422, 'La fecha de entrega no es válida (dd/mm/aaaa)');
     }
@@ -118,6 +137,16 @@ function remito_public(array $row): array
         $doc['caiVto'] = '';
     }
     $doc['facturado'] = (bool) (int) ($row['facturado'] ?? 0);
+    $doc['faltantes'] = $authorized ? [] : remito_faltantes($doc);
+    $doc['conformidad'] = [
+        'enlace_activo' => !empty($row['conformidad_hash'])
+            && strtotime((string) $row['conformidad_desde']) > time() - REMITO_CONFORMIDAD_DIAS * 86400,
+        'enlace_desde' => $row['conformidad_desde'] ?? null,
+        'conformado' => $row['conformado'] ?? null,
+        'nombre' => $row['conformado_nombre'] ?? null,
+        'documento' => $row['conformado_doc'] ?? null,
+        'observaciones' => $row['conformado_obs'] ?? null,
+    ];
     $doc['id_local'] = $row['id_local'];
     $doc['creado_por'] = $row['creado_por'] ?? null;
     $doc['actualizado_por'] = $row['actualizado_por'] ?? null;
@@ -198,6 +227,32 @@ if ($method === 'POST') {
             'categoria' => 'remito', 'detalle' => mb_substr((string) $row['cliente'], 0, 120),
         ]);
         api_respond(200, ['ok' => true, 'remito' => remito_public(remito_find($pdo, $row['id']))]);
+    }
+
+    if (($body['accion'] ?? '') === 'conformidad') {
+        $row = remito_find($pdo, (string) ($body['id'] ?? ''));
+        if ($row === null) {
+            api_error(404, 'Remito no encontrado');
+        }
+        if ($row['estado'] !== 'autorizado') {
+            api_error(409, 'Solo un remito autorizado (con número y C.A.I.) se puede enviar en formato digital');
+        }
+        if ($row['conformado'] !== null) {
+            api_error(409, 'El destinatario ya confirmó la recepción de este remito', ['remito' => remito_public($row)]);
+        }
+        // Un enlace nuevo reemplaza al anterior: el viejo deja de funcionar.
+        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $pdo->prepare('UPDATE remitos SET conformidad_hash = ?, conformidad_desde = NOW(), updated = ? WHERE id = ?')
+            ->execute([hash('sha256', $token), $now, $row['id']]);
+        audit_event($pdo, 'Enlace de conformidad generado: remito ' . remito_label($row), [
+            'categoria' => 'remito', 'detalle' => 'vence en ' . REMITO_CONFORMIDAD_DIAS . ' días' . (!empty($row['conformidad_hash']) ? ' · reemplaza al anterior' : ''),
+        ]);
+        api_respond(200, [
+            'ok' => true,
+            'url' => api_base_url($config) . '/conformidad.html#' . $token,
+            'vence_dias' => REMITO_CONFORMIDAD_DIAS,
+            'remito' => remito_public(remito_find($pdo, $row['id'])),
+        ]);
     }
 
     $remito = remito_from_input($body);

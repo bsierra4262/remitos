@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Conformidad de recepción · Intellihelp</title>
+<link rel="stylesheet" href="css/fuentes.css?v=230">
+<link rel="icon" href="assets/logos/favicon.png">
+<link rel="stylesheet" href="css/conformidad.css?v=230">
+</head>
+<body>
+<main class="conf">
+  <header class="conf-head">
+    <img src="assets/logos/ITH-logo-139x75.png" alt="Intellihelp" width="93" height="50">
+    <div>
+      <h1>Conformidad de recepción</h1>
+      <p>Remito digital · RG ARCA 5678/2025</p>
+    </div>
+  </header>
+
+  <section class="card" id="cargando"><p>Cargando el remito…</p></section>
+
+  <section class="card err" id="error" hidden><p id="errorTexto"></p></section>
+
+  <section id="remito" hidden>
+    <div class="card">
+      <div class="fila"><span>Remito</span><b id="rNumero"></b></div>
+      <div class="fila"><span>Fecha</span><b id="rFecha"></b></div>
+      <div class="fila"><span>Emisor</span><b>INTELLIHELP S.A. · CUIT 30-71140975-7</b></div>
+      <div class="fila"><span>Destinatario</span><b id="rDestinatario"></b></div>
+      <div class="fila" id="rEntregaFila"><span>Lugar de entrega</span><b id="rEntrega"></b></div>
+      <div class="fila"><span>C.A.I.</span><b id="rCai"></b></div>
+    </div>
+    <div class="card">
+      <h2>Bienes</h2>
+      <table class="items">
+        <thead><tr><th>Art.</th><th>Descripción</th><th>Cantidad</th></tr></thead>
+        <tbody id="rItems"></tbody>
+      </table>
+      <p class="obs" id="rObs" hidden></p>
+    </div>
+
+    <form class="card" id="formConformar" autocomplete="on" hidden>
+      <h2>Confirmar la recepción</h2>
+      <p class="muted">Completá tus datos al recibir los bienes. La confirmación queda registrada con la fecha y la hora.</p>
+      <label for="cNombre">Nombre y apellido</label>
+      <input id="cNombre" autocomplete="name" maxlength="120" required>
+      <label for="cDoc">Documento (DNI, CUIL o pasaporte)</label>
+      <input id="cDoc" inputmode="numeric" autocomplete="off" maxlength="20" required>
+      <label for="cObs">Observaciones <span class="muted">(opcional: faltantes, daños, etc.)</span></label>
+      <textarea id="cObs" rows="3" maxlength="300"></textarea>
+      <label class="check"><input type="checkbox" id="cConforme"> Recibí conforme los bienes detallados en este remito.</label>
+      <button class="btn" type="submit" id="cEnviar">Confirmar la recepción</button>
+      <p class="aviso" id="cAviso" role="alert" hidden></p>
+    </form>
+
+    <section class="card ok" id="conformado" hidden>
+      <h2>Recepción confirmada</h2>
+      <p id="confTexto"></p>
+    </section>
+  </section>
+
+  <footer class="conf-pie">Intellihelp S.A. · Dorrego 1789 6to piso of 604, CABA · info@intellihelp.tech</footer>
+</main>
+<script src="js/conformidad.js?v=230"></script>
+</body>
+</html>

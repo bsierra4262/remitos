@@ -8,15 +8,28 @@
  * Un talonario es el rango de numeración que ARCA autoriza en cada solicitud de
  * C.A.I. (RG 1415/2003, Anexo II, ap. A, V.4): punto de venta, tipo de
  * comprobante, número desde/hasta, código de 14 dígitos y vencimiento. ARCA no
- * ofrece web service para el C.A.I.: se tramita con Clave Fiscal y se carga acá
- * una vez por rango. A partir de ahí cada remito toma su número correlativo.
+ * ofrece web service para solicitar el C.A.I.: se tramita con Clave Fiscal en el
+ * servicio «Autorización de Impresión de Comprobantes» y se carga acá una vez por
+ * rango. A partir de ahí cada remito toma su número correlativo.
+ *
+ * Lo que sí ofrece ARCA es la constatación (WSCDC): al cargar el talonario se verifica
+ * que el C.A.I. corresponda al CUIT del emisor, al punto de venta, al tipo de
+ * comprobante, al primer y al último número del rango y a la fecha. Se usa el
+ * certificado de producción (los C.A.I. reales solo existen ahí), con el servicio
+ * «wscdc» asociado en ARCA.
  *
  *   GET    talonarios.php?accion=listar               (admin) Talonarios y uso.
  *   GET    talonarios.php?accion=vigente&pv=1&tipo=91 (leer)  Talonario activo, sin consumir número.
- *   POST   talonarios.php {punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento}  (admin) Alta.
- *   POST   talonarios.php {accion: 'autorizar', remito_id, pv, tipo, fecha, confirmar?}  (crear) Asigna número.
+ *   POST   talonarios.php {punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, sin_verificar?}
+ *                                                     (admin) Alta, constatada con ARCA.
+ *   POST   talonarios.php {accion: 'verificar', id}   (admin) Vuelve a constatar un talonario con ARCA.
+ *   POST   talonarios.php {accion: 'autorizar', remito_id, pv, tipo, fecha}  (crear) Asigna número.
  *   POST   talonarios.php {id, activa}                (admin) Activa o desactiva.
  *   DELETE talonarios.php?id=N                        (admin) Elimina.
+ *
+ * Autorizar exige que el remito tenga los datos del Anexo V de la RG 1415 (ver
+ * lib/normativa.php) y nunca usa un C.A.I. vencido: un comprobante emitido con C.A.I.
+ * vencido no es válido.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -69,6 +82,8 @@ function talonario_public(array $t): array
         'cai_vencimiento' => $t['cai_vencimiento'],
         'activa' => (bool) (int) $t['activa'],
         'nota' => $t['nota'],
+        'verificado_arca' => $t['verificado_arca'] ?? null,
+        'verificacion' => $t['verificacion'] ?? null,
         'restantes' => $remaining,
         'dias_para_vto' => $days,
         'vencido' => $days !== null && $days < 0,
@@ -76,6 +91,47 @@ function talonario_public(array $t): array
         'pocos_numeros' => $remaining <= AVISO_RESTANTES,
         'agotado' => $remaining <= 0,
     ];
+}
+
+/**
+ * Constata el talonario en ARCA (WSCDC) con el primer y el último número del rango.
+ *
+ * @return array{estado: string, detalle: string, mensajes: string[]}
+ *         estado: verificado | rechazado | sin_credenciales | error
+ */
+function talonario_constatar(PDO $pdo, array $config, int $pointOfSale, int $type, int $from, int $to, string $cai): array
+{
+    $credential = arca_credentials_status($pdo, 'produccion');
+    if ($credential === null || $credential['vencido']) {
+        return [
+            'estado' => 'sin_credenciales',
+            'detalle' => 'Sin verificar: no hay un certificado vigente de producción para constatar el C.A.I. en ARCA',
+            'mensajes' => [],
+        ];
+    }
+    $cuit = preg_replace('/\D/', '', (string) (settings_get($pdo, 'emisor')['cuit'] ?? '')) ?: $credential['cuit'];
+    $today = date('Ymd');
+    try {
+        $mensajes = [];
+        foreach (array_unique([$from, $to]) as $number) {
+            $r = arca_cai_constatar($pdo, $config, 'produccion', $cuit, $pointOfSale, $type, $number, $today, $cai);
+            if ($r['resultado'] !== 'A') {
+                $mensajes = array_merge($mensajes, $r['errores'], $r['observaciones']);
+                $mensajes = $mensajes ?: ['ARCA no aprobó el número ' . $number];
+            }
+        }
+    } catch (ArcaException $e) {
+        return ['estado' => 'error', 'detalle' => $e->getMessage(), 'mensajes' => []];
+    }
+    if ($mensajes !== []) {
+        return [
+            'estado' => 'rechazado',
+            'detalle' => 'ARCA no reconoce el C.A.I. para este rango: ' . implode(' · ', array_unique($mensajes)),
+            'mensajes' => array_values(array_unique($mensajes)),
+        ];
+    }
+
+    return ['estado' => 'verificado', 'detalle' => 'Constatado con ARCA (WSCDC) para el CUIT ' . $cuit, 'mensajes' => []];
 }
 
 /** ¿Es una fecha aaaa-mm-dd válida en el calendario? */
@@ -144,7 +200,6 @@ if ($method === 'POST') {
         if (!talonario_iso_valid($date)) {
             $date = date('Y-m-d');
         }
-        $confirm = api_bool($body['confirmar'] ?? false);
         $remitoId = (string) ($body['remito_id'] ?? '');
         // Cada número se asigna a un remito concreto: nunca se consumen números sueltos.
         if (!preg_match('/^[0-9a-f]{16}$/', $remitoId)) {
@@ -165,15 +220,21 @@ if ($method === 'POST') {
             if (($remito['estado'] ?? '') === 'autorizado') {
                 api_error(409, 'Este remito ya está autorizado con el Nº ' . $remito['numero']);
             }
+            $faltan = remito_faltantes(json_decode((string) $remito['data'], true) ?: []);
+            if ($faltan !== []) {
+                api_error(422, 'Para autorizar el remito falta: ' . implode(', ', $faltan) . ' (RG 1415, Anexo V).', [
+                    'faltan' => $faltan,
+                ]);
+            }
             $t = talonario_vigente($pdo, $pointOfSale, $type, true);
             if ($t === null) {
                 api_error(409, 'No hay un talonario activo con números disponibles. Cargá el próximo C.A.I.');
             }
-            if ($date > $t['cai_vencimiento'] && !$confirm) {
+            if ($date > $t['cai_vencimiento']) {
                 api_error(
                     409,
                     'El C.A.I. venció el ' . date('d/m/Y', (int) strtotime($t['cai_vencimiento']))
-                        . '. Un comprobante emitido con C.A.I. vencido no es válido.',
+                        . '. Un comprobante emitido con C.A.I. vencido no es válido: cargá el talonario nuevo.',
                     ['vencido' => true]
                 );
             }
@@ -204,7 +265,7 @@ if ($method === 'POST') {
 
         audit_event($pdo, 'Remito autorizado Nº ' . fmt_numero($pointOfSale, $number) . ' (borrador ' . $remito['referencia'] . ')', [
             'categoria' => 'remito',
-            'detalle' => 'C.A.I. ' . $t['cai'] . ' · vence ' . $t['cai_vencimiento'] . ($confirm ? ' · confirmado vencido' : ''),
+            'detalle' => 'C.A.I. ' . $t['cai'] . ' · vence ' . $t['cai_vencimiento'] . ($t['verificado_arca'] ? '' : ' · talonario sin constatar con ARCA'),
         ]);
         api_respond(200, [
             'ok' => true,
@@ -241,7 +302,26 @@ if ($method === 'POST') {
     $expiry = (string) ($body['cai_vencimiento'] ?? '');
     $type = (int) ($body['tipo_comprobante'] ?? TIPO_REMITO);
 
-    // ARCA no ofrece un servicio para validar el C.A.I.: se controla la coherencia de los datos.
+    if (($body['accion'] ?? '') === 'verificar') {
+        $st = $pdo->prepare('SELECT * FROM cai_talonarios WHERE id = ?');
+        $st->execute([(int) ($body['id'] ?? 0)]);
+        $t = $st->fetch();
+        if (!$t) {
+            api_error(404, 'No existe ese talonario');
+        }
+        $v = talonario_constatar($pdo, $config, (int) $t['punto_venta'], (int) $t['tipo_comprobante'], (int) $t['numero_desde'], (int) $t['numero_hasta'], (string) $t['cai']);
+        if ($v['estado'] === 'verificado' || $v['estado'] === 'rechazado') {
+            $pdo->prepare('UPDATE cai_talonarios SET verificado_arca = ?, verificacion = ? WHERE id = ?')
+                ->execute([$v['estado'] === 'verificado' ? date('Y-m-d H:i:s') : null, mb_substr($v['detalle'], 0, 255), $t['id']]);
+        }
+        audit_event($pdo, 'Talonario #' . $t['id'] . ($v['estado'] === 'verificado' ? ' constatado con ARCA' : ' sin constatar'), [
+            'categoria' => 'cai', 'nivel' => $v['estado'] === 'verificado' ? 'info' : 'error', 'detalle' => $v['detalle'],
+        ]);
+        $st->execute([$t['id']]);
+        api_respond(200, ['ok' => $v['estado'] === 'verificado', 'verificacion' => $v, 'talonario' => talonario_public($st->fetch())]);
+    }
+
+    // Primero la coherencia de los datos; después la constatación con ARCA (WSCDC).
     if (!in_array($type, TIPOS_CAI, true)) {
         api_error(400, 'Tipo de comprobante inválido (91 para remitos R)');
     }
@@ -272,22 +352,44 @@ if ($method === 'POST') {
         api_error(409, 'El rango se superpone con otro talonario del mismo punto de venta');
     }
 
+    $v = talonario_constatar($pdo, $config, $pointOfSale, $type, $from, $to, $cai);
+    if ($v['estado'] === 'rechazado') {
+        audit_event($pdo, 'C.A.I. rechazado por ARCA · PV ' . str_pad((string) $pointOfSale, 5, '0', STR_PAD_LEFT), [
+            'categoria' => 'cai', 'nivel' => 'error', 'detalle' => mb_substr($v['detalle'], 0, 255), 'estado' => 422,
+        ]);
+        api_error(422, $v['detalle'] . '. Revisá el C.A.I., el punto de venta y el rango contra el comprobante de ARCA.', [
+            'verificacion' => $v,
+        ]);
+    }
+    if ($v['estado'] === 'error' && !api_bool($body['sin_verificar'] ?? false)) {
+        api_error(502, 'No se pudo constatar el C.A.I. con ARCA: ' . $v['detalle'], [
+            'verificacion' => $v, 'puede_cargar_sin_verificar' => true,
+        ]);
+    }
+
     $pdo->prepare(
         'INSERT INTO cai_talonarios
-            (punto_venta, tipo_comprobante, numero_desde, numero_hasta, proximo_numero, cai, cai_vencimiento, activa, nota, creado)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, NOW())'
-    )->execute([$pointOfSale, $type, $from, $to, $from, $cai, $expiry, api_str($body['nota'] ?? '', 160) ?: null]);
+            (punto_venta, tipo_comprobante, numero_desde, numero_hasta, proximo_numero, cai, cai_vencimiento, activa, nota, creado,
+             verificado_arca, verificacion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), ?, ?)'
+    )->execute([
+        $pointOfSale, $type, $from, $to, $from, $cai, $expiry, api_str($body['nota'] ?? '', 160) ?: null,
+        $v['estado'] === 'verificado' ? date('Y-m-d H:i:s') : null, mb_substr($v['detalle'], 0, 255),
+    ]);
     $newId = (int) $pdo->lastInsertId();
 
     audit_event($pdo, 'C.A.I. cargado · PV ' . str_pad((string) $pointOfSale, 5, '0', STR_PAD_LEFT), [
         'categoria' => 'cai',
-        'detalle' => 'rango ' . fmt_numero($pointOfSale, $from) . ' a ' . fmt_numero($pointOfSale, $to) . ' · vence ' . $expiry,
+        'nivel' => $v['estado'] === 'verificado' ? 'info' : 'error',
+        'detalle' => 'rango ' . fmt_numero($pointOfSale, $from) . ' a ' . fmt_numero($pointOfSale, $to) . ' · vence ' . $expiry
+            . ' · ' . ($v['estado'] === 'verificado' ? 'constatado con ARCA' : 'sin constatar'),
     ]);
     api_respond(201, [
         'ok' => true,
         'id' => $newId,
         'numero_desde' => fmt_numero($pointOfSale, $from),
         'numero_hasta' => fmt_numero($pointOfSale, $to),
+        'verificacion' => $v,
     ]);
 }
 
