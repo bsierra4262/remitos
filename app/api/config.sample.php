@@ -38,6 +38,16 @@ return [
     // con CORS. La aplicación usa su propio origen y no necesita ninguno.
     'allowed_origins' => [],
 
+    // Ingreso con Google (opcional). Cliente OAuth «Aplicación web» de Google Cloud con la URI de
+    // redirección https://<dominio>/remitos/api/google.php (una por cada dominio de la aplicación).
+    // Solo ingresan cuentas del dominio de Google Workspace indicado que ya sean usuarios activos.
+    // El secreto del cliente solo vive acá: no se versiona ni llega al navegador.
+    'google' => [
+        'client_id' => '',
+        'client_secret' => '',
+        'dominio' => 'intellihelp.tech',
+    ],
+
     // IP de los proxies inversos de confianza. Solo desde estas IP se acepta la cabecera
     // X-Forwarded-Proto para saber si la conexión original fue HTTPS. Sin proxy: vacío.
     'trusted_proxies' => [],

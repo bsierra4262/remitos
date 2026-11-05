@@ -155,7 +155,7 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 - Atajos **Ctrl+S** y **Ctrl+P** según el documento en pantalla.
 
 ### Usuarios y acceso
-- Ingreso con **correo y contraseña** y **verificación en dos pasos** opcional (TOTP); contraseña temporal en el alta, con cambio obligatorio en el primer ingreso.
+- Ingreso con **correo y contraseña** o con la **cuenta de Google** de Intellihelp, y **verificación en dos pasos** opcional (TOTP); contraseña temporal en el alta, con cambio obligatorio en el primer ingreso.
 - Roles **operador** (documentos y clientes) y **administrador** (además usuarios, ajustes, certificado de ARCA, talonarios y panel).
 - «Mi cuenta» para cambiar la contraseña; el administrador genera contraseñas temporales y activa o desactiva usuarios.
 - La calibración de impresión queda en cada equipo, porque depende de su impresora.
@@ -262,6 +262,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 **Usuarios y sesión**
 - Contraseñas con `password_hash` (bcrypt); mínimo 12 caracteres, sin palabras comunes, secuencias ni el nombre de usuario; contraseña temporal con cambio obligatorio.
 - **Verificación en dos pasos** (TOTP, RFC 6238) opcional, con secreto cifrado y códigos de un solo uso.
+- **Ingreso con Google** para las cuentas de Intellihelp: OpenID Connect con PKCE resuelto en el servidor, limitado al dominio `intellihelp.tech` y a usuarios ya dados de alta; el secreto del cliente vive solo en `config.php`.
 - Cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, limitada a la ruta de la aplicación; identificador regenerado al ingresar.
 - **Token CSRF** obligatorio en toda escritura, que además debe ser JSON y venir del propio origen (también el ingreso); vencimiento por inactividad (8 h) y absoluto (12 h).
 - **Freno de ingresos fallidos** por correo y conexión, por conexión y por cuenta, sin bloquear la cuenta a los demás; el mensaje no revela si el correo existe y el tiempo de respuesta es el mismo. La reconfirmación de contraseña también tiene límite.

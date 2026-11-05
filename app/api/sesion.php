@@ -5,7 +5,8 @@
  *
  * Sesión de usuario.
  *
- *   GET  sesion.php                                          Usuario actual y token CSRF (usuario nulo sin sesión).
+ *   GET  sesion.php                                          Usuario actual y token CSRF (usuario nulo sin sesión;
+ *                                                            `google` indica si está habilitado el ingreso con Google).
  *   POST sesion.php {accion: 'ingresar', email, clave}       Inicia sesión (o pide el código del segundo factor).
  *   POST sesion.php {accion: 'verificar_codigo', codigo}     Completa el ingreso con el código TOTP.
  *   POST sesion.php {accion: 'salir'}                        Cierra la sesión.
@@ -102,7 +103,12 @@ if ($method === 'GET') {
     if ($user !== null) {
         api_respond(200, session_payload($user));
     }
-    api_respond(200, ['ok' => true, 'usuario' => null, 'segundo_factor' => session_pending_user() !== null]);
+    api_respond(200, [
+        'ok' => true,
+        'usuario' => null,
+        'segundo_factor' => session_pending_user() !== null,
+        'google' => google_config($config) !== null,
+    ]);
 }
 
 if ($method !== 'POST') {

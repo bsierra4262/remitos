@@ -2902,3 +2902,40 @@ body.es-admin .solo-operador {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* ============================ Ingreso con Google ============================ */
+.ingreso-google {
+  margin-top: 4px;
+}
+.ingreso-google .separador {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted, #6b6478);
+  font-size: 13px;
+  margin: 10px 0;
+}
+.ingreso-google .separador::before,
+.ingreso-google .separador::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid #e6e1ee;
+}
+.btn.google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #fff;
+  color: #1f1f1f;
+  border: 1px solid #dadce0;
+  text-decoration: none;
+  font-weight: 600;
+}
+.btn.google:hover {
+  background: #f8f9fa;
+}
+.btn.google svg {
+  width: 18px;
+  height: 18px;
+}

@@ -29,6 +29,7 @@ require __DIR__ . '/lib/arca.php';
 require __DIR__ . '/lib/importes.php';
 require __DIR__ . '/lib/ajustes.php';
 require __DIR__ . '/lib/normativa.php';
+require __DIR__ . '/lib/google.php';
 
 /*
  * Las respuestas se lanzan como ApiResponse (así los `finally` liberan bloqueos y

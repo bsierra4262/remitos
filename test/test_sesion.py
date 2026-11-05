@@ -354,3 +354,44 @@ def segundo_factor():
           and malo == 401 and usado == 401 and st_ok == 200 and con_codigo == 200)
     return ok, (f"activar={st_act} paso1={paso1} sin_codigo={sin_codigo} malo={malo} reutilizado={usado} "
                 f"siguiente={st_ok} con_codigo={con_codigo}")
+
+
+@caso("Ingreso con Google: va a Google con PKCE y dominio, y una vuelta manipulada no abre sesión")
+def ingreso_google():
+    """El entorno de pruebas tiene un cliente de Google ficticio: se prueba todo lo que
+    ocurre de este lado (la redirección, la cookie de estado y el rechazo de una vuelta
+    sin estado válido). El canje con Google se prueba en producción."""
+    import urllib.parse
+
+    class SinRedireccion(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    jar = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), SinRedireccion)
+
+    def get(ruta):
+        try:
+            with op.open(API + ruta, timeout=20) as r:
+                return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers)
+
+    s1, h1 = get("/google.php?accion=inicio")
+    destino = urllib.parse.urlparse(h1.get("Location", ""))
+    q = urllib.parse.parse_qs(destino.query)
+    cookie = h1.get("Set-Cookie", "")
+    s2, h2 = get("/google.php?state=otro&code=abc")
+    s3, h3 = get("/google.php?accion=inicio")
+    sin_cookie = urllib.request.build_opener(SinRedireccion)
+    try:
+        sin_cookie.open(API + "/google.php?state=" + q.get("state", [""])[0] + "&code=abc", timeout=20)
+        s4, h4 = 200, {}
+    except urllib.error.HTTPError as e:
+        s4, h4 = e.code, dict(e.headers)
+    _, sesion = pedir("/sesion.php")
+    ok = (s1 == 302 and destino.netloc == "accounts.google.com" and q.get("code_challenge_method") == ["S256"]
+          and q.get("hd") == ["intellihelp.tech"] and "samesite=lax" in cookie.lower() and "httponly" in cookie.lower()
+          and s2 == 302 and "ingreso=google_vencido" in h2.get("Location", "")
+          and s4 == 302 and "ingreso=google_vencido" in h4.get("Location", "") and sesion.get("google") is True)
+    return ok, f"inicio={s1} {destino.netloc} cookie={cookie[:60]!r} vuelta_manipulada={h2.get('Location')} sin_cookie={h4.get('Location')}"

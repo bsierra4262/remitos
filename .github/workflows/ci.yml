@@ -100,6 +100,7 @@ jobs:
               'db' => ['host' => '127.0.0.1', 'port' => 3306, 'name' => 'remitos_test', 'user' => 'root', 'pass' => 'testroot'],
               'master_key_hash' => hash('sha256', 'ith_test_master_key_0123456789abcdef'),
               'app_key' => str_repeat('ab', 32),
+              'google' => ['client_id' => 'pruebas.apps.googleusercontent.com', 'client_secret' => 'secreto-de-pruebas', 'dominio' => 'intellihelp.tech'],
           ];
           PHP
           php app/api/cli/migrar.php

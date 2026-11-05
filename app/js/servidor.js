@@ -162,13 +162,35 @@ function aplicarClavesLocales(uid) {
 async function iniciarSesionApp() {
   try {
     const j = await api('sesion.php', { sinSesion: true });
-    if (!j.usuario) return mostrarAcceso(j.segundo_factor ? 'codigo' : 'ingreso');
+    $('#ingresoGoogleFila').hidden = !j.google;
+    const aviso = avisoIngresoGoogle();
+    if (!j.usuario) return mostrarAcceso(j.segundo_factor ? 'codigo' : 'ingreso', aviso);
     aplicarSesion(j);
   } catch (e) {
     if (e.status === 0)
       return mostrarAcceso('ingreso', 'Sin conexión con el servidor. Revisá la conexión y volvé a intentar.');
     mostrarAcceso('ingreso');
   }
+}
+
+/* Resultado de la vuelta desde Google (?ingreso=…): se muestra una vez y se limpia de la URL. */
+const AVISOS_GOOGLE = {
+  google_no_configurado: 'El ingreso con Google todavía no está configurado.',
+  google_cancelado: 'Se canceló el ingreso con Google.',
+  google_vencido: 'El ingreso con Google venció o no se pudo verificar. Probá de nuevo.',
+  google_error: 'Google no pudo confirmar el ingreso. Probá de nuevo en unos minutos.',
+  google_dominio: 'Solo se puede ingresar con una cuenta de Intellihelp (@intellihelp.tech).',
+  google_sin_usuario:
+    'Esa cuenta no tiene usuario en el sistema o está desactivada. Pedile el alta a un administrador.',
+  google_limitado: 'Demasiados intentos de ingreso con Google. Esperá unos minutos.',
+};
+function avisoIngresoGoogle() {
+  const params = new URLSearchParams(location.search);
+  const codigo = params.get('ingreso');
+  if (!codigo) return '';
+  params.delete('ingreso');
+  history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : ''));
+  return AVISOS_GOOGLE[codigo] || '';
 }
 
 function aplicarSesion(j) {

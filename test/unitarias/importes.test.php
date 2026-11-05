@@ -23,6 +23,7 @@ require $api . '/importes.php';
 require $api . '/totp.php';
 require $api . '/arca.php';
 require $api . '/normativa.php';
+require $api . '/google.php';
 
 $fallas = 0;
 $total = 0;
@@ -108,6 +109,24 @@ verificar(remito_faltantes($completo) === [], 'remito completo');
 verificar(remito_faltantes(array_replace_recursive($completo, ['cliente' => ['condIVA' => 'Consumidor Final', 'cuit' => '', 'domicilio' => '']])) === [], 'consumidor final sin CUIT');
 verificar(count(remito_faltantes(array_replace_recursive($completo, ['transporte' => ['tipo' => 'tercero']]))) === 3, 'transportista tercero');
 verificar(in_array('la cantidad del ítem 1', remito_faltantes(array_replace($completo, ['items' => [['descripcion' => 'Bien']]])), true), 'cantidad obligatoria');
+
+// Ingreso con Google: validación del token de identidad.
+$g = ['client_id' => 'cliente.apps.googleusercontent.com', 'client_secret' => 'x', 'dominio' => 'intellihelp.tech'];
+$base = ['iss' => 'https://accounts.google.com', 'aud' => $g['client_id'], 'exp' => 2000, 'iat' => 1000, 'nonce' => 'N1',
+    'email' => 'ana@intellihelp.tech', 'email_verified' => true, 'hd' => 'intellihelp.tech'];
+verificar(google_claims_problem($base, $g, 'N1', 1500) === null, 'token de Google válido');
+verificar(google_claims_problem(['aud' => 'otro'] + $base, $g, 'N1', 1500) !== null, 'token para otra aplicación');
+verificar(google_claims_problem($base, $g, 'N2', 1500) !== null, 'nonce distinto');
+verificar(google_claims_problem($base, $g, 'N1', 3000) !== null, 'token vencido');
+verificar(google_claims_problem(['email_verified' => false] + $base, $g, 'N1', 1500) !== null, 'correo sin verificar');
+verificar(google_claims_problem(['hd' => 'gmail.com', 'email' => 'ana@gmail.com'] + $base, $g, 'N1', 1500) !== null, 'otro dominio');
+verificar(google_claims_problem(['iss' => 'https://malicioso.example'] + $base, $g, 'N1', 1500) !== null, 'otro emisor');
+$jwt = 'e30.' . rtrim(strtr(base64_encode(json_encode($base)), '+/', '-_'), '=') . '.firma';
+verificar(google_claims($jwt)['email'] === 'ana@intellihelp.tech', 'lectura del token');
+$url = google_auth_url($g, 'S', 'N', 'verificador', 'https://intellihelp.tech/remitos/api/google.php');
+parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+verificar($q['code_challenge_method'] === 'S256' && $q['hd'] === 'intellihelp.tech' && $q['scope'] === 'openid email profile'
+    && $q['code_challenge'] === rtrim(strtr(base64_encode(hash('sha256', 'verificador', true)), '+/', '-_'), '='), 'URL de autorización con PKCE');
 
 echo $fallas === 0 ? "Pruebas unitarias del servidor: los $total casos pasaron\n" : "$fallas de $total casos fallaron\n";
 exit($fallas === 0 ? 0 : 1);
