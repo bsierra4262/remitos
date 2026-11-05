@@ -10,7 +10,9 @@
  *
  * Solo ingresa quien ya es usuario activo de la aplicación con ese correo: los usuarios
  * los da de alta un administrador. Si el usuario tiene activa la verificación en dos
- * pasos, se le pide el código igual que con contraseña. Cualquier error vuelve a la
+ * pasos, se le pide el código igual que con contraseña, y si tiene una contraseña temporal
+ * pendiente, se le pide elegir la propia (la usa para reconfirmar operaciones sensibles).
+ * Cualquier error vuelve a la
  * pantalla de ingreso con un código (?ingreso=…) que la aplicación traduce.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
@@ -101,15 +103,9 @@ if ($user === null || !(int) $user['activo']) {
     google_back('google_sin_usuario');
 }
 
-// Quien entra con Google y tenía una contraseña temporal pendiente no la necesita: se
-// anula, así esa contraseña (compartida por otro medio) deja de servir.
-if ((int) $user['debe_cambiar']) {
-    $pdo->prepare('UPDATE usuarios SET clave_hash = ?, debe_cambiar = 0 WHERE id = ?')
-        ->execute([user_hash(google_random(32)), $user['id']]);
-    audit_event($pdo, 'Contraseña temporal anulada: ingresa con Google', [
-        'categoria' => 'usuario', 'usuario_id' => (int) $user['id'], 'clave' => $user['nombre'],
-    ]);
-}
+// La contraseña propia se sigue necesitando para reconfirmar operaciones sensibles
+// (certificado de ARCA, cambio de contraseña, segundo factor): si había una temporal
+// pendiente, la aplicación pide elegir la propia igual que con el ingreso por contraseña.
 $pdo->prepare('UPDATE usuarios SET ultimo_ingreso = NOW() WHERE id = ?')->execute([$user['id']]);
 attempts_clear($pdo, 'ingreso', $email);
 
