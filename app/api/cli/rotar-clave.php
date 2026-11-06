@@ -8,7 +8,7 @@
  *   php api/cli/rotar-clave.php --confirmar
  *
  * Genera una app_key nueva, vuelve a cifrar con ella todos los secretos guardados
- * (certificados y claves privadas de ARCA, tickets de acceso y secretos TOTP) y
+ * (certificados y claves privadas de ARCA y tickets de acceso) y
  * actualiza config.php. Todo ocurre en una transacción: si algo falla, la base y
  * config.php quedan como estaban.
  *
@@ -48,7 +48,6 @@ $fields = [
     ['arca_credenciales', ['ambiente'], 'clave', static fn (array $r): string => 'arca:' . $r['ambiente'] . ':clave'],
     ['arca_tickets', ['ambiente', 'servicio'], 'token', static fn (array $r): string => 'arca:' . $r['ambiente'] . ':' . $r['servicio'] . ':token'],
     ['arca_tickets', ['ambiente', 'servicio'], 'sign', static fn (array $r): string => 'arca:' . $r['ambiente'] . ':' . $r['servicio'] . ':sign'],
-    ['usuarios', ['id'], 'totp_secret', static fn (array $r): string => 'totp:' . $r['id']],
 ];
 
 $count = 0;

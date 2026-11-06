@@ -143,9 +143,6 @@ function auth_require_session(PDO $pdo, string $permission, string $resource): a
     if ($user === null) {
         api_error(401, 'La sesión no está iniciada o venció. Ingresá de nuevo.', ['sesion' => false]);
     }
-    if ($user['debe_cambiar']) {
-        api_error(403, 'Antes de continuar tenés que cambiar la contraseña temporal.', ['cambiar_clave' => true]);
-    }
     if (!in_array(api_method(), ['GET', 'HEAD'], true)) {
         if (!session_csrf_valid()) {
             api_error(403, 'El token de seguridad de la sesión no es válido. Recargá la página.', ['csrf' => false]);

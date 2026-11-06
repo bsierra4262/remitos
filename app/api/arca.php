@@ -9,12 +9,12 @@
  *   POST   arca.php {accion: 'cargar', ambiente, cuit?, certificado, clave, frase?}
  *                                                         (admin) Valida y guarda cifrado.
  *   POST   arca.php {accion: 'probar', ambiente}          (crear) Verifica servidores y acceso.
- *   POST   arca.php {accion: 'quitar', ambiente, confirmacion?}  (admin) Elimina las credenciales.
+ *   POST   arca.php {accion: 'quitar', ambiente}          (admin) Elimina las credenciales.
  *   DELETE arca.php?ambiente=…                            (clave maestra) Ídem, para integraciones.
  *
- * Con sesión de usuario, cargar o quitar el certificado exige reconfirmar la
- * contraseña en «confirmacion»; cinco intentos fallidos cierran la sesión. El
- * método DELETE es solo para la clave maestra: la aplicación usa la acción 'quitar'.
+ * Con sesión de usuario, cargar o quitar el certificado exige haber confirmado la
+ * identidad con Google en los últimos 15 minutos (si no, 403 con `reconfirmar_google`
+ * y la aplicación ofrece confirmarla). El método DELETE es solo para la clave maestra: la aplicación usa la acción 'quitar'.
  *
  * Si no se indica `cuit`, el certificado debe corresponder al CUIT del emisor
  * configurado en los ajustes (cuando hay uno).
@@ -34,13 +34,13 @@ api_headers('GET, POST, DELETE, OPTIONS');
 $pdo = api_db($config);
 
 /**
- * Con sesión de usuario, las operaciones sobre el certificado piden reconfirmar la
- * contraseña (la clave maestra ya es una credencial de alto privilegio).
+ * Con sesión de usuario, las operaciones sobre el certificado exigen haber confirmado la
+ * identidad con Google hace poco (la clave maestra ya es una credencial de alto privilegio).
  */
-function arca_confirm_identity(PDO $pdo, array $auth, mixed $password): void
+function arca_confirm_identity(array $auth): void
 {
     if (isset($auth['usuario'])) {
-        user_confirm_password($pdo, $auth['usuario'], $password, 'certificado de ARCA');
+        user_confirm_identity($auth['usuario']);
     }
 }
 
@@ -73,7 +73,7 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
     if ($action === 'cargar') {
         api_require_https();
         $auth = auth_require($pdo, $config, 'admin', 'arca');
-        arca_confirm_identity($pdo, $auth, $body['confirmacion'] ?? null);
+        arca_confirm_identity($auth);
         $environment = arca_environment_param($body['ambiente'] ?? null);
 
         try {
@@ -143,7 +143,7 @@ if ($method === 'DELETE' || ($method === 'POST' && ($body['accion'] ?? '') === '
     if ($method === 'DELETE' && isset($auth['usuario'])) {
         api_error(405, 'Con sesión de usuario, el certificado se quita con POST {accion: "quitar"} y la contraseña de confirmación');
     }
-    arca_confirm_identity($pdo, $auth, $body['confirmacion'] ?? null);
+    arca_confirm_identity($auth);
     $environment = arca_environment_param($method === 'DELETE' ? ($_GET['ambiente'] ?? null) : ($body['ambiente'] ?? null));
     if (!arca_delete_credentials($pdo, $environment)) {
         api_error(404, 'No hay credenciales cargadas para ' . ARCA_ENVIRONMENT_NAMES[$environment]);

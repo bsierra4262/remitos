@@ -1600,7 +1600,7 @@ function nombreArchivo(input) {
   el.classList.toggle('on', !!f);
 }
 function limpiarFormCert() {
-  ['#certFile', '#keyFile', '#keyPass', '#certConfirm'].forEach(id => {
+  ['#certFile', '#keyFile', '#keyPass'].forEach(id => {
     const el = $(id);
     if (el) el.value = '';
   });
@@ -1609,9 +1609,6 @@ function limpiarFormCert() {
 }
 function abrirCargaCert() {
   limpiarFormCert();
-  const google = typeof sesionGoogle === 'function' && sesionGoogle();
-  $('#certConfirmFila').hidden = google;
-  $('#certConfirmGoogle').hidden = !google;
   $('#certAmbiente').value = $('#apiAmbiente').value;
   openPanel($('#certModal'), $('#backdrop5'));
 }
@@ -1619,9 +1616,6 @@ async function enviarCertificado(e) {
   e.preventDefault();
   const btn = $('#certSend');
   const ambiente = $('#certAmbiente').value;
-  const confirmacion = $('#certConfirm').value;
-  if (!confirmacion && !$('#certConfirmFila').hidden)
-    return avisoCert('warn', 'Falta tu contraseña', ' Se pide para confirmar la operación.', '#certFormAlert');
   let certificado, clave;
   try {
     [certificado, clave] = await Promise.all([
@@ -1643,7 +1637,6 @@ async function enviarCertificado(e) {
         certificado,
         clave,
         frase: $('#keyPass').value,
-        confirmacion,
       },
     });
     certificado = clave = null; // no se retienen en memoria más de lo necesario
@@ -1686,17 +1679,9 @@ async function probarConexionArca() {
 }
 async function quitarCertificado() {
   const ambiente = $('#apiAmbiente').value;
-  let confirmacion = '';
-  if (sesionGoogle()) {
-    if (!confirm('¿Quitar el certificado de ' + ambienteNombre(ambiente) + '? Se borra del servidor.')) return;
-  } else {
-    confirmacion = prompt(
-      'Para quitar el certificado de ' + ambienteNombre(ambiente) + ', confirmá con tu contraseña:'
-    );
-    if (!confirmacion) return;
-  }
+  if (!confirm('¿Quitar el certificado de ' + ambienteNombre(ambiente) + '? Se borra del servidor.')) return;
   try {
-    await api('arca.php', { method: 'POST', body: { accion: 'quitar', ambiente, confirmacion } });
+    await api('arca.php', { method: 'POST', body: { accion: 'quitar', ambiente } });
     certEstado[ambiente] = null;
     renderCertificado();
     avisoCert(

@@ -14,7 +14,8 @@ mysql -u root -p -e "CREATE DATABASE remitos_test CHARACTER SET utf8mb4"
 #    return ['app_url' => 'http://127.0.0.1:8765',
 #            'db' => ['host' => '127.0.0.1', 'port' => 3306, 'name' => 'remitos_test', 'user' => 'root', 'pass' => '…'],
 #            'master_key_hash' => hash('sha256', 'ith_test_master_key_0123456789abcdef'),
-#            'app_key' => str_repeat('ab', 32)];
+#            'app_key' => str_repeat('ab', 32),
+#            'google' => [… ver «Ingreso con Google» más abajo …]];
 
 # 3. Esquema (la web no migra la base: se hace por consola, igual que en el despliegue)
 REMITOS_CONFIG=/tmp/config.test.php php app/api/cli/migrar.php
@@ -50,7 +51,14 @@ Ejemplo en Linux: `REMITOS_MYSQL=mysql REMITOS_DB_PORT=3306 REMITOS_DB_PASS=secr
 
 La integración continua (`.github/workflows/ci.yml`) corre todo esto en cada cambio contra MariaDB 11.
 
-Las pruebas de interfaz ingresan con un administrador de pruebas (`admin.pruebas@intellihelp.test`) que se crea solo con la clave maestra del entorno.
+Se ingresa solo con Google. Las pruebas levantan un **Google simulado** en `127.0.0.1:8766` (variable `REMITOS_GOOGLE_PUERTO`) que hace de endpoint de tokens, y recorren el flujo real: la redirección, la cookie de estado, el canje del código con PKCE y la validación del token. La configuración de pruebas lo indica con `token_url`, que solo se acepta si es una dirección local:
+
+```php
+'google' => ['client_id' => 'pruebas.apps.googleusercontent.com', 'client_secret' => 'secreto-de-pruebas',
+             'dominio' => 'intellihelp.tech', 'token_url' => 'http://127.0.0.1:8766/token'],
+```
+
+Las pruebas de interfaz ingresan con un administrador de pruebas (`admin.pruebas@intellihelp.tech`) que se crea solo con la clave maestra del entorno.
 
 ## Otro entorno de pruebas
 
@@ -71,10 +79,10 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, copias de seguridad, certificado, respaldo, celular |
 | `test_api.py` | Autenticación, permisos y ciclo de vida de las claves, auditoría |
 | `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA), validación de datos, cabeceras, archivos internos |
-| `test_sesion.py` | Ingreso, freno por intentos sin revelar cuentas, cookie y CSRF, ingreso desde otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, reconfirmación limitada, segundo factor, traspaso de datos de versiones anteriores |
+| `test_sesion.py` | Ingreso con Google de punta a punta y sus rechazos (sin usuario, otro dominio, correo sin verificar, otra aplicación, token vencido, PKCE ajeno, estado manipulado), ausencia de contraseñas y segundo factor, alta solo con correos del dominio, cookie y CSRF, otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, traspaso de datos de versiones anteriores |
 | `test_cai.py` | Talonarios, numeración correlativa, autorizaciones simultáneas, inmutabilidad del autorizado, C.A.I. vencido, talonarios usados y autorización desde la aplicación |
 | `test_normativa.py` | Contenido obligatorio del remito (Anexo V), talonario sin constatar, conformidad del remito digital por API y desde la página pública en celular, PDF digital con QR |
-| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, TOTP y XML para ARCA (mismos casos en JS y PHP) |
+| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, XML para ARCA, token de Google y plazo de confirmación de la sesión (mismos casos en JS y PHP) |
 
 ## Agregar un caso
 

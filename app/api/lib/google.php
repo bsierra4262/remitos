@@ -17,8 +17,13 @@
  *   verificado, por lo que su origen está garantizado (OpenID Connect Core, 3.1.3.7);
  *   igual se validan emisor, audiencia, vigencia, nonce, dominio y correo verificado.
  *
+ * Es la única forma de ingresar a la aplicación (no hay contraseñas ni segundo factor
+ * propios).
+ *
  * Configuración (config.php):
  *   'google' => ['client_id' => '…apps.googleusercontent.com', 'client_secret' => '…', 'dominio' => 'intellihelp.tech']
+ * El entorno de pruebas agrega 'token_url' => 'http://127.0.0.1:<puerto>/token' (un Google
+ * simulado); solo se acepta una dirección local.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -40,10 +45,18 @@ function google_config(array $config): ?array
         return null;
     }
 
+    // Solo el entorno de pruebas reemplaza el endpoint de tokens, por uno local que simula
+    // a Google; en cualquier otro caso se usa el de Google por HTTPS.
+    $tokenUrl = (string) ($g['token_url'] ?? '');
+    if (!preg_match('#^http://(127\.0\.0\.1|localhost):\d+/#', $tokenUrl)) {
+        $tokenUrl = GOOGLE_TOKEN_URL;
+    }
+
     return [
         'client_id' => (string) $g['client_id'],
         'client_secret' => (string) $g['client_secret'],
         'dominio' => strtolower((string) $g['dominio']),
+        'token_url' => $tokenUrl,
     ];
 }
 
@@ -152,7 +165,7 @@ function google_take_state(array $config): ?array
  */
 function google_exchange(array $g, string $code, string $verifier, string $redirect): array
 {
-    $ch = curl_init(GOOGLE_TOKEN_URL);
+    $ch = curl_init($g['token_url']);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => http_build_query([
@@ -166,7 +179,7 @@ function google_exchange(array $g, string $code, string $verifier, string $redir
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 8,
         CURLOPT_TIMEOUT => 20,
-        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+        CURLOPT_PROTOCOLS => $g['token_url'] === GOOGLE_TOKEN_URL ? CURLPROTO_HTTPS : CURLPROTO_HTTP,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'],

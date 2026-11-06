@@ -13,7 +13,7 @@ API REST/JSON de la aplicación: usuarios y sesión, clientes, remitos y comprob
 
 ### Sesión de usuario (la aplicación)
 
-La aplicación ingresa con correo y contraseña (`sesion.php`) y recibe una cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, más un token CSRF que debe enviar en la cabecera `X-CSRF-Token` en toda escritura. Las escrituras con sesión, incluido el ingreso, solo se aceptan como `application/json` y, si el navegador informa el origen (`Origin`), desde el propio sitio. Los permisos dependen del rol:
+La aplicación se ingresa **solo con la cuenta de Google** de Intellihelp (`google.php`); no hay contraseñas ni segundo factor propios. El ingreso deja una cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, más un token CSRF que debe enviarse en la cabecera `X-CSRF-Token` en toda escritura. Las escrituras con sesión solo se aceptan como `application/json` y, si el navegador informa el origen (`Origin`), desde el propio sitio. Los permisos dependen del rol:
 
 | Rol | Permisos |
 |---|---|
@@ -21,11 +21,10 @@ La aplicación ingresa con correo y contraseña (`sesion.php`) y recibe una cook
 | Administrador | Lo anterior más `admin`: usuarios, ajustes, certificados de ARCA, talonarios, claves, auditoría y exportación |
 
 - La sesión vence tras 8 horas sin actividad o 12 horas desde el ingreso.
-- Cambiar la contraseña, el rol o el segundo factor, desactivar al usuario o restablecer su contraseña cierra todas sus otras sesiones.
+- Cambiar el rol o desactivar al usuario cierra todas sus sesiones.
 - **Freno de ingresos fallidos** (ventana de 15 minutos): 5 por correo desde la misma conexión, 30 por conexión y 50 por correo en total. El freno responde `429` con el mismo mensaje exista o no el correo, y no bloquea la cuenta para los demás.
-- **Ingreso con Google** (opcional, `google` en `config.php`): `GET google.php?accion=inicio` lleva a Google (OpenID Connect con PKCE, limitado al dominio de Google Workspace configurado) y la vuelta abre la sesión si el correo es de un usuario activo. El estado viaja cifrado en una cookie `SameSite=Lax` de 10 minutos; un error vuelve a la aplicación con `?ingreso=<código>`. Con Google no se usa contraseña: una temporal pendiente se anula. La sesión informa `ingreso: 'google'` y `confirmado` (ingreso con Google de los últimos 15 minutos); en ese plazo las operaciones que piden reconfirmar la identidad (certificado de ARCA, segundo factor, definir contraseña) aceptan la confirmación vacía, y pasado el plazo responden 403 con `reconfirmar_google: true`: `GET google.php?accion=inicio&confirmar=1` vuelve a pasar por Google con la cuenta de la sesión y regresa con `?ingreso=confirmado`. `GET sesion.php` informa `google: true` cuando está habilitado.
-- **Verificación en dos pasos** (TOTP, RFC 6238) opcional por usuario. Con ella activa, `ingresar` responde `{usuario: null, segundo_factor: true}` y la sesión se completa con `verificar_codigo` dentro de los 5 minutos. Cada código se acepta una sola vez.
-- **Reconfirmación de contraseña** (cambio de contraseña, segundo factor, certificado de ARCA): cinco fallos en 15 minutos cierran la sesión (`429`).
+- **Ingreso con Google** (`google` en `config.php`; sin esa configuración nadie puede ingresar a la aplicación): `GET google.php?accion=inicio` lleva a Google (OpenID Connect con PKCE, limitado al dominio de Google Workspace configurado) y la vuelta abre la sesión si el correo es de un usuario activo. El estado viaja cifrado en una cookie `SameSite=Lax` de 10 minutos; un error vuelve a la aplicación con `?ingreso=<código>` (`google_sin_usuario`, `google_dominio`, `google_vencido`, `google_cancelado`, `google_error`, `google_limitado`). La seguridad de la cuenta (contraseña, verificación en dos pasos) la administra Google Workspace.
+- **Confirmación de identidad** (cargar o quitar el certificado de ARCA): la sesión informa `confirmado` (ingreso con Google de los últimos 15 minutos). Pasado ese plazo la operación responde `403` con `reconfirmar_google: true`, y `GET google.php?accion=inicio&confirmar=1` vuelve a pasar por Google con la cuenta de la sesión y regresa con `?ingreso=confirmado`.
 
 ### Clave de API (integraciones)
 
@@ -68,29 +67,20 @@ sequenceDiagram
 | Método | Operación | Acceso |
 |---|---|---|
 | `GET sesion.php` | Usuario de la sesión y token CSRF. Sin sesión: `usuario: null` (y `segundo_factor: true` si falta el código) | público |
-| `POST sesion.php` `{accion: "ingresar", email, clave}` | Inicia sesión o pide el código del segundo factor | público |
-| `POST sesion.php` `{accion: "verificar_codigo", codigo}` | Completa el ingreso con el código TOTP | público |
 | `POST sesion.php` `{accion: "salir"}` | Cierra la sesión | sesión |
-| `POST sesion.php` `{accion: "cambiar_clave", actual, nueva}` | Cambia la contraseña propia | sesión |
-| `POST sesion.php` `{accion: "totp_iniciar", clave}` | Genera el secreto TOTP y su URI `otpauth://` (todavía inactivo) | sesión |
-| `POST sesion.php` `{accion: "totp_activar", codigo}` | Activa el segundo factor | sesión |
-| `POST sesion.php` `{accion: "totp_desactivar", clave, codigo}` | Desactiva el segundo factor | sesión |
 | `GET usuarios.php` | Lista de usuarios (con `segundo_factor` y `bloqueado`) | admin |
-| `POST usuarios.php` `{nombre, email, rol}` | Alta; devuelve una contraseña temporal una única vez | admin |
+| `GET google.php?accion=inicio` | Ingreso con Google (redirige a Google y vuelve a la aplicación) | público |
+| `GET google.php?accion=inicio&confirmar=1` | Vuelve a confirmar la identidad con la cuenta de la sesión | sesión |
+| `POST usuarios.php` `{nombre, email, rol}` | Alta (el correo tiene que ser del dominio de Google configurado); desde ese momento ingresa con Google | admin |
 | `POST usuarios.php` `{accion: "editar", id, nombre?, rol?, activo?}` | Edición y activación | admin |
-| `POST usuarios.php` `{accion: "restablecer", id}` | Nueva contraseña temporal | admin |
-| `POST usuarios.php` `{accion: "desbloquear", id}` | Borra el freno de ingresos fallidos | admin |
-| `POST usuarios.php` `{accion: "quitar_segundo_factor", id}` | Desactiva el TOTP de un usuario que perdió el teléfono | admin |
 | `DELETE usuarios.php?id={id}` | Baja | admin |
 
-**Política de contraseñas:** al menos 12 caracteres, letras y números, al menos 6 caracteres distintos, sin palabras comunes (lista propia), secuencias evidentes ni partes del correo del usuario. Una contraseña que no cumple responde `422` con el motivo.
 
 Siempre queda al menos un administrador activo, y nadie puede quitarse el rol, desactivarse ni eliminarse a sí mismo. Por línea de comandos:
 
 ```bash
-php api/cli/usuario.php "Nombre Apellido" correo@dominio admin   # alta (contraseña temporal)
-php api/cli/usuario.php restablecer correo@dominio               # recuperar el acceso
-php api/cli/usuario.php quitar-segundo-factor correo@dominio
+php api/cli/usuario.php "Nombre Apellido" correo@dominio admin   # alta
+php api/cli/usuario.php admin correo@dominio                     # recuperar el acceso: lo activa como administrador
 ```
 
 ## Clientes
@@ -260,9 +250,9 @@ Remitos, comprobantes y clientes en JSON, para la copia descargable de la aplica
 | Método | Operación | Permiso |
 |---|---|---|
 | `GET arca.php` | Datos públicos del certificado de cada ambiente (titular, CUIT, vigencia, huella) | `leer` |
-| `POST arca.php` `{accion: "cargar", ambiente, cuit?, certificado, clave, frase?, confirmacion?}` | Valida el par y lo guarda cifrado. Solo por HTTPS; con sesión exige reconfirmar la contraseña | admin |
+| `POST arca.php` `{accion: "cargar", ambiente, cuit?, certificado, clave, frase?}` | Valida el par y lo guarda cifrado. Solo por HTTPS; con sesión exige la identidad confirmada con Google | admin |
 | `POST arca.php` `{accion: "probar", ambiente}` | Verifica los servidores de WSFEv1 y obtiene el ticket de WSAA | `crear` |
-| `POST arca.php` `{accion: "quitar", ambiente, confirmacion?}` | Elimina el certificado, la clave y los tickets del ambiente (con sesión, reconfirmando la contraseña) | admin |
+| `POST arca.php` `{accion: "quitar", ambiente}` | Elimina el certificado, la clave y los tickets del ambiente (con sesión, con la identidad confirmada con Google) | admin |
 | `DELETE arca.php?ambiente={ambiente}` | Ídem, solo con la clave maestra (integraciones) | admin |
 | `GET proximo.php?ambiente=&tipo=&subtipo=&letra=&pv=` | Próximo número según ARCA (último autorizado + 1), solo informativo | `leer` |
 
@@ -341,14 +331,14 @@ const { url } = await res.json();
 |---|---|
 | `200` / `201` | Operación correcta / recurso creado |
 | `400` | Petición mal formada o acción desconocida |
-| `401` | Falta la credencial, es inválida, la sesión venció o el código del segundo factor es incorrecto |
-| `403` | Sin el permiso necesario, clave desactivada, token CSRF ausente, origen no permitido, contraseña temporal sin cambiar, contraseña de confirmación incorrecta u operación que exige HTTPS |
+| `401` | Falta la credencial, es inválida, o la sesión venció |
+| `403` | Sin el permiso necesario, clave desactivada, token CSRF ausente, origen no permitido, identidad sin confirmar con Google (`reconfirmar_google`) u operación que exige HTTPS |
 | `404` | Recurso inexistente |
 | `405` | Método no permitido |
 | `409` | Conflicto: número repetido, documento autorizado (no se modifica), talonario agotado, vencido o ya usado, rango superpuesto, emisión no activa, sin certificado |
 | `413` | Cuerpo demasiado grande (256 KB) |
 | `415` | La escritura no se envió como `application/json` |
-| `422` | Datos que no superan la validación: fecha, CUIT, importes, contraseña, ajustes, certificado, número fuera de rango o rechazo de ARCA (con `errores` y `observaciones`) |
-| `429` | Demasiados intentos (ingreso, clave, código del segundo factor, reconfirmación) o eventos |
+| `422` | Datos que no superan la validación: fecha, CUIT, importes, ajustes, certificado, número fuera de rango o rechazo de ARCA (con `errores` y `observaciones`) |
+| `429` | Demasiados intentos (ingreso con Google, clave, enlace de conformidad) o eventos |
 | `502` | ARCA no respondió o la respuesta no se pudo confirmar |
 | `503` | Base de datos no disponible, esquema pendiente de migración u operación igual en curso |

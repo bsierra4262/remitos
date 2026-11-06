@@ -616,7 +616,7 @@
     fetch('api/sesion.php', { cache: 'no-store', credentials: 'same-origin' })
       .then(r => r.json())
       .then(j => {
-        if (j && j.usuario && j.usuario.rol === 'admin' && !j.usuario.debe_cambiar) {
+        if (j && j.usuario && j.usuario.rol === 'admin') {
           csrf = j.csrf;
           abrirPanel();
         }

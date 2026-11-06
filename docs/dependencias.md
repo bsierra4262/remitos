@@ -7,7 +7,7 @@ La aplicación no usa gestores de paquetes en producción: las pocas dependencia
 | Componente | Versión | Licencia | Archivo | Uso | Origen |
 |---|---|---|---|---|---|
 | SheetJS Community Edition | 0.20.3 | Apache-2.0 | `app/js/lib/xlsx.full.min.js` | Lectura de planillas Excel/CSV al importar clientes. Se carga solo al importar | `https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js` |
-| qrcode-generator | 2.0.4 | MIT | `app/js/lib/qrcode.js` | QR fiscal de los comprobantes (RG 4892/2020) y QR del segundo factor, generados en el navegador | `https://registry.npmjs.org/qrcode-generator/-/qrcode-generator-2.0.4.tgz` (`dist/qrcode.js`) |
+| qrcode-generator | 2.0.4 | MIT | `app/js/lib/qrcode.js` | QR fiscal de los comprobantes (RG 4892/2020) y QR de conformidad del remito digital, generados en el navegador | `https://registry.npmjs.org/qrcode-generator/-/qrcode-generator-2.0.4.tgz` (`dist/qrcode.js`) |
 | Saira (fuente variable 400–800) | Google Fonts v23 | SIL OFL 1.1 (`app/assets/fonts/OFL.txt`) | `app/assets/fonts/saira-latin*.woff2` | Tipografía de la interfaz y de los documentos, servida desde el propio sitio | Google Fonts |
 
 SHA-256 de cada archivo: [`test/dependencias.sha256`](../test/dependencias.sha256).

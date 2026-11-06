@@ -1,20 +1,28 @@
-"""Pruebas de usuarios y sesión: ingreso, bloqueo, cookie segura, CSRF, roles,
+"""Pruebas de usuarios y sesión: ingreso con Google, cookie segura, CSRF, roles,
 datos compartidos entre usuarios y numeración asignada por el servidor.
 
-Crean sus propios usuarios y datos en el entorno de pruebas.
+Se ingresa solo con Google: las pruebas usan el Google simulado de base.py y recorren
+el flujo real. Crean sus propios usuarios y datos en el entorno de pruebas.
 """
 import concurrent.futures
 import http.cookiejar
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from playwright.sync_api import sync_playwright
 
 import base
-from base import ADMIN_CLAVE, ADMIN_EMAIL, API, abrir, asegurar_admin, asegurar_usuario, caso, clave_maestra, ir_a, pedir
+from base import (ADMIN_EMAIL, API, abrir, asegurar_admin, asegurar_usuario, caso, clave_maestra, ingresar_con_google,
+                  ir_a, pedir)
 
-OPERADOR = ("operador.pruebas@intellihelp.test", "Operador de Pruebas", "Faro-Delta-91Wz")
+OPERADOR = ("operador.pruebas@intellihelp.tech", "Operador de Pruebas")
+
+
+class _SinRedireccion(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 class Sesion:
@@ -22,8 +30,9 @@ class Sesion:
 
     def __init__(self):
         self.jar = http.cookiejar.CookieJar()
-        self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+        self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar), _SinRedireccion)
         self.csrf = ""
+        self.cookies = []
 
     def pedir(self, ruta, metodo="GET", cuerpo=None, csrf=True):
         req = urllib.request.Request(API + ruta, method=metodo,
@@ -37,17 +46,32 @@ class Sesion:
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read().decode() or "{}"), dict(e.headers)
 
-    def ingresar(self, email, clave):
-        s, d, h = self.pedir("/sesion.php", "POST", {"accion": "ingresar", "email": email, "clave": clave})
+    def get(self, url):
+        """GET sin seguir redirecciones: (status, headers)."""
+        try:
+            with self.op.open(url, timeout=25) as r:
+                return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            self.cookies = e.headers.get_all("Set-Cookie") or []
+            return e.code, dict(e.headers)
+
+    def ingresar(self, email, **kw):
+        """Ingresa con Google. Devuelve a dónde volvió (con ?ingreso=<error> si falló)."""
+        destino = ingresar_con_google(self.get, email, **kw)
+        _, d, _ = self.pedir("/sesion.php")
         self.csrf = d.get("csrf", "")
-        return s, d, h
+        return destino
 
 
 def _admin():
     asegurar_admin()
     s = Sesion()
-    s.ingresar(ADMIN_EMAIL, ADMIN_CLAVE)
+    s.ingresar(ADMIN_EMAIL)
     return s
+
+
+def _error(destino):
+    return urllib.parse.parse_qs(urllib.parse.urlparse(destino).query).get("ingreso", [""])[0]
 
 
 @caso("Sin sesión la aplicación muestra el ingreso y la API no entrega datos")
@@ -58,20 +82,22 @@ def sin_sesion():
         try:
             pg.goto(base.url_app(), wait_until="networkidle")
             pg.wait_for_timeout(600)
-            ingreso = pg.is_visible("#formIngreso")
+            ingreso = pg.is_visible("#ingresoGoogle")
+            sin_clave = pg.locator("#acceso input").count() == 0  # solo el botón de Google
             app = pg.is_visible(".navbar")
         finally:
             b.close()
     estados = {r: pedir(r)[0] for r in ("/clientes.php", "/remitos.php", "/comprobantes.php", "/ajustes.php")}
-    ok = ingreso and not app and all(v == 401 for v in estados.values())
-    return ok, f"ingreso={ingreso} app={app} api={estados}"
+    ok = ingreso and sin_clave and not app and all(v == 401 for v in estados.values())
+    return ok, f"boton_google={ingreso} sin_campos_de_contraseña={sin_clave} app={app} api={estados}"
 
 
 @caso("La cookie de sesión es HttpOnly y SameSite=Strict, y cerrar sesión la invalida")
 def cookie_segura():
     s = _admin()
-    _, _, h = Sesion().ingresar(ADMIN_EMAIL, ADMIN_CLAVE)
-    cookie = h.get("Set-Cookie", "")
+    otra = Sesion()
+    otra.ingresar(ADMIN_EMAIL)
+    cookie = next((c for c in otra.cookies if c.startswith("remitos_sid=")), "")
     flags = "httponly" in cookie.lower() and "samesite=strict" in cookie.lower()
     antes = s.pedir("/clientes.php")[0]
     s.pedir("/sesion.php", "POST", {"accion": "salir"})
@@ -89,57 +115,71 @@ def csrf_obligatorio():
     return sin == 403 and con == 201, f"sin_token={sin} con_token={con}"
 
 
-@caso("Cinco contraseñas incorrectas frenan el ingreso sin revelar si la cuenta existe")
-def bloqueo_por_intentos():
-    """El freno es por correo y conexión (no bloquea la cuenta para todos) y responde
-    lo mismo exista o no el correo: no sirve para averiguar qué cuentas hay."""
-    email = "bloqueo.pruebas@intellihelp.test"
-    clave = "Cometa-Gris-37Hn"
-    asegurar_usuario(email, "Bloqueo de Pruebas", "operador", clave)
+@caso("Se ingresa con Google y la aplicación no tiene contraseñas ni segundo factor")
+def ingreso_solo_google():
+    asegurar_usuario(*OPERADOR, "operador")
     s = Sesion()
-    malos = [s.ingresar(email, "incorrecta")[1].get("error") for _ in range(5)]
-    st_ok, d, _ = s.ingresar(email, clave)
-    frenada = st_ok == 429
-    inexistentes = [s.ingresar("no.existe@intellihelp.test", "incorrecta") for _ in range(6)]
-    mensaje_inexistente = inexistentes[0][1].get("error")
-    freno_inexistente = inexistentes[-1][0] == 429 and inexistentes[-1][1].get("error") == d.get("error")
-    asegurar_usuario(email, "Bloqueo de Pruebas", "operador", clave)  # restablecer borra el freno
-    ok = frenada and freno_inexistente and malos[0] == mensaje_inexistente == "Correo o contraseña incorrectos"
-    return ok, (f"frenada={frenada} ({d.get('error')!r}) mensaje={malos[0]!r} inexistente={mensaje_inexistente!r} "
-                f"freno_inexistente={freno_inexistente}")
+    destino = s.ingresar(OPERADOR[0])
+    _, d, _ = s.pedir("/sesion.php")
+    datos = s.pedir("/clientes.php")[0]
+    viejas = {a: s.pedir("/sesion.php", "POST", {"accion": a, "email": OPERADOR[0], "clave": "x", "codigo": "123456"})[0]
+              for a in ("ingresar", "verificar_codigo", "cambiar_clave", "totp_iniciar")}
+    _, lista = pedir("/usuarios.php", clave=clave_maestra())
+    campos = set().union(*(u.keys() for u in lista.get("usuarios", [])))
+    restos = campos & {"clave_temporal", "debe_cambiar", "segundo_factor", "bloqueado", "clave_hash"}
+    _, alta = pedir("/usuarios.php", "POST", clave_maestra(), {"nombre": "X", "email": "x.pruebas@intellihelp.tech", "rol": "operador"})
+    if alta.get("usuario"):
+        pedir(f"/usuarios.php?id={alta['usuario']['id']}", "DELETE", clave_maestra())
+    usuario = d.get("usuario") or {}
+    ok = (_error(destino) == "" and usuario.get("email") == OPERADOR[0] and usuario.get("confirmado") is True
+          and datos == 200 and set(viejas.values()) == {400} and not restos and "clave_temporal" not in alta)
+    return ok, f"vuelta={destino} usuario={usuario.get('email')} datos={datos} acciones_viejas={viejas} restos={restos}"
 
 
-@caso("La contraseña temporal obliga a cambiarla y se aplica la política de contraseñas")
-def clave_temporal():
+@caso("Google: sin usuario, de otro dominio, sin verificar, de otra aplicación o con PKCE ajeno no ingresa")
+def ingreso_google_rechazos():
+    asegurar_usuario(*OPERADOR, "operador")
+    casos = {
+        "sin usuario": ("nadie.pruebas@intellihelp.tech", {}, None),
+        "otro dominio": ("operador.pruebas@gmail.com", {"hd": "gmail.com"}, None),
+        "sin hd": (OPERADOR[0], {"hd": ""}, None),
+        "sin verificar": (OPERADOR[0], {"email_verified": False}, None),
+        "otra aplicación": (OPERADOR[0], {"aud": "otra.apps.googleusercontent.com"}, None),
+        "vencido": (OPERADOR[0], {"exp": 1000, "iat": 900}, None),
+        "PKCE ajeno": (OPERADOR[0], {}, "reto-que-no-corresponde"),
+    }
+    resultados = {}
+    for etq, (email, claims, reto) in casos.items():
+        s = Sesion()
+        destino = s.ingresar(email, claims=claims, reto=reto)
+        resultados[etq] = (_error(destino), s.pedir("/clientes.php")[0])
+    esperados = {"sin usuario": "google_sin_usuario", "otro dominio": "google_dominio", "sin hd": "google_dominio"}
+    ok = all(r[1] == 401 and r[0] == esperados.get(e, "google_error") for e, r in resultados.items())
+    asegurar_usuario(*OPERADOR, "operador")  # borra los intentos fallidos acumulados
+    return ok, f"{resultados}"
+
+
+@caso("Solo se dan de alta correos de Intellihelp, y reconfirmar con Google vuelve con la cuenta de la sesión")
+def alta_dominio_y_reconfirmacion():
     m = clave_maestra()
-    email = "temporal.pruebas@intellihelp.test"
-    _, lista = pedir("/usuarios.php", clave=m)
-    previo = next((u for u in lista.get("usuarios", []) if u["email"] == email), None)
-    if previo:
-        pedir(f"/usuarios.php?id={previo['id']}", "DELETE", m)
-    _, d = pedir("/usuarios.php", "POST", m, {"nombre": "Temporal", "email": email, "rol": "operador"})
-    temporal = d["clave_temporal"]
-    s = Sesion()
-    s.ingresar(email, temporal)
-    bloqueado = s.pedir("/clientes.php")[0]
-    corta = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "abc12"})[0]
-    sin_numeros = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "solamenteletrasaqui"})[0]
-    laxas = [s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": n})[0]
-             for n in ("aaaaaaaaaaa1", "1234567890ab", "Password2026x", "temporal2026xyz")]
-    st, d2, _ = s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": temporal, "nueva": "Definitiva2026"})
-    s.csrf = d2.get("csrf", "")
-    habilitado = s.pedir("/clientes.php")[0]
-    pedir(f"/usuarios.php?id={d['usuario']['id']}", "DELETE", m)
-    ok = (len(temporal) >= 12 and bloqueado == 403 and corta == 422 and sin_numeros == 422
-          and laxas == [422] * 4 and st == 200 and habilitado == 200)
-    return ok, f"bloqueado={bloqueado} corta={corta} sin_numeros={sin_numeros} laxas={laxas} cambio={st} despues={habilitado}"
+    ajeno = pedir("/usuarios.php", "POST", m, {"nombre": "Ajeno", "email": "alguien@gmail.com", "rol": "operador"})[0]
+    s = _admin()
+    _, h = s.get(API + "/google.php?accion=inicio&confirmar=1")
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(h.get("Location", "")).query)
+    sugerida = q.get("login_hint") == [ADMIN_EMAIL] and "prompt" not in q
+    s2 = Sesion()
+    _, h2 = s2.get(API + "/google.php?accion=inicio")
+    q2 = urllib.parse.parse_qs(urllib.parse.urlparse(h2.get("Location", "")).query)
+    elegir = q2.get("prompt") == ["select_account"] and "login_hint" not in q2
+    ok = ajeno == 400 and sugerida and elegir
+    return ok, f"alta_gmail={ajeno} reconfirmar_con_la_cuenta={sugerida} ingreso_elige_cuenta={elegir}"
 
 
 @caso("El operador trabaja con documentos pero no administra usuarios, ajustes ni certificados")
 def permisos_operador():
-    asegurar_usuario(*OPERADOR[:2], "operador", OPERADOR[2])
+    asegurar_usuario(*OPERADOR, "operador")
     s = Sesion()
-    s.ingresar(OPERADOR[0], OPERADOR[2])
+    s.ingresar(OPERADOR[0])
     guarda, d, _ = s.pedir("/remitos.php", "POST", {"cliente": {"razonSocial": "DEL OPERADOR"}})
     usuarios = s.pedir("/usuarios.php")[0]
     ajustes = s.pedir("/ajustes.php", "POST", {"seccion": "remito", "valores": {"ptoVenta": "9"}})[0]
@@ -147,7 +187,7 @@ def permisos_operador():
     if d.get("id"):
         pedir(f"/remitos.php?id={d['id']}", "DELETE", clave_maestra())
     with sync_playwright() as pw:
-        b, pg, _ = abrir(pw, email=OPERADOR[0], clave=OPERADOR[2])
+        b, pg, _ = abrir(pw, email=OPERADOR[0])
         try:
             ir_a(pg, "config")
             pestaña = pg.is_visible(".cfg-tab[data-tab=usuarios]")
@@ -161,10 +201,10 @@ def permisos_operador():
 
 @caso("Los datos son compartidos: lo que carga un usuario lo ve otro en otro equipo")
 def datos_compartidos():
-    asegurar_usuario(*OPERADOR[:2], "operador", OPERADOR[2])
+    asegurar_usuario(*OPERADOR, "operador")
     with sync_playwright() as pw:
         b1, admin, _ = abrir(pw)
-        b2, operador, _ = abrir(pw, email=OPERADOR[0], clave=OPERADOR[2])
+        b2, operador, _ = abrir(pw, email=OPERADOR[0])
         try:
             ir_a(admin, "clientes")
             admin.click("#btnNuevoCliente")
@@ -218,18 +258,20 @@ def siempre_un_admin():
 
 @caso("Un usuario desactivado pierde el acceso en el acto")
 def desactivado_sin_acceso():
-    email = "desactivado.pruebas@intellihelp.test"
-    asegurar_usuario(email, "Desactivado de Pruebas", "operador", "Linterna-Roja-64Pe")
+    email = "desactivado.pruebas@intellihelp.tech"
+    asegurar_usuario(email, "Desactivado de Pruebas", "operador")
     s = Sesion()
-    s.ingresar(email, "Linterna-Roja-64Pe")
+    s.ingresar(email)
     antes = s.pedir("/clientes.php")[0]
     _, lista = pedir("/usuarios.php", clave=clave_maestra())
     uid = next(u["id"] for u in lista["usuarios"] if u["email"] == email)
     pedir("/usuarios.php", "POST", clave_maestra(), {"accion": "editar", "id": uid, "activo": False})
     despues = s.pedir("/clientes.php")[0]
-    reingreso = s.ingresar(email, "Linterna-Roja-64Pe")[0]
+    reingreso = _error(s.ingresar(email))
+    sin_datos = s.pedir("/clientes.php")[0]
     pedir(f"/usuarios.php?id={uid}", "DELETE", clave_maestra())
-    return antes == 200 and despues == 401 and reingreso == 401, f"antes={antes} después={despues} reingreso={reingreso}"
+    ok = antes == 200 and despues == 401 and reingreso == "google_sin_usuario" and sin_datos == 401
+    return ok, f"antes={antes} después={despues} reingreso={reingreso} datos={sin_datos}"
 
 
 @caso("Los datos que la versión anterior dejó en el navegador se suben al servidor al ingresar")
@@ -262,43 +304,26 @@ def traspaso_de_datos_locales():
     return ok, f"clientes={len(cli)} remitos={len(rem)} quedan_en_navegador={quedan}"
 
 
-@caso("Cambiar la contraseña cierra las demás sesiones del usuario")
-def cambio_cierra_sesiones():
-    email = "sesiones.pruebas@intellihelp.test"
-    clave, nueva = "Velero-Azul-28Km", "Velero-Azul-29Km"
-    asegurar_usuario(email, "Sesiones de Pruebas", "operador", clave)
+@caso("Cambiar el rol de un usuario cierra sus sesiones abiertas")
+def cambio_de_rol_cierra_sesiones():
+    email = "sesiones.pruebas@intellihelp.tech"
+    uid = asegurar_usuario(email, "Sesiones de Pruebas", "operador")
     a, b = Sesion(), Sesion()
-    a.ingresar(email, clave)
-    b.ingresar(email, clave)
-    antes = b.pedir("/clientes.php")[0]
-    st, d, _ = a.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": clave, "nueva": nueva})
-    a.csrf = d.get("csrf", "")
-    propia = a.pedir("/clientes.php")[0]
-    otra = b.pedir("/clientes.php")[0]
-    asegurar_usuario(email, "Sesiones de Pruebas", "operador", clave)
-    ok = antes == 200 and st == 200 and propia == 200 and otra == 401
-    return ok, f"antes={antes} cambio={st} propia={propia} otra={otra}"
+    a.ingresar(email)
+    b.ingresar(email)
+    antes = [a.pedir("/clientes.php")[0], b.pedir("/clientes.php")[0]]
+    st = pedir("/usuarios.php", "POST", clave_maestra(), {"accion": "editar", "id": uid, "rol": "admin"})[0]
+    despues = [a.pedir("/clientes.php")[0], b.pedir("/clientes.php")[0]]
+    a.ingresar(email)
+    _, d, _ = a.pedir("/sesion.php")
+    pedir(f"/usuarios.php?id={uid}", "DELETE", clave_maestra())
+    ok = antes == [200, 200] and st == 200 and despues == [401, 401] and (d.get("usuario") or {}).get("rol") == "admin"
+    return ok, f"antes={antes} cambio={st} después={despues} nuevo_rol={(d.get('usuario') or {}).get('rol')}"
 
 
-@caso("Reconfirmar la contraseña tiene límite: cinco fallos cierran la sesión")
-def reconfirmacion_limitada():
-    email = "reconfirma.pruebas@intellihelp.test"
-    clave = "Glaciar-Ocre-45Bd"
-    asegurar_usuario(email, "Reconfirma de Pruebas", "operador", clave)
-    s = Sesion()
-    s.ingresar(email, clave)
-    estados = [s.pedir("/sesion.php", "POST", {"accion": "cambiar_clave", "actual": "mal", "nueva": "Otra-Clave-77Zz"})[0]
-               for _ in range(6)]
-    despues = s.pedir("/clientes.php")[0]
-    asegurar_usuario(email, "Reconfirma de Pruebas", "operador", clave)
-    ok = estados[:5] == [403] * 5 and estados[5] == 429 and despues == 401
-    return ok, f"estados={estados} despues={despues}"
-
-
-@caso("El ingreso rechaza formularios de otro origen o que no son JSON")
+@caso("La sesión rechaza formularios de otro origen o que no son JSON")
 def ingreso_mismo_origen():
-    asegurar_admin()
-    cuerpo = json.dumps({"accion": "ingresar", "email": ADMIN_EMAIL, "clave": ADMIN_CLAVE}).encode()
+    cuerpo = json.dumps({"accion": "salir"}).encode()
 
     def post(tipo, origen=None):
         req = urllib.request.Request(API + "/sesion.php", data=cuerpo, method="POST")
@@ -315,45 +340,6 @@ def ingreso_mismo_origen():
     otro = post("application/json", "https://sitio-malicioso.example")
     propio = post("application/json", base.SITIO)
     return formulario == 415 and otro == 403 and propio == 200, f"text/plain={formulario} otro_origen={otro} propio={propio}"
-
-
-@caso("Verificación en dos pasos: sin el código no hay sesión, y un código no se reutiliza")
-def segundo_factor():
-    import base64
-    import hashlib
-    import hmac
-    import struct
-    import time
-
-    def codigo(secreto, desplazamiento=0):
-        clave = base64.b32decode(secreto + "=" * (-len(secreto) % 8))
-        h = hmac.new(clave, struct.pack(">Q", int(time.time() // 30) + desplazamiento), hashlib.sha1).digest()
-        o = h[-1] & 15
-        return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000)
-
-    email = "totp.pruebas@intellihelp.test"
-    clave = "Brasero-Lila-52Cx"
-    asegurar_usuario(email, "TOTP de Pruebas", "operador", clave)
-    a = Sesion()
-    a.ingresar(email, clave)
-    _, d, _ = a.pedir("/sesion.php", "POST", {"accion": "totp_iniciar", "clave": clave})
-    secreto = d.get("secreto", "")
-    st_act, d, _ = a.pedir("/sesion.php", "POST", {"accion": "totp_activar", "codigo": codigo(secreto)})
-    b = Sesion()
-    _, paso1, _ = b.ingresar(email, clave)
-    sin_codigo = b.pedir("/clientes.php")[0]
-    malo = b.pedir("/sesion.php", "POST", {"accion": "verificar_codigo", "codigo": "000000"})[0]
-    usado = b.pedir("/sesion.php", "POST", {"accion": "verificar_codigo", "codigo": codigo(secreto)})[0]
-    st_ok, d2, _ = b.pedir("/sesion.php", "POST", {"accion": "verificar_codigo", "codigo": codigo(secreto, 1)})
-    b.csrf = d2.get("csrf", "")
-    con_codigo = b.pedir("/clientes.php")[0]
-    _, lista = pedir("/usuarios.php", clave=clave_maestra())
-    uid = next(u["id"] for u in lista["usuarios"] if u["email"] == email)
-    pedir("/usuarios.php", "POST", clave_maestra(), {"accion": "quitar_segundo_factor", "id": uid})
-    ok = (st_act == 200 and paso1.get("segundo_factor") and paso1.get("usuario") is None and sin_codigo == 401
-          and malo == 401 and usado == 401 and st_ok == 200 and con_codigo == 200)
-    return ok, (f"activar={st_act} paso1={paso1} sin_codigo={sin_codigo} malo={malo} reutilizado={usado} "
-                f"siguiente={st_ok} con_codigo={con_codigo}")
 
 
 @caso("Ingreso con Google: va a Google con PKCE y dominio, y una vuelta manipulada no abre sesión")

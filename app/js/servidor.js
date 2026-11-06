@@ -1,7 +1,8 @@
 /**
  * Remitos y Comprobantes — Intellihelp
  *
- * Capa de servidor: llamadas a la API, sesión de usuario, pantalla de ingreso,
+ * Capa de servidor: llamadas a la API, sesión de usuario, pantalla de ingreso (solo
+ * con la cuenta de Google de Intellihelp),
  * datos compartidos (clientes, remitos, comprobantes y ajustes), administración
  * de usuarios y traspaso al servidor de los datos de versiones anteriores que
  * habían quedado guardados en el navegador.
@@ -66,7 +67,6 @@ async function api(ruta, opciones = {}) {
     j = { ok: false, error: 'Respuesta inesperada del servidor (HTTP ' + res.status + ')' };
   }
   if (res.status === 401 && j.sesion === false && !opciones.sinSesion) sesionVencida();
-  if (res.status === 403 && j.cambiar_clave) mostrarAcceso('cambio');
   if (!res.ok || !j.ok) throw new ErrorApi(j.error || 'Error del servidor (HTTP ' + res.status + ')', res.status, j);
   return j;
 }
@@ -162,15 +162,19 @@ function aplicarClavesLocales(uid) {
 async function iniciarSesionApp() {
   try {
     const j = await api('sesion.php', { sinSesion: true });
-    pintarOpcionesIngreso(!!j.google);
     const aviso = avisoIngresoGoogle();
-    if (!j.usuario) return mostrarAcceso(j.segundo_factor ? 'codigo' : 'ingreso', aviso);
+    if (!j.usuario) {
+      $('#ingresoGoogleFila').hidden = !j.google;
+      return mostrarAcceso(
+        j.google
+          ? aviso
+          : 'El ingreso con Google todavía no está configurado en el servidor. Avisale a un administrador.'
+      );
+    }
     aplicarSesion(j);
     if (aviso) toast(aviso, 3200, true);
   } catch (e) {
-    if (e.status === 0)
-      return mostrarAcceso('ingreso', 'Sin conexión con el servidor. Revisá la conexión y volvé a intentar.');
-    mostrarAcceso('ingreso');
+    mostrarAcceso(e.status === 0 ? 'Sin conexión con el servidor. Revisá la conexión y volvé a intentar.' : e.message);
   }
 }
 
@@ -186,32 +190,6 @@ const AVISOS_GOOGLE = {
   google_limitado: 'Demasiados intentos de ingreso con Google. Esperá unos minutos.',
   confirmado: 'Identidad confirmada con Google. Ya podés repetir la operación.',
 };
-
-/* Con Google habilitado, es la forma principal de ingresar; correo y contraseña quedan
-   como alternativa. */
-function pintarOpcionesIngreso(conGoogle) {
-  $('#ingresoGoogleFila').hidden = !conGoogle;
-  $('#ingresoClaveBloque').hidden = conGoogle;
-  $('#ingresoSub').textContent = conGoogle ? 'Con tu cuenta de Google de Intellihelp.' : 'Con tu correo y contraseña.';
-}
-function mostrarIngresoConClave() {
-  $('#ingresoClaveBloque').hidden = false;
-  $('#ingresoConClave').hidden = true;
-  $('#ingresoSub').textContent = 'Con tu correo y contraseña.';
-  $('#ingresoEmail').focus();
-}
-
-/* Sesión abierta con Google: las operaciones sensibles no piden contraseña; pasados
-   15 minutos del ingreso, el servidor pide volver a confirmar con Google. */
-const URL_CONFIRMAR_GOOGLE = 'api/google.php?accion=inicio&confirmar=1';
-const sesionGoogle = () => !!(sesion.usuario && sesion.usuario.ingreso === 'google');
-/** Detalle de un error para avisoCert: si hay que reconfirmar con Google, ofrece hacerlo. */
-function detalleError(err) {
-  const texto = ' ' + esc(err && err.message ? err.message : 'Error inesperado');
-  return err && err.respuesta && err.respuesta.reconfirmar_google
-    ? texto + ` <a class="btn sm google-confirmar" href="${URL_CONFIRMAR_GOOGLE}">Confirmar con Google</a>`
-    : texto;
-}
 function avisoIngresoGoogle() {
   const params = new URLSearchParams(location.search);
   const codigo = params.get('ingreso');
@@ -221,10 +199,20 @@ function avisoIngresoGoogle() {
   return AVISOS_GOOGLE[codigo] || '';
 }
 
+/* Las operaciones sensibles valen dentro de los 15 minutos del ingreso con Google;
+   después el servidor pide volver a confirmar la identidad con Google. */
+const URL_CONFIRMAR_GOOGLE = 'api/google.php?accion=inicio&confirmar=1';
+/** Detalle de un error para avisoCert: si hay que reconfirmar con Google, ofrece hacerlo. */
+function detalleError(err) {
+  const texto = ' ' + esc(err && err.message ? err.message : 'Error inesperado');
+  return err && err.respuesta && err.respuesta.reconfirmar_google
+    ? texto + ` <a class="btn sm google-confirmar" href="${URL_CONFIRMAR_GOOGLE}">Confirmar con Google</a>`
+    : texto;
+}
+
 function aplicarSesion(j) {
   sesion.usuario = j.usuario;
   sesion.csrf = j.csrf;
-  if (j.usuario.debe_cambiar) return mostrarAcceso('cambio');
   entrarApp();
 }
 
@@ -245,7 +233,7 @@ function sesionVencida() {
   if (!sesion.usuario) return;
   sesion.usuario = null;
   sesion.csrf = '';
-  mostrarAcceso('ingreso', 'La sesión venció. Ingresá de nuevo: el borrador en curso quedó guardado en este equipo.');
+  mostrarAcceso('La sesión venció. Ingresá de nuevo: el borrador en curso quedó guardado en este equipo.');
 }
 
 /* Al salir se borran del equipo los borradores del usuario (tienen datos de clientes).
@@ -267,105 +255,19 @@ async function cerrarSesion() {
 }
 
 /* ---------------------------- Pantalla de acceso ---------------------------- */
-function mostrarAcceso(modo, aviso) {
-  const panel = $('#acceso');
-  panel.hidden = false;
+function mostrarAcceso(aviso) {
+  $('#acceso').hidden = false;
   document.body.classList.add('sin-sesion');
-  $('#formIngreso').hidden = modo !== 'ingreso';
-  $('#formCodigo').hidden = modo !== 'codigo';
-  $('#formCambio').hidden = modo !== 'cambio';
   const el = $('#accesoAviso');
   el.textContent = aviso || '';
   el.hidden = !aviso;
   setTimeout(() => {
-    const foco =
-      modo === 'cambio'
-        ? $('#cambioActual')
-        : modo === 'codigo'
-          ? $('#ingresoCodigo')
-          : $('#ingresoClaveBloque').hidden
-            ? $('#ingresoGoogle')
-            : $('#ingresoEmail');
-    if (foco) foco.focus();
+    if (!$('#ingresoGoogleFila').hidden) $('#ingresoGoogle').focus();
   }, 50);
 }
 function ocultarAcceso() {
   $('#acceso').hidden = true;
   document.body.classList.remove('sin-sesion');
-  ['#ingresoClave', '#ingresoCodigo', '#cambioActual', '#cambioNueva', '#cambioRepetir'].forEach(
-    id => ($(id).value = '')
-  );
-}
-function avisoAcceso(texto) {
-  const el = $('#accesoAviso');
-  el.textContent = texto;
-  el.hidden = !texto;
-}
-
-async function enviarIngreso(e) {
-  e.preventDefault();
-  const btn = $('#ingresoEnviar');
-  const email = $('#ingresoEmail').value.trim();
-  const clave = $('#ingresoClave').value;
-  if (!email || !clave) return avisoAcceso('Ingresá el correo y la contraseña.');
-  btn.disabled = true;
-  try {
-    const j = await api('sesion.php', { method: 'POST', body: { accion: 'ingresar', email, clave }, sinSesion: true });
-    $('#ingresoClave').value = '';
-    if (!j.usuario && j.segundo_factor) return mostrarAcceso('codigo');
-    aplicarSesion(j);
-  } catch (err) {
-    avisoAcceso(err.message);
-    $('#ingresoClave').select();
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-/** Segundo paso del ingreso: el código TOTP de la aplicación de autenticación. */
-async function enviarCodigo(e) {
-  e.preventDefault();
-  const btn = $('#codigoEnviar');
-  const codigo = $('#ingresoCodigo').value.replace(/\D/g, '');
-  if (codigo.length !== 6) return avisoAcceso('El código tiene 6 dígitos.');
-  btn.disabled = true;
-  try {
-    const j = await api('sesion.php', {
-      method: 'POST',
-      body: { accion: 'verificar_codigo', codigo },
-      sinSesion: true,
-    });
-    aplicarSesion(j);
-  } catch (err) {
-    $('#ingresoCodigo').value = '';
-    if (err.respuesta && err.respuesta.sesion === false) mostrarAcceso('ingreso', err.message);
-    else avisoAcceso(err.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-/** Cambio de contraseña: el obligatorio del primer ingreso y el de «Mi cuenta». */
-async function cambiarClave(actual, nueva, repetir) {
-  if (nueva !== repetir) throw new Error('Las contraseñas nuevas no coinciden');
-  const j = await api('sesion.php', { method: 'POST', body: { accion: 'cambiar_clave', actual, nueva } });
-  sesion.usuario = j.usuario;
-  sesion.csrf = j.csrf;
-  return j;
-}
-async function enviarCambio(e) {
-  e.preventDefault();
-  const btn = $('#cambioEnviar');
-  btn.disabled = true;
-  try {
-    await cambiarClave($('#cambioActual').value, $('#cambioNueva').value, $('#cambioRepetir').value);
-    entrarApp();
-    toast('Contraseña actualizada', 1800, true);
-  } catch (err) {
-    avisoAcceso(err.message);
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 /* ------------------------------ Mi cuenta ------------------------------ */
@@ -381,88 +283,7 @@ function abrirMiCuenta() {
   $('#cuentaNombre').textContent = u.nombre;
   $('#cuentaEmail').textContent = u.email;
   $('#cuentaRol').textContent = u.rol === 'admin' ? 'Administrador' : 'Operador';
-  ['#cuentaActual', '#cuentaNueva', '#cuentaRepetir'].forEach(id => ($(id).value = ''));
-  const google = sesionGoogle();
-  $('#cuentaActualFila').hidden = google;
-  $('#cuentaActual').required = !google;
-  $('#cuentaClaveGoogle').hidden = !google;
-  $('#cuentaClaveTit').textContent = google ? 'Contraseña (opcional)' : 'Cambiar la contraseña';
-  ocultar('#cuentaAlert');
-  pintarSegundoFactor();
   openPanel($('#cuentaModal'), $('#backdrop6'));
-}
-
-/* ---------------------- Verificación en dos pasos (TOTP) ---------------------- */
-function pintarSegundoFactor(enAlta = false) {
-  const activo = !!sesion.usuario.segundo_factor;
-  $('#tfaEstado').innerHTML = activo
-    ? '<b>Activa.</b> Al ingresar se pide el código de tu aplicación de autenticación.'
-    : 'Pide un código de una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, 1Password…) además de la contraseña.';
-  $('#tfaInicio').hidden = enAlta || sesionGoogle();
-  $('#tfaAlta').hidden = !enAlta;
-  $('#tfaCodigoFila').hidden = !(enAlta || activo);
-  $('#tfaIniciar').hidden = activo || enAlta;
-  $('#tfaConfirmar').hidden = !enAlta;
-  $('#tfaDesactivar').hidden = !activo;
-  ['#tfaClave', '#tfaCodigo'].forEach(id => ($(id).value = ''));
-  if (!enAlta) $('#tfaQr').innerHTML = '';
-  ocultar('#tfaAlert');
-}
-function actualizarSesion(j) {
-  sesion.usuario = j.usuario;
-  sesion.csrf = j.csrf;
-}
-async function iniciarSegundoFactor() {
-  try {
-    const j = await api('sesion.php', {
-      method: 'POST',
-      body: { accion: 'totp_iniciar', clave: $('#tfaClave').value },
-    });
-    pintarSegundoFactor(true);
-    $('#tfaSecreto').textContent = j.secreto.replace(/(.{4})/g, '$1 ').trim();
-    const q = qrcode(0, 'M');
-    q.addData(j.uri);
-    q.make();
-    $('#tfaQr').innerHTML = `<img src="${q.createDataURL(5, 2)}" alt="Código QR para la aplicación de autenticación">`;
-    $('#tfaCodigo').focus();
-  } catch (err) {
-    avisoCert('err', 'No se pudo activar', detalleError(err), '#tfaAlert');
-  }
-}
-async function confirmarSegundoFactor() {
-  try {
-    actualizarSesion(
-      await api('sesion.php', { method: 'POST', body: { accion: 'totp_activar', codigo: $('#tfaCodigo').value } })
-    );
-    pintarSegundoFactor();
-    toast('Verificación en dos pasos activada. Se cerraron tus otras sesiones.', 3000, true);
-  } catch (err) {
-    avisoCert('err', 'El código no es correcto', ' ' + esc(err.message), '#tfaAlert');
-  }
-}
-async function desactivarSegundoFactor() {
-  try {
-    actualizarSesion(
-      await api('sesion.php', {
-        method: 'POST',
-        body: { accion: 'totp_desactivar', clave: $('#tfaClave').value, codigo: $('#tfaCodigo').value },
-      })
-    );
-    pintarSegundoFactor();
-    toast('Verificación en dos pasos desactivada', 2200, true);
-  } catch (err) {
-    avisoCert('err', 'No se pudo desactivar', detalleError(err), '#tfaAlert');
-  }
-}
-async function guardarMiClave(e) {
-  e.preventDefault();
-  try {
-    await cambiarClave($('#cuentaActual').value, $('#cuentaNueva').value, $('#cuentaRepetir').value);
-    closePanels();
-    toast('Contraseña actualizada', 1800, true);
-  } catch (err) {
-    avisoCert('err', 'No se pudo cambiar la contraseña', detalleError(err), '#cuentaAlert');
-  }
 }
 
 /* ============================ Usuarios (admin) ============================ */
@@ -479,18 +300,14 @@ async function renderUsuarios() {
   }
   box.innerHTML = usuarios
     .map(u => {
-      const estado = !u.activo
-        ? '<span class="doc-state draft">Desactivado</span>'
-        : u.bloqueado
-          ? '<span class="doc-state draft">Ingreso frenado</span>'
-          : u.debe_cambiar
-            ? '<span class="doc-state saved">Contraseña temporal</span>'
-            : `<span class="doc-state auth">Activo${u.segundo_factor ? ' · 2 pasos' : ''}</span>`;
+      const estado = u.activo
+        ? '<span class="doc-state auth">Activo</span>'
+        : '<span class="doc-state draft">Desactivado</span>';
       const propio = u.id === sesion.usuario.id ? ' <span class="note">(vos)</span>' : '';
       return `<div class="user-row" data-id="${escA(String(u.id))}">
         <span class="avatar">${esc(iniciales(u.nombre))}</span>
         <div class="doc-main"><strong>${esc(u.nombre)}${propio}</strong><small>${esc(u.email)} · ${u.rol === 'admin' ? 'Administrador' : 'Operador'}</small></div>
-        <div class="doc-meta">${u.ultimo_ingreso ? 'Último ingreso ' + esc(fmtFechaHora(u.ultimo_ingreso)) : 'Sin ingresos'}</div>
+        <div class="doc-meta">${u.ultimo_ingreso ? 'Último ingreso ' + esc(fmtFechaHora(u.ultimo_ingreso)) : 'Todavía no ingresó'}</div>
         ${estado}
         <button class="btn sm" data-editar="${escA(String(u.id))}">Editar</button>
       </div>`;
@@ -512,17 +329,8 @@ function abrirUsuario(id) {
   $('#usrActivo').checked = u ? u.activo : true;
   $('#usrActivoFila').hidden = !u;
   $('#usrAcciones').hidden = !u;
-  $('#usrDesbloquear').hidden = !(u && u.bloqueado);
-  $('#usrQuitar2fa').hidden = !(u && u.segundo_factor);
-  $('#usrTemporal').hidden = true;
   ocultar('#usuarioAlert');
   openPanel($('#usuarioModal'), $('#backdrop7'));
-}
-
-function mostrarTemporal(clave, aviso) {
-  $('#usrTemporalClave').textContent = clave;
-  $('#usrTemporalAviso').textContent = aviso;
-  $('#usrTemporal').hidden = false;
 }
 
 async function guardarUsuario(e) {
@@ -540,48 +348,10 @@ async function guardarUsuario(e) {
   try {
     const j = await api('usuarios.php', { method: 'POST', body });
     await renderUsuarios();
-    if (!u) {
-      usuarioEditando = j.usuario;
-      usuarios = usuarios.some(x => x.id === j.usuario.id) ? usuarios : [j.usuario, ...usuarios];
-      $('#usrEmail').readOnly = true;
-      $('#usrActivoFila').hidden = false;
-      $('#usrAcciones').hidden = false;
-      $('#usuarioTitulo').textContent = 'Editar usuario';
-      mostrarTemporal(j.clave_temporal, j.aviso);
-      toast('Usuario creado', 1800, true);
-    } else {
-      closePanels();
-      toast('Usuario actualizado', 1600, true);
-    }
+    closePanels();
+    toast(u ? 'Usuario actualizado' : j.aviso || 'Usuario creado', u ? 1600 : 3200, true);
   } catch (err) {
     avisoCert('err', 'No se pudo guardar el usuario', ' ' + esc(err.message), '#usuarioAlert');
-  }
-}
-
-async function restablecerUsuario() {
-  const u = usuarioEditando;
-  if (!u || !confirm('¿Generar una contraseña temporal nueva para ' + u.nombre + '? La actual deja de funcionar.'))
-    return;
-  try {
-    const j = await api('usuarios.php', { method: 'POST', body: { accion: 'restablecer', id: u.id } });
-    mostrarTemporal(j.clave_temporal, j.aviso);
-    renderUsuarios();
-  } catch (err) {
-    avisoCert('err', 'No se pudo restablecer la contraseña', ' ' + esc(err.message), '#usuarioAlert');
-  }
-}
-
-async function accionUsuario(accion, pregunta, aviso) {
-  const u = usuarioEditando;
-  if (!u || !confirm(pregunta.replace('%s', u.nombre))) return;
-  try {
-    const j = await api('usuarios.php', { method: 'POST', body: { accion, id: u.id } });
-    usuarioEditando = j.usuario;
-    await renderUsuarios();
-    abrirUsuario(u.id);
-    toast(aviso, 2000, true);
-  } catch (err) {
-    avisoCert('err', 'No se pudo completar la acción', ' ' + esc(err.message), '#usuarioAlert');
   }
 }
 
@@ -673,43 +443,15 @@ async function traspasarDatosLocales() {
 
 /* ================================ Eventos ================================ */
 function wireServidor() {
-  $('#formIngreso').addEventListener('submit', enviarIngreso);
-  $('#ingresoConClave').addEventListener('click', mostrarIngresoConClave);
-  $('#formCodigo').addEventListener('submit', enviarCodigo);
-  $('#codigoVolver').addEventListener('click', cerrarSesion);
-  $('#tfaIniciar').addEventListener('click', iniciarSegundoFactor);
-  $('#tfaConfirmar').addEventListener('click', confirmarSegundoFactor);
-  $('#tfaDesactivar').addEventListener('click', desactivarSegundoFactor);
-  $('#usrDesbloquear').addEventListener('click', () =>
-    accionUsuario('desbloquear', '¿Borrar los intentos de ingreso fallidos de %s?', 'Ingreso desbloqueado')
-  );
-  $('#usrQuitar2fa').addEventListener('click', () =>
-    accionUsuario(
-      'quitar_segundo_factor',
-      '¿Quitar la verificación en dos pasos de %s? Hacelo solo si perdió el teléfono.',
-      'Verificación en dos pasos quitada'
-    )
-  );
-  $('#formCambio').addEventListener('submit', enviarCambio);
-  $('#cambioSalir').addEventListener('click', cerrarSesion);
   $('#btnSalir').addEventListener('click', cerrarSesion);
   $('#btnCuenta').addEventListener('click', abrirMiCuenta);
-  $('#cuentaForm').addEventListener('submit', guardarMiClave);
+  $('#cuentaSalir').addEventListener('click', cerrarSesion);
   $('#cuentaClose').addEventListener('click', closePanels);
   $('#backdrop6').addEventListener('click', closePanels);
   $('#btnNuevoUsuario').addEventListener('click', () => abrirUsuario(null));
   $('#usuarioForm').addEventListener('submit', guardarUsuario);
-  $('#usrRestablecer').addEventListener('click', restablecerUsuario);
   $('#usrEliminar').addEventListener('click', eliminarUsuario);
   $('#usuarioClose').addEventListener('click', closePanels);
   $('#usuarioCancel').addEventListener('click', closePanels);
   $('#backdrop7').addEventListener('click', closePanels);
-  $('#usrCopiar').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText($('#usrTemporalClave').textContent);
-      toast('Contraseña copiada', 1400, true);
-    } catch (e) {
-      toast('Copiala manualmente', 1600);
-    }
-  });
 }

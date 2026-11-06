@@ -6,16 +6,14 @@
  * Administración de usuarios (requiere rol administrador o la clave maestra).
  *
  *   GET    usuarios.php                                   Lista de usuarios.
- *   POST   usuarios.php {nombre, email, rol}              Alta con contraseña temporal (se devuelve una vez).
+ *   POST   usuarios.php {nombre, email, rol}              Alta: desde ese momento ingresa con Google.
  *   POST   usuarios.php {accion: 'editar', id, nombre?, rol?, activo?}
- *   POST   usuarios.php {accion: 'restablecer', id}       Nueva contraseña temporal.
- *   POST   usuarios.php {accion: 'desbloquear', id}       Borra los intentos de ingreso fallidos.
- *   POST   usuarios.php {accion: 'quitar_segundo_factor', id} Desactiva el TOTP (pérdida del teléfono).
  *   DELETE usuarios.php?id=N                              Elimina un usuario.
  *
- * Reglas: siempre queda al menos un administrador activo, y nadie puede
- * quitarse a sí mismo el rol de administrador, desactivarse ni eliminarse.
- * Cambiar el rol, desactivar o restablecer la contraseña cierra las sesiones abiertas
+ * No hay contraseñas: cada persona ingresa con su cuenta de Google de Intellihelp, así
+ * que el correo tiene que ser de ese dominio. Reglas: siempre queda al menos un
+ * administrador activo, y nadie puede quitarse a sí mismo el rol de administrador,
+ * desactivarse ni eliminarse. Cambiar el rol o desactivar cierra las sesiones abiertas
  * de ese usuario.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
@@ -56,7 +54,7 @@ $method = api_method();
 
 if ($method === 'GET') {
     $rows = $pdo->query('SELECT * FROM usuarios ORDER BY activo DESC, nombre')->fetchAll();
-    api_respond(200, ['ok' => true, 'usuarios' => array_map(static fn (array $r): array => user_public($pdo, $r), $rows)]);
+    api_respond(200, ['ok' => true, 'usuarios' => array_map(static fn (array $r): array => user_public($r), $rows)]);
 }
 
 if ($method === 'POST') {
@@ -70,8 +68,9 @@ if ($method === 'POST') {
         if ($name === '') {
             api_error(400, 'Indicá el nombre y apellido');
         }
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 160) {
-            api_error(400, 'El correo no es válido');
+        $problem = user_email_problem($email, $config);
+        if ($problem !== null) {
+            api_error(400, $problem);
         }
         if (!isset(USER_ROLES[$role])) {
             api_error(400, 'Rol inválido (admin u operador)');
@@ -82,19 +81,16 @@ if ($method === 'POST') {
             api_error(409, 'Ya existe un usuario con ese correo');
         }
 
-        $temporary = user_temporary_password();
-        $pdo->prepare(
-            'INSERT INTO usuarios (nombre, email, clave_hash, rol, activo, debe_cambiar, creado) VALUES (?, ?, ?, ?, 1, 1, NOW())'
-        )->execute([$name, $email, user_hash($temporary), $role]);
+        $pdo->prepare('INSERT INTO usuarios (nombre, email, rol, activo, creado) VALUES (?, ?, ?, 1, NOW())')
+            ->execute([$name, $email, $role]);
         $id = (int) $pdo->lastInsertId();
         audit_event($pdo, 'Usuario creado: ' . $name, [
             'categoria' => 'usuario', 'detalle' => $email . ' · ' . $role,
         ]);
         api_respond(201, [
             'ok' => true,
-            'usuario' => user_public($pdo, user_find($pdo, $id)),
-            'clave_temporal' => $temporary,
-            'aviso' => 'Compartí la contraseña temporal por un medio seguro: se muestra una sola vez y se pide cambiarla al ingresar.',
+            'usuario' => user_public(user_find($pdo, $id)),
+            'aviso' => 'Ya puede ingresar con «Ingresar con Google» usando ' . $email . '.',
         ]);
     }
 
@@ -126,33 +122,7 @@ if ($method === 'POST') {
             'categoria' => 'usuario',
             'detalle' => $user['rol'] . ' → ' . $role . ($active ? '' : ' · desactivado'),
         ]);
-        api_respond(200, ['ok' => true, 'usuario' => user_public($pdo, user_find($pdo, $id))]);
-    }
-
-    if ($action === 'restablecer') {
-        $temporary = user_temporary_password();
-        $pdo->prepare('UPDATE usuarios SET clave_hash = ?, debe_cambiar = 1, sesion_version = sesion_version + 1 WHERE id = ?')
-            ->execute([user_hash($temporary), $id]);
-        attempts_clear($pdo, 'ingreso', (string) $user['email']);
-        audit_event($pdo, 'Contraseña restablecida: ' . $user['nombre'], ['categoria' => 'usuario']);
-        api_respond(200, [
-            'ok' => true,
-            'clave_temporal' => $temporary,
-            'aviso' => 'Compartí la contraseña temporal por un medio seguro: se muestra una sola vez.',
-        ]);
-    }
-
-    if ($action === 'desbloquear') {
-        attempts_clear($pdo, 'ingreso', (string) $user['email']);
-        audit_event($pdo, 'Ingreso desbloqueado: ' . $user['nombre'], ['categoria' => 'usuario']);
-        api_respond(200, ['ok' => true, 'usuario' => user_public($pdo, user_find($pdo, $id))]);
-    }
-
-    if ($action === 'quitar_segundo_factor') {
-        $pdo->prepare('UPDATE usuarios SET totp_activo = 0, totp_secret = NULL, totp_ultimo = NULL, sesion_version = sesion_version + 1 WHERE id = ?')
-            ->execute([$id]);
-        audit_event($pdo, 'Segundo factor quitado: ' . $user['nombre'], ['categoria' => 'usuario']);
-        api_respond(200, ['ok' => true, 'usuario' => user_public($pdo, user_find($pdo, $id))]);
+        api_respond(200, ['ok' => true, 'usuario' => user_public(user_find($pdo, $id))]);
     }
 
     api_error(400, 'Acción desconocida');

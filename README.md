@@ -99,7 +99,7 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 <table>
   <tr>
     <td width="50%"><b>Usuarios y roles</b><br><img src="docs/screenshots/usuarios.png" alt="Usuarios"></td>
-    <td width="50%"><b>Alta con contraseña temporal</b><br><img src="docs/screenshots/usuario-nuevo.png" alt="Nuevo usuario"></td>
+    <td width="50%"><b>Alta de usuario</b><br><img src="docs/screenshots/usuario-nuevo.png" alt="Nuevo usuario"></td>
   </tr>
 </table>
 
@@ -155,9 +155,9 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 - Atajos **Ctrl+S** y **Ctrl+P** según el documento en pantalla.
 
 ### Usuarios y acceso
-- Ingreso con **correo y contraseña** o con la **cuenta de Google** de Intellihelp, y **verificación en dos pasos** opcional (TOTP); contraseña temporal en el alta, con cambio obligatorio en el primer ingreso. Quien ingresa con Google no necesita contraseña: las operaciones sensibles se confirman con Google.
+- Ingreso **solo con la cuenta de Google** de Intellihelp (`@intellihelp.tech`): la aplicación es de uso interno y no tiene contraseñas ni segundo factor propios; la seguridad de la cuenta la da Google Workspace. Las operaciones sensibles se confirman con el ingreso con Google de los últimos 15 minutos.
 - Roles **operador** (documentos y clientes) y **administrador** (además usuarios, ajustes, certificado de ARCA, talonarios y panel).
-- «Mi cuenta» para cambiar la contraseña; el administrador genera contraseñas temporales y activa o desactiva usuarios.
+- El administrador da de alta a cada persona con su correo de Intellihelp y su rol, y la activa o desactiva.
 - La calibración de impresión queda en cada equipo, porque depende de su impresora.
 
 ### Panel de la API
@@ -216,14 +216,14 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   │   ├── config.js        # Papel, posición de cada campo, calibración de fábrica, datos del emisor
 │   │   ├── calculos.js      # Importes, IVA, CUIT y montos en letras (también se prueba con Node)
 │   │   ├── app.js           # Edición, vista previa, impresión, emisión, agenda y configuración
-│   │   ├── servidor.js      # API, sesión, ingreso, segundo factor, usuarios y datos compartidos
+│   │   ├── servidor.js      # API, sesión, ingreso con Google, usuarios y datos compartidos
 │   │   ├── panel.js         # Panel de la API
 │   │   └── lib/             # SheetJS y generador de QR (versión y hash en docs/dependencias.md)
 │   ├── api/
 │   │   ├── bootstrap.php    # Arranque común y manejo de errores
-│   │   ├── lib/             # http · db (migraciones) · session · users · totp · auth · audit · crypto
+│   │   ├── lib/             # http · db (migraciones) · session · users · google · auth · audit · crypto
 │   │   │                    # · importes · ajustes · normativa · arca (WSAA, WSFEv1, WSCDC)
-│   │   ├── sesion.php       # Ingreso, segundo factor, salida y cambio de contraseña
+│   │   ├── sesion.php       # Estado de la sesión y salida (el ingreso es google.php)
 │   │   ├── usuarios.php     # Administración de usuarios
 │   │   ├── clientes.php     # Agenda de clientes
 │   │   ├── remitos.php      # Remitos (numeración asignada por el servidor)
@@ -260,16 +260,15 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 ## Seguridad
 
 **Usuarios y sesión**
-- Contraseñas con `password_hash` (bcrypt); mínimo 12 caracteres, sin palabras comunes, secuencias ni el nombre de usuario; contraseña temporal con cambio obligatorio.
-- **Verificación en dos pasos** (TOTP, RFC 6238) opcional, con secreto cifrado y códigos de un solo uso.
+- **Sin contraseñas propias:** se ingresa solo con Google (OpenID Connect con PKCE, resuelto en el servidor), limitado al dominio `intellihelp.tech` y a usuarios dados de alta. No hay contraseñas ni secretos de segundo factor que puedan filtrarse de la base.
 - **Ingreso con Google** para las cuentas de Intellihelp: OpenID Connect con PKCE resuelto en el servidor, limitado al dominio `intellihelp.tech` y a usuarios ya dados de alta; el secreto del cliente vive solo en `config.php`.
 - Cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, limitada a la ruta de la aplicación; identificador regenerado al ingresar.
 - **Token CSRF** obligatorio en toda escritura, que además debe ser JSON y venir del propio origen (también el ingreso); vencimiento por inactividad (8 h) y absoluto (12 h).
-- **Freno de ingresos fallidos** por correo y conexión, por conexión y por cuenta, sin bloquear la cuenta a los demás; el mensaje no revela si el correo existe y el tiempo de respuesta es el mismo. La reconfirmación de contraseña también tiene límite.
-- Cambiar la contraseña, el rol o el segundo factor cierra las demás sesiones del usuario. Siempre queda al menos un administrador.
+- **Freno de ingresos fallidos** con Google por conexión.
+- Cambiar el rol o desactivar a un usuario cierra sus sesiones en el acto. Siempre queda al menos un administrador.
 
 **Credenciales de ARCA**
-- El certificado y la clave privada **nunca se guardan en el navegador**: los carga un administrador, que reconfirma su contraseña, y se envían una sola vez al servidor por **HTTPS obligatorio**.
+- El certificado y la clave privada **nunca se guardan en el navegador**: los carga un administrador que confirmó su identidad con Google en los últimos 15 minutos, y se envían una sola vez al servidor por **HTTPS obligatorio**.
 - El servidor valida que sean PEM correctos, que la clave sea RSA de 2048 bits o más y corresponda al certificado, que esté vigente y que el CUIT coincida con el del emisor.
 - Se almacenan **cifrados con AES-256-GCM**. La clave de cifrado vive solo en `config.php` (fuera del repositorio y de la base) y se deriva una subclave por propósito con **HKDF-SHA256**. Cada valor queda ligado a su ambiente y su campo como dato autenticado: un valor copiado a otra fila no se descifra.
 - Los tickets de WSAA también se guardan cifrados y se piden de a uno (bloqueo). La firma se hace en el servidor: los archivos temporales solo contienen el pedido y la firma, con permisos `0600`, y se eliminan siempre.
@@ -318,7 +317,7 @@ php app/api/cli/migrar.php
 
 # 4. Primer administrador:
 php app/api/cli/usuario.php "Nombre Apellido" correo@intellihelp.tech admin
-#    imprime una contraseña temporal que se cambia en el primer ingreso
+#    después ingresa con «Ingresar con Google» usando esa cuenta
 
 # 5. Respaldo diario cifrado (cron del hosting):
 #    15 3 * * * php ~/public_html/remitos/api/cli/respaldo.php >> ~/backups/remitos/respaldo.log 2>&1
@@ -340,7 +339,7 @@ node --test test/unitarias/calculos.test.js   # unitarias de la interfaz
 php test/unitarias/importes.test.php          # unitarias del servidor
 ```
 
-**97 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, sesión, segundo factor y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
+**97 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 

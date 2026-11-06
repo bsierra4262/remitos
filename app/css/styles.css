@@ -1850,28 +1850,6 @@ body.sin-sesion .toast:not(.show) {
 .user-row:last-child {
   border-bottom: 0;
 }
-.temporal {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 16px 0;
-  padding: 14px 16px;
-  border: 1px solid var(--cream-line);
-  border-radius: 12px;
-  background: var(--cream);
-  font-size: 13.5px;
-  color: var(--ink-2);
-}
-.temporal code {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--cream-line);
-  border-radius: 8px;
-  background: #fff;
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  font-size: 15px;
-  letter-spacing: 0.04em;
-}
 .usr-acciones {
   display: flex;
   gap: 8px;
@@ -2873,10 +2851,7 @@ body.es-admin .solo-operador {
   cursor: progress;
 }
 
-/* ===================== Verificación en dos pasos (TOTP) ===================== */
-.cuenta-2fa {
-  border-top: 1px solid var(--line, #e6e1ee);
-}
+/* ========================= QR (remito digital) ========================= */
 .tfa-qr {
   display: flex;
   justify-content: center;
@@ -2890,14 +2865,6 @@ body.es-admin .solo-operador {
   border-radius: 8px;
   background: #fff;
 }
-.tfa-secreto {
-  display: block;
-  text-align: center;
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  word-break: break-all;
-  margin-bottom: 10px;
-}
 .is-disabled {
   opacity: 0.5;
   pointer-events: none;
@@ -2906,20 +2873,6 @@ body.es-admin .solo-operador {
 /* ============================ Ingreso con Google ============================ */
 .ingreso-google {
   margin-top: 4px;
-}
-.ingreso-google .separador {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--muted, #6b6478);
-  font-size: 13px;
-  margin: 10px 0;
-}
-.ingreso-google .separador::before,
-.ingreso-google .separador::after {
-  content: '';
-  flex: 1;
-  border-top: 1px solid #e6e1ee;
 }
 .btn.google {
   display: flex;

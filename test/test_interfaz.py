@@ -9,7 +9,7 @@ import uuid
 
 from playwright.sync_api import sync_playwright
 
-from base import ADMIN_CLAVE, abrir, caso, clave_maestra, es_local, ir_a, modo_documento, pedir
+from base import abrir, caso, clave_maestra, es_local, ir_a, modo_documento, pedir
 
 
 def _con_pagina(fn, ancho=1440, alto=900):
@@ -206,7 +206,7 @@ def certificado_fuera_del_navegador():
     return _con_pagina(prueba)
 
 
-@caso("Cargar el certificado desde la interfaz lo valida en el servidor")
+@caso("Cargar el certificado desde la interfaz lo valida en el servidor, confirmado por el ingreso con Google")
 def carga_certificado_interfaz():
     if not es_local():
         return True, "solo en el entorno local"
@@ -227,21 +227,14 @@ def carga_certificado_interfaz():
         pg.click("#certUpload")
         pg.set_input_files("#certFile", rc)
         pg.set_input_files("#keyFile", rk)
-        pg.fill("#certConfirm", "contraseña-equivocada")
-        pg.click("#certSend")
-        pg.wait_for_timeout(1200)
-        rechazo = pg.inner_text("#certFormAlert")
-        pg.fill("#certConfirm", ADMIN_CLAVE)
+        sin_clave = pg.locator("#certModal input[type=password]").count() == 1  # solo la frase opcional de la .key
         pg.click("#certSend")
         pg.wait_for_timeout(1500)
         estado = pg.inner_text("#certStatus")
         en_memoria = pg.evaluate("() => JSON.stringify(localStorage)")
-        campos_vacios = pg.evaluate("() => !document.querySelector('#certConfirm').value && !document.querySelector('#certFile').value")
-        # El 403 de la contraseña equivocada es esperado; cualquier otro error, no.
-        inesperados = [e for e in errores if "status of 403" not in e]
-        ok = ("contraseña" in rechazo.lower() and "20-12345678-6" in estado and "BEGIN" not in en_memoria
-              and campos_vacios and not inesperados)
-        return ok, f"rechazo={rechazo[:60]!r} estado={estado[:60]!r} campos_vacios={campos_vacios} errores={inesperados}"
+        campos_vacios = pg.evaluate("() => !document.querySelector('#certFile').value && !document.querySelector('#keyFile').value")
+        ok = "20-12345678-6" in estado and "BEGIN" not in en_memoria and campos_vacios and sin_clave and not errores
+        return ok, f"estado={estado[:60]!r} campos_vacios={campos_vacios} sin_contraseña={sin_clave} errores={errores}"
     try:
         return _con_pagina(prueba)
     finally:

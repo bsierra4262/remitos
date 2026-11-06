@@ -8,9 +8,7 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 |---|---|---|
 | Certificado y clave privada de ARCA | Tabla `arca_credenciales` | AES-256-GCM con subclave HKDF de `app_key`, ligado a ambiente y campo (AAD). Nunca sale del servidor |
 | Tickets de acceso de WSAA | Tabla `arca_tickets` | Ídem; vencen a las 12 h |
-| Secretos TOTP de los usuarios | `usuarios.totp_secret` | Ídem, ligados al id del usuario |
 | `app_key` y hash de la clave maestra | `api/config.php` (permisos `0600`, fuera del repositorio, bloqueado para la web) | Copia en el gestor de contraseñas de la empresa |
-| Contraseñas de usuarios | `usuarios.clave_hash` | bcrypt (`password_hash`), con rehash automático |
 | Claves de API | `api_keys.hash` | Solo SHA-256; la clave se muestra una vez |
 | Datos de clientes (PII, Ley 25.326) | Tablas `clientes`, `remitos`, `comprobantes` | Acceso con sesión o clave; exportación solo para administradores y auditada |
 | Numeración fiscal (C.A.I. y CAE) | Tablas `remitos`, `comprobantes`, `cai_talonarios` | Asignada solo por el servidor; claves únicas en la base; documentos autorizados inmutables |
@@ -21,13 +19,13 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 | Amenaza | Escenario | Control |
 |---|---|---|
 | Robo de la clave privada de ARCA | Acceso a la base (copia de respaldo, inyección SQL, hosting comprometido) | Cifrado con `app_key`, que no está en la base; consultas 100 % parametrizadas; respaldos cifrados |
-| Emisión fraudulenta con una sesión robada | Un tercero usa la sesión de un operador | Cookie `HttpOnly`/`Secure`/`SameSite=Strict`, CSRF, vencimiento, segundo factor opcional; toda emisión queda auditada con usuario e IP |
+| Emisión fraudulenta con una sesión robada | Un tercero usa la sesión de un operador | Cookie `HttpOnly`/`Secure`/`SameSite=Strict`, CSRF, vencimiento; la cuenta de Google tiene la verificación en dos pasos de Workspace; toda emisión queda auditada con usuario e IP |
 | Comprobante con CAE o C.A.I. inventado | Un usuario intenta imprimir un documento «autorizado» sin pasar por ARCA | El CAE y el C.A.I. solo los asigna el servidor (o un administrador por API, auditado); sin autorización el documento sale marcado «SIN AUTORIZAR» |
 | Números duplicados o salteados | Dos usuarios autorizan a la vez; se corta la conexión durante la emisión | Bloqueo por serie, transacción con bloqueo de fila, clave única en la base; idempotencia por `id_local`; recuperación del CAE con `FECompConsultar` antes de pedir un número nuevo |
 | Alteración del historial | Borrar o cambiar eventos para ocultar una operación | Hash encadenado verificable desde el panel; la depuración es solo por antigüedad; los contadores de intentos están en otra tabla |
+| Contraseñas filtradas de la aplicación | Robo de la base de datos | La aplicación no guarda contraseñas ni secretos de segundo factor: se ingresa solo con Google |
 | Ingreso con una cuenta de Google ajena | Cuenta personal de Gmail o de otra organización; respuesta de Google manipulada o reenviada | Solo cuentas del dominio `intellihelp.tech` con correo verificado y que ya sean usuarios activos; `state`, `nonce` y PKCE en una cookie cifrada de 10 minutos; token obtenido directo de Google por TLS y validado (emisor, audiencia, vigencia) |
-| Operación sensible con una sesión de Google robada | Cookie de sesión copiada de un equipo con sesión de Google | Las operaciones sensibles solo se aceptan sin contraseña dentro de los 15 minutos del ingreso con Google; después hay que volver a pasar por Google con la cuenta del usuario, cosa que no se logra solo con la cookie de la aplicación |
-| Fuerza bruta de contraseñas | Desde internet o con una sesión robada (reconfirmación) | Freno por correo y conexión, por conexión y por cuenta; reconfirmación limitada a 5 intentos; mensaje único que no revela si la cuenta existe |
+| Operación sensible con una sesión de Google robada | Cookie de sesión copiada de un equipo con sesión de Google | Las operaciones sensibles solo se aceptan dentro de los 15 minutos del ingreso con Google; después hay que volver a pasar por Google con la cuenta del usuario, cosa que no se logra solo con la cookie de la aplicación |
 | Planilla manipulada al importar clientes | Excel diseñado para atacar el lector | SheetJS 0.20.3 (sin CVE conocidas), validación del CUIT y recorte de cada campo en el servidor |
 | Suplantación de HTTPS | Cabecera `X-Forwarded-Proto` falsificada | Solo se acepta desde `trusted_proxies`; HSTS |
 | Talonario con C.A.I. inválido o mal tipeado | Se imprimen remitos con un código que ARCA no reconoce | Constatación con WSCDC al cargar el talonario (CUIT, punto de venta, tipo, rango y fecha); un rechazo impide cargarlo |
@@ -50,7 +48,7 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 
 | Clave | Cuándo | Cómo |
 |---|---|---|
-| `app_key` | Ante sospecha de exposición, cambio de personal con acceso al servidor, o una vez al año | `php api/cli/rotar-clave.php --confirmar`: vuelve a cifrar certificados, tickets y secretos TOTP y actualiza `config.php` en una sola operación. Guardar la clave nueva en el gestor de contraseñas. Los respaldos anteriores se leen con la clave anterior: conservarla mientras se guarden esos respaldos |
+| `app_key` | Ante sospecha de exposición, cambio de personal con acceso al servidor, o una vez al año | `php api/cli/rotar-clave.php --confirmar`: vuelve a cifrar certificados y tickets y actualiza `config.php` en una sola operación. Guardar la clave nueva en el gestor de contraseñas. Los respaldos anteriores se leen con la clave anterior: conservarla mientras se guarden esos respaldos |
 | Clave maestra de la API | Ante sospecha de exposición o una vez al año | Generar una nueva (`config.sample.php`), reemplazar `master_key_hash` y actualizar las integraciones |
 | Claves de servicio | Al dar de baja una integración | Panel → Claves: desactivar o eliminar |
 | Certificado de ARCA | Antes de su vencimiento (2 años) o ante exposición | Generar el nuevo en ARCA, cargarlo en Configuración → Conexión con ARCA (reemplaza al anterior e invalida sus tickets) |

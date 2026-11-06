@@ -10,12 +10,11 @@
  *                                             para operaciones sensibles (vuelve con ?ingreso=confirmado).
  *   GET google.php?code=…&state=…             Vuelta desde Google: valida, abre la sesión y vuelve a la aplicación.
  *
- * Solo ingresa quien ya es usuario activo de la aplicación con ese correo: los usuarios
- * los da de alta un administrador. Con Google no se usa contraseña: si había una temporal
- * pendiente se anula, y las operaciones sensibles se reconfirman con Google (ver
- * user_confirm_password). Si el usuario tiene activa la verificación en dos pasos, se le
- * pide el código igual que con contraseña. Cualquier error vuelve a la pantalla de
- * ingreso con un código (?ingreso=…) que la aplicación traduce.
+ * Es la única forma de ingresar: la aplicación no tiene contraseñas ni segundo factor
+ * propios (es de uso interno y Google ya protege la cuenta de Workspace). Solo ingresa
+ * quien ya es usuario activo de la aplicación con ese correo: los usuarios los da de
+ * alta un administrador. Cualquier error vuelve a la pantalla de ingreso con un código
+ * (?ingreso=…) que la aplicación traduce.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -108,25 +107,12 @@ if ($user === null || !(int) $user['activo']) {
     google_back('google_sin_usuario');
 }
 
-// Con Google no hace falta contraseña: una temporal pendiente se anula (nadie más puede
-// usarla) y las operaciones sensibles se reconfirman con Google.
-$annulled = (bool) (int) $user['debe_cambiar'];
-if ($annulled) {
-    $pdo->prepare('UPDATE usuarios SET clave_hash = ?, debe_cambiar = 0, ultimo_ingreso = NOW() WHERE id = ?')
-        ->execute([user_hash(google_random(32)), $user['id']]);
-} else {
-    $pdo->prepare('UPDATE usuarios SET ultimo_ingreso = NOW() WHERE id = ?')->execute([$user['id']]);
-}
-attempts_clear($pdo, 'ingreso', $email);
-
-if ((int) $user['totp_activo']) {
-    session_pending_totp((int) $user['id'], 'google');
-    google_back('codigo');
-}
-session_login($pdo, (int) $user['id'], 'google');
+$pdo->prepare('UPDATE usuarios SET ultimo_ingreso = NOW() WHERE id = ?')->execute([$user['id']]);
+attempts_clear($pdo, 'google', $email);
+session_login($pdo, (int) $user['id']);
 $confirm = !empty($saved['confirmar']);
 audit_event($pdo, $confirm ? 'Identidad confirmada con Google' : 'Ingreso al sistema', [
     'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => (int) $user['id'], 'clave' => $user['nombre'],
-    'detalle' => 'con Google' . ($annulled ? '; se anuló la contraseña temporal pendiente' : ''),
+    'detalle' => 'con Google',
 ]);
 google_back($confirm ? 'confirmado' : '');

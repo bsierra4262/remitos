@@ -6,13 +6,21 @@ crean y borran datos. Para apuntar a otro entorno de pruebas:
     REMITOS_URL=https://pruebas.ejemplo/remitos
     REMITOS_MASTER_KEY=<clave maestra de ese entorno>
 
-Las pruebas de interfaz ingresan con un administrador de pruebas que se crea
-solo (ADMIN_EMAIL), usando la clave maestra.
+Se ingresa solo con Google. Las pruebas usan un Google simulado (un servidor local que
+hace de endpoint de tokens, `token_url` en la configuración de pruebas) y recorren el
+flujo real: la redirección a Google, la cookie de estado, el canje del código con PKCE
+y la validación del token. Los usuarios de prueba se crean con la clave maestra.
 """
+import base64
+import hashlib
+import http.server
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,8 +28,9 @@ APP = os.path.join(RAIZ, "app")
 SITIO = os.environ.get("REMITOS_URL", "http://127.0.0.1:8765").rstrip("/")
 CLAVE_MAESTRA_LOCAL = "ith_test_master_key_0123456789abcdef"
 API = SITIO + "/api"
-ADMIN_EMAIL = "admin.pruebas@intellihelp.test"
-ADMIN_CLAVE = "Brujula-Norte-58Tq"
+ADMIN_EMAIL = "admin.pruebas@intellihelp.tech"
+DOMINIO = "intellihelp.tech"
+GOOGLE_PUERTO = int(os.environ.get("REMITOS_GOOGLE_PUERTO", "8766"))
 
 _casos = []
 
@@ -54,8 +63,8 @@ def url_app():
 # --------------------------------------------------------------------------- #
 #  Navegador
 # --------------------------------------------------------------------------- #
-def abrir(pw, ancho=1500, alto=1000, capturar_print=True, email=None, clave=None):
-    """Abre la app con la sesión iniciada. Devuelve (browser, page, errores)."""
+def abrir(pw, ancho=1500, alto=1000, capturar_print=True, email=None):
+    """Abre la app con la sesión iniciada (con Google). Devuelve (browser, page, errores)."""
     errores = []
     b = pw.chromium.launch()
     ctx = b.new_context(viewport={"width": ancho, "height": alto})
@@ -65,10 +74,15 @@ def abrir(pw, ancho=1500, alto=1000, capturar_print=True, email=None, clave=None
           lambda m: errores.append("console: " + m.text) if m.type == "error" else None)
     if email is None:
         asegurar_admin()
-        email, clave = ADMIN_EMAIL, ADMIN_CLAVE
-    r = ctx.request.post(API + "/sesion.php", data={"accion": "ingresar", "email": email, "clave": clave})
-    if r.status != 200:
-        raise RuntimeError(f"No se pudo ingresar con {email}: {r.status} {r.text()[:200]}")
+        email = ADMIN_EMAIL
+
+    def get(url):
+        r = ctx.request.get(url, max_redirects=0)
+        return r.status, r.headers
+
+    destino = ingresar_con_google(get, email)
+    if "ingreso=" in destino:
+        raise RuntimeError(f"No se pudo ingresar con {email}: {destino}")
     pg.goto(url_app(), wait_until="networkidle", timeout=60000)
     pg.wait_for_selector(".navbar", state="visible", timeout=15000)
     pg.wait_for_timeout(600)
@@ -143,42 +157,99 @@ def pedir(ruta, metodo="GET", clave=None, cuerpo=None, timeout=25, cabeceras=Fal
 _admin_listo = False
 
 
-def asegurar_usuario(email, nombre, rol, clave):
-    """Crea (o restablece) un usuario con contraseña conocida y sin cambio pendiente.
+def asegurar_usuario(email, nombre, rol):
+    """Crea (o reactiva con ese rol) un usuario de pruebas.
 
     En la base local se borran los intentos fallidos acumulados: todas las pruebas
     salen de 127.0.0.1 y, si no, el freno de ingresos por conexión las cortaría."""
-    import http.cookiejar
     if es_local():
         _sql("DELETE FROM intentos")
     m = clave_maestra()
     _, lista = pedir("/usuarios.php", clave=m)
     existente = next((u for u in lista.get("usuarios", []) if u["email"] == email), None)
     if existente:
-        _, d = pedir("/usuarios.php", "POST", m, {"accion": "restablecer", "id": existente["id"]})
         pedir("/usuarios.php", "POST", m, {"accion": "editar", "id": existente["id"], "rol": rol, "activo": True})
-    else:
-        _, d = pedir("/usuarios.php", "POST", m, {"nombre": nombre, "email": email, "rol": rol})
-    temporal = d["clave_temporal"]
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-
-    def post(cuerpo, csrf=""):
-        req = urllib.request.Request(API + "/sesion.php", data=json.dumps(cuerpo).encode(), method="POST")
-        req.add_header("Content-Type", "application/json")
-        if csrf:
-            req.add_header("X-CSRF-Token", csrf)
-        with op.open(req, timeout=20) as r:
-            return json.loads(r.read().decode())
-
-    sesion = post({"accion": "ingresar", "email": email, "clave": temporal})
-    post({"accion": "cambiar_clave", "actual": temporal, "nueva": clave}, sesion["csrf"])
+        return existente["id"]
+    _, d = pedir("/usuarios.php", "POST", m, {"nombre": nombre, "email": email, "rol": rol})
+    return d["usuario"]["id"]
 
 
 def asegurar_admin():
     global _admin_listo
     if not _admin_listo:
-        asegurar_usuario(ADMIN_EMAIL, "Admin de Pruebas", "admin", ADMIN_CLAVE)
+        asegurar_usuario(ADMIN_EMAIL, "Admin de Pruebas", "admin")
         _admin_listo = True
+
+
+# --------------------------------------------------------------------------- #
+#  Google simulado
+# --------------------------------------------------------------------------- #
+def _b64(datos):
+    return base64.urlsafe_b64encode(datos).rstrip(b"=").decode()
+
+
+class _GoogleSimulado(http.server.BaseHTTPRequestHandler):
+    """Endpoint de tokens de Google para las pruebas. El código de autorización trae
+    (en JSON, base64url) el correo y el nonce del pedido, más los datos que una prueba
+    quiera alterar: así cada caso arma la respuesta de Google que necesita."""
+
+    def do_POST(self):
+        largo = int(self.headers.get("Content-Length") or 0)
+        form = urllib.parse.parse_qs(self.rfile.read(largo).decode())
+        campo = lambda k: (form.get(k) or [""])[0]  # noqa: E731
+        try:
+            pedido = json.loads(base64.urlsafe_b64decode(campo("code") + "=" * (-len(campo("code")) % 4)))
+        except Exception:
+            return self._responder(400, {"error": "invalid_grant"})
+        reto = _b64(hashlib.sha256(campo("code_verifier").encode()).digest())
+        if campo("grant_type") != "authorization_code" or reto != pedido.get("challenge") or not campo("client_secret"):
+            return self._responder(400, {"error": "invalid_grant"})
+        ahora = int(time.time())
+        email = pedido["email"]
+        claims = {"iss": "https://accounts.google.com", "aud": campo("client_id"), "iat": ahora, "exp": ahora + 3600,
+                  "nonce": pedido["nonce"], "email": email, "email_verified": True, "hd": email.split("@")[-1],
+                  "sub": hashlib.sha256(email.encode()).hexdigest()[:21]}
+        claims.update(pedido.get("claims", {}))
+        token = "e30." + _b64(json.dumps(claims).encode()) + ".firma"
+        self._responder(200, {"id_token": token, "access_token": "simulado", "token_type": "Bearer", "expires_in": 3600})
+
+    def _responder(self, estado, cuerpo):
+        datos = json.dumps(cuerpo).encode()
+        self.send_response(estado)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(datos)))
+        self.end_headers()
+        self.wfile.write(datos)
+
+    def log_message(self, *args):
+        pass
+
+
+_google = None
+
+
+def iniciar_google_simulado():
+    global _google
+    if _google is None:
+        _google = http.server.ThreadingHTTPServer(("127.0.0.1", GOOGLE_PUERTO), _GoogleSimulado)
+        threading.Thread(target=_google.serve_forever, daemon=True).start()
+
+
+def _cabecera(headers, nombre):
+    return next((v for k, v in headers.items() if k.lower() == nombre.lower()), "")
+
+
+def ingresar_con_google(get, email, claims=None, reto=None):
+    """Recorre el ingreso con Google. `get(url)` hace un GET sin seguir redirecciones,
+    con las cookies del cliente, y devuelve (status, headers). Devuelve a dónde redirige
+    la vuelta (la aplicación, o la aplicación con ?ingreso=<error>)."""
+    iniciar_google_simulado()
+    _, h = get(API + "/google.php?accion=inicio")
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(_cabecera(h, "Location")).query)
+    pedido = {"email": email, "nonce": q["nonce"][0], "challenge": reto or q["code_challenge"][0], "claims": claims or {}}
+    codigo = _b64(json.dumps(pedido).encode())
+    _, h = get(API + "/google.php?state=" + q["state"][0] + "&code=" + codigo)
+    return _cabecera(h, "Location")
 
 
 def limpiar_datos():

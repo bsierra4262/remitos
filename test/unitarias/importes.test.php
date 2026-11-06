@@ -4,8 +4,8 @@
  * Remitos y Comprobantes — Intellihelp
  *
  * Pruebas unitarias del servidor que no necesitan base de datos: importes
- * (api/lib/importes.php), CUIT (api/lib/http.php), TOTP (api/lib/totp.php) y el
- * detalle que se envía a ARCA (api/lib/arca.php).
+ * (api/lib/importes.php), CUIT (api/lib/http.php), el detalle que se envía a ARCA
+ * (api/lib/arca.php), el ingreso con Google y la sesión.
  *
  *   php test/unitarias/importes.test.php
  *
@@ -20,11 +20,11 @@ declare(strict_types=1);
 $api = dirname(__DIR__, 2) . '/app/api/lib';
 require $api . '/http.php';
 require $api . '/importes.php';
-require $api . '/totp.php';
 require $api . '/arca.php';
 require $api . '/normativa.php';
 require $api . '/google.php';
 require $api . '/session.php';
+require $api . '/users.php';
 
 $fallas = 0;
 $total = 0;
@@ -61,14 +61,6 @@ foreach ($casos['cuit'] as [$cuit, $valido]) {
 }
 verificar(api_date_dmy('31/02/2026') === '' && api_date_dmy('29/02/2028') === '29/02/2028', 'fechas del calendario');
 verificar(api_bool('false') === false && api_bool('sí') === true && api_bool('x', true) === true, 'booleanos');
-
-// RFC 6238, apéndice B (SHA-1, 8 dígitos en el RFC; los 6 últimos son el código de 6 dígitos).
-$secreto = totp_base32_encode('12345678901234567890');
-verificar(totp_code($secreto, intdiv(59, 30)) === '287082', 'TOTP vector RFC 6238 (T=59)');
-verificar(totp_code($secreto, intdiv(1111111109, 30)) === '081804', 'TOTP vector RFC 6238 (T=1111111109)');
-$ahora = intdiv(time(), 30);
-verificar(totp_verify($secreto, totp_code($secreto, $ahora), null) === $ahora, 'TOTP acepta el código vigente');
-verificar(totp_verify($secreto, totp_code($secreto, $ahora), $ahora) === null, 'TOTP no acepta un código ya usado');
 
 // Detalle de FECAESolicitar: importes con punto y dos decimales, y orden del esquema.
 $xml = arca_cae_detail([
@@ -134,12 +126,21 @@ parse_str((string) parse_url(google_auth_url($g, 'S', 'N', 'v', 'https://x/api/g
 verificar(($q['prompt'] ?? '') === 'select_account' && ($hint['login_hint'] ?? '') === 'ana@intellihelp.tech' && !isset($hint['prompt']),
     'reconfirmación con la cuenta de la sesión');
 
-// Sesión abierta con Google: plazo en que vale como confirmación de identidad.
-verificar(session_confirmation_valid(['metodo' => 'google', 'confirmado' => 1000], 1000 + SESSION_CONFIRM_SECONDS), 'Google reciente confirma');
-verificar(!session_confirmation_valid(['metodo' => 'google', 'confirmado' => 1000], 1001 + SESSION_CONFIRM_SECONDS), 'Google vencido no confirma');
-verificar(!session_confirmation_valid(['metodo' => 'clave', 'confirmado' => 1000], 1001), 'contraseña no confirma sin pedirla');
-verificar(!session_confirmation_valid(['metodo' => 'otro', 'confirmado' => 1000], 1001) && session_method(['metodo' => 'otro']) === 'clave', 'método desconocido');
-verificar(!session_confirmation_valid(['metodo' => 'google'], 1001), 'sin hora de confirmación');
+// Sesión: plazo en que el ingreso con Google vale como confirmación de identidad.
+verificar(session_confirmation_valid(['confirmado' => 1000], 1000 + SESSION_CONFIRM_SECONDS), 'ingreso reciente confirma');
+verificar(!session_confirmation_valid(['confirmado' => 1000], 1001 + SESSION_CONFIRM_SECONDS), 'ingreso vencido no confirma');
+verificar(!session_confirmation_valid([], 1001), 'sin hora de confirmación');
+verificar(!session_confirmation_valid(['confirmado' => 2000], 1000), 'hora de confirmación futura');
+
+// Usuarios: solo correos del dominio de Google Workspace; endpoint de tokens solo local en pruebas.
+$conGoogle = ['google' => $g];
+verificar(user_email_problem('ana@intellihelp.tech', $conGoogle) === null, 'correo de Intellihelp');
+verificar(user_email_problem('ana@gmail.com', $conGoogle) !== null && user_email_problem('ana@intellihelp.tech.ar', $conGoogle) !== null, 'correo de otro dominio');
+verificar(user_email_problem('no es un correo', $conGoogle) !== null, 'correo inválido');
+verificar(google_config($conGoogle)['token_url'] === GOOGLE_TOKEN_URL, 'endpoint de tokens de Google por defecto');
+verificar(google_config(['google' => $g + ['token_url' => 'http://127.0.0.1:8766/token']])['token_url'] === 'http://127.0.0.1:8766/token', 'Google simulado local');
+verificar(google_config(['google' => $g + ['token_url' => 'http://malicioso.example/token']])['token_url'] === GOOGLE_TOKEN_URL
+    && google_config(['google' => $g + ['token_url' => 'https://127.0.0.1.malicioso.example/']])['token_url'] === GOOGLE_TOKEN_URL, 'endpoint de tokens ajeno ignorado');
 
 echo $fallas === 0 ? "Pruebas unitarias del servidor: los $total casos pasaron\n" : "$fallas de $total casos fallaron\n";
 exit($fallas === 0 ? 0 : 1);

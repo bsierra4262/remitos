@@ -16,7 +16,7 @@
  *    aplicación tienen además una cuota por usuario (evento.php).
  *
  * Intentos fallidos: tabla propia, independiente de la auditoría, que alimenta los
- * bloqueos por fuerza bruta (claves de API, ingreso, reconfirmación, segundo factor).
+ * bloqueos por fuerza bruta (claves de API, ingreso con Google, enlaces de conformidad).
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp

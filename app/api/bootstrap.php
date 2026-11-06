@@ -23,7 +23,6 @@ require __DIR__ . '/lib/crypto.php';
 require __DIR__ . '/lib/audit.php';
 require __DIR__ . '/lib/session.php';
 require __DIR__ . '/lib/users.php';
-require __DIR__ . '/lib/totp.php';
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/arca.php';
 require __DIR__ . '/lib/importes.php';

@@ -18,7 +18,7 @@
 declare(strict_types=1);
 
 /** Versión del esquema que espera este código. */
-const API_SCHEMA_VERSION = 4;
+const API_SCHEMA_VERSION = 5;
 
 /** Zona horaria de la sesión de base de datos (Argentina, UTC−3 todo el año). */
 const API_DB_TIMEZONE = '-03:00';
@@ -74,6 +74,7 @@ function api_migrate(PDO $pdo): void
             2 => 'api_migration_2',
             3 => 'api_migration_3',
             4 => 'api_migration_4',
+            5 => 'api_migration_5',
         ];
         foreach ($migrations as $version => $migration) {
             if ($version > $current) {
@@ -442,4 +443,20 @@ function api_migration_4(PDO $pdo): void
     if (!api_index_exists($pdo, 'remitos', 'uq_conformidad')) {
         $pdo->exec('ALTER TABLE remitos ADD UNIQUE KEY uq_conformidad (conformidad_hash)');
     }
+}
+
+/**
+ * Noviembre de 2026: se ingresa solo con la cuenta de Google de Intellihelp. Se borran
+ * de la base las contraseñas, las contraseñas temporales y los secretos del segundo
+ * factor (TOTP), con sus intentos fallidos; se cierran todas las sesiones abiertas.
+ */
+function api_migration_5(PDO $pdo): void
+{
+    foreach (['clave_hash', 'debe_cambiar', 'intentos', 'bloqueado_hasta', 'clave_cambiada', 'totp_secret', 'totp_activo', 'totp_ultimo'] as $column) {
+        if (api_column_exists($pdo, 'usuarios', $column)) {
+            $pdo->exec("ALTER TABLE usuarios DROP COLUMN $column");
+        }
+    }
+    $pdo->exec("DELETE FROM intentos WHERE tipo IN ('ingreso', 'totp', 'reconfirmar')");
+    $pdo->exec('UPDATE usuarios SET sesion_version = sesion_version + 1');
 }
