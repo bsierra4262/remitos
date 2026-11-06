@@ -24,7 +24,8 @@ def alta_valida():
     casos = [
         ("CAI corto",   {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "123", "cai_vencimiento": VTO}),
         ("vto pasado",  {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890",
-                         "cai_vencimiento": (date.today() - timedelta(days=1)).isoformat()}),
+                         # dos días: el servidor usa la hora de Argentina y el CI la UTC
+                         "cai_vencimiento": (date.today() - timedelta(days=2)).isoformat()}),
         ("rango malo",  {"punto_venta": 90, "numero_desde": 9, "numero_hasta": 9, "cai": "75041234567890", "cai_vencimiento": VTO}),
         ("pv inválido", {"punto_venta": 0, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890", "cai_vencimiento": VTO}),
         ("tipo inválido", {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890",

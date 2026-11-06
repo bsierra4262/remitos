@@ -80,6 +80,10 @@ jobs:
         with:
           php-version: '8.3'
           extensions: mbstring, openssl, curl, dom, pdo_mysql
+          # Sin extensión de cobertura: la que trae la imagen desactiva el JIT con una
+          # advertencia de arranque que el paso «Errores del servidor» toma como error.
+          coverage: none
+          ini-values: opcache.jit=disable
 
       - uses: actions/setup-python@v5
         with:
