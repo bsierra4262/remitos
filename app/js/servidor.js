@@ -162,10 +162,11 @@ function aplicarClavesLocales(uid) {
 async function iniciarSesionApp() {
   try {
     const j = await api('sesion.php', { sinSesion: true });
-    $('#ingresoGoogleFila').hidden = !j.google;
+    pintarOpcionesIngreso(!!j.google);
     const aviso = avisoIngresoGoogle();
     if (!j.usuario) return mostrarAcceso(j.segundo_factor ? 'codigo' : 'ingreso', aviso);
     aplicarSesion(j);
+    if (aviso) toast(aviso, 3200, true);
   } catch (e) {
     if (e.status === 0)
       return mostrarAcceso('ingreso', 'Sin conexión con el servidor. Revisá la conexión y volvé a intentar.');
@@ -183,7 +184,34 @@ const AVISOS_GOOGLE = {
   google_sin_usuario:
     'Esa cuenta no tiene usuario en el sistema o está desactivada. Pedile el alta a un administrador.',
   google_limitado: 'Demasiados intentos de ingreso con Google. Esperá unos minutos.',
+  confirmado: 'Identidad confirmada con Google. Ya podés repetir la operación.',
 };
+
+/* Con Google habilitado, es la forma principal de ingresar; correo y contraseña quedan
+   como alternativa. */
+function pintarOpcionesIngreso(conGoogle) {
+  $('#ingresoGoogleFila').hidden = !conGoogle;
+  $('#ingresoClaveBloque').hidden = conGoogle;
+  $('#ingresoSub').textContent = conGoogle ? 'Con tu cuenta de Google de Intellihelp.' : 'Con tu correo y contraseña.';
+}
+function mostrarIngresoConClave() {
+  $('#ingresoClaveBloque').hidden = false;
+  $('#ingresoConClave').hidden = true;
+  $('#ingresoSub').textContent = 'Con tu correo y contraseña.';
+  $('#ingresoEmail').focus();
+}
+
+/* Sesión abierta con Google: las operaciones sensibles no piden contraseña; pasados
+   15 minutos del ingreso, el servidor pide volver a confirmar con Google. */
+const URL_CONFIRMAR_GOOGLE = 'api/google.php?accion=inicio&confirmar=1';
+const sesionGoogle = () => !!(sesion.usuario && sesion.usuario.ingreso === 'google');
+/** Detalle de un error para avisoCert: si hay que reconfirmar con Google, ofrece hacerlo. */
+function detalleError(err) {
+  const texto = ' ' + esc(err && err.message ? err.message : 'Error inesperado');
+  return err && err.respuesta && err.respuesta.reconfirmar_google
+    ? texto + ` <a class="btn sm google-confirmar" href="${URL_CONFIRMAR_GOOGLE}">Confirmar con Google</a>`
+    : texto;
+}
 function avisoIngresoGoogle() {
   const params = new URLSearchParams(location.search);
   const codigo = params.get('ingreso');
@@ -250,7 +278,14 @@ function mostrarAcceso(modo, aviso) {
   el.textContent = aviso || '';
   el.hidden = !aviso;
   setTimeout(() => {
-    const foco = modo === 'cambio' ? $('#cambioActual') : modo === 'codigo' ? $('#ingresoCodigo') : $('#ingresoEmail');
+    const foco =
+      modo === 'cambio'
+        ? $('#cambioActual')
+        : modo === 'codigo'
+          ? $('#ingresoCodigo')
+          : $('#ingresoClaveBloque').hidden
+            ? $('#ingresoGoogle')
+            : $('#ingresoEmail');
     if (foco) foco.focus();
   }, 50);
 }
@@ -347,6 +382,11 @@ function abrirMiCuenta() {
   $('#cuentaEmail').textContent = u.email;
   $('#cuentaRol').textContent = u.rol === 'admin' ? 'Administrador' : 'Operador';
   ['#cuentaActual', '#cuentaNueva', '#cuentaRepetir'].forEach(id => ($(id).value = ''));
+  const google = sesionGoogle();
+  $('#cuentaActualFila').hidden = google;
+  $('#cuentaActual').required = !google;
+  $('#cuentaClaveGoogle').hidden = !google;
+  $('#cuentaClaveTit').textContent = google ? 'Contraseña (opcional)' : 'Cambiar la contraseña';
   ocultar('#cuentaAlert');
   pintarSegundoFactor();
   openPanel($('#cuentaModal'), $('#backdrop6'));
@@ -358,7 +398,7 @@ function pintarSegundoFactor(enAlta = false) {
   $('#tfaEstado').innerHTML = activo
     ? '<b>Activa.</b> Al ingresar se pide el código de tu aplicación de autenticación.'
     : 'Pide un código de una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, 1Password…) además de la contraseña.';
-  $('#tfaInicio').hidden = enAlta;
+  $('#tfaInicio').hidden = enAlta || sesionGoogle();
   $('#tfaAlta').hidden = !enAlta;
   $('#tfaCodigoFila').hidden = !(enAlta || activo);
   $('#tfaIniciar').hidden = activo || enAlta;
@@ -386,7 +426,7 @@ async function iniciarSegundoFactor() {
     $('#tfaQr').innerHTML = `<img src="${q.createDataURL(5, 2)}" alt="Código QR para la aplicación de autenticación">`;
     $('#tfaCodigo').focus();
   } catch (err) {
-    avisoCert('err', 'No se pudo activar', ' ' + esc(err.message), '#tfaAlert');
+    avisoCert('err', 'No se pudo activar', detalleError(err), '#tfaAlert');
   }
 }
 async function confirmarSegundoFactor() {
@@ -411,7 +451,7 @@ async function desactivarSegundoFactor() {
     pintarSegundoFactor();
     toast('Verificación en dos pasos desactivada', 2200, true);
   } catch (err) {
-    avisoCert('err', 'No se pudo desactivar', ' ' + esc(err.message), '#tfaAlert');
+    avisoCert('err', 'No se pudo desactivar', detalleError(err), '#tfaAlert');
   }
 }
 async function guardarMiClave(e) {
@@ -421,7 +461,7 @@ async function guardarMiClave(e) {
     closePanels();
     toast('Contraseña actualizada', 1800, true);
   } catch (err) {
-    avisoCert('err', 'No se pudo cambiar la contraseña', ' ' + esc(err.message), '#cuentaAlert');
+    avisoCert('err', 'No se pudo cambiar la contraseña', detalleError(err), '#cuentaAlert');
   }
 }
 
@@ -634,6 +674,7 @@ async function traspasarDatosLocales() {
 /* ================================ Eventos ================================ */
 function wireServidor() {
   $('#formIngreso').addEventListener('submit', enviarIngreso);
+  $('#ingresoConClave').addEventListener('click', mostrarIngresoConClave);
   $('#formCodigo').addEventListener('submit', enviarCodigo);
   $('#codigoVolver').addEventListener('click', cerrarSesion);
   $('#tfaIniciar').addEventListener('click', iniciarSegundoFactor);

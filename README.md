@@ -155,7 +155,7 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 - Atajos **Ctrl+S** y **Ctrl+P** según el documento en pantalla.
 
 ### Usuarios y acceso
-- Ingreso con **correo y contraseña** o con la **cuenta de Google** de Intellihelp, y **verificación en dos pasos** opcional (TOTP); contraseña temporal en el alta, con cambio obligatorio en el primer ingreso.
+- Ingreso con **correo y contraseña** o con la **cuenta de Google** de Intellihelp, y **verificación en dos pasos** opcional (TOTP); contraseña temporal en el alta, con cambio obligatorio en el primer ingreso. Quien ingresa con Google no necesita contraseña: las operaciones sensibles se confirman con Google.
 - Roles **operador** (documentos y clientes) y **administrador** (además usuarios, ajustes, certificado de ARCA, talonarios y panel).
 - «Mi cuenta» para cambiar la contraseña; el administrador genera contraseñas temporales y activa o desactiva usuarios.
 - La calibración de impresión queda en cada equipo, porque depende de su impresora.

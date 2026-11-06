@@ -5,15 +5,17 @@
  *
  * Ingreso con Google (ver lib/google.php).
  *
- *   GET google.php?accion=inicio        Redirige a Google para elegir la cuenta.
- *   GET google.php?code=…&state=…       Vuelta desde Google: valida, abre la sesión y vuelve a la aplicación.
+ *   GET google.php?accion=inicio              Redirige a Google para elegir la cuenta.
+ *   GET google.php?accion=inicio&confirmar=1  Igual, con la cuenta de la sesión: reconfirma la identidad
+ *                                             para operaciones sensibles (vuelve con ?ingreso=confirmado).
+ *   GET google.php?code=…&state=…             Vuelta desde Google: valida, abre la sesión y vuelve a la aplicación.
  *
  * Solo ingresa quien ya es usuario activo de la aplicación con ese correo: los usuarios
- * los da de alta un administrador. Si el usuario tiene activa la verificación en dos
- * pasos, se le pide el código igual que con contraseña, y si tiene una contraseña temporal
- * pendiente, se le pide elegir la propia (la usa para reconfirmar operaciones sensibles).
- * Cualquier error vuelve a la
- * pantalla de ingreso con un código (?ingreso=…) que la aplicación traduce.
+ * los da de alta un administrador. Con Google no se usa contraseña: si había una temporal
+ * pendiente se anula, y las operaciones sensibles se reconfirman con Google (ver
+ * user_confirm_password). Si el usuario tiene activa la verificación en dos pasos, se le
+ * pide el código igual que con contraseña. Cualquier error vuelve a la pantalla de
+ * ingreso con un código (?ingreso=…) que la aplicación traduce.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -50,11 +52,14 @@ if (($_GET['accion'] ?? '') === 'inicio') {
     if (attempts_count($pdo, 'google', null, true, 15) >= GOOGLE_MAX_FALLOS) {
         google_back('google_limitado');
     }
+    // Reconfirmación: la cookie de sesión (SameSite=Strict) llega porque es una navegación
+    // desde la propia aplicación; se sugiere a Google la cuenta de esa sesión.
+    $current = !empty($_GET['confirmar']) ? session_user($pdo) : null;
     $state = google_random();
     $nonce = google_random();
     $verifier = google_random(48);
-    google_save_state($config, ['state' => $state, 'nonce' => $nonce, 'verifier' => $verifier]);
-    header('Location: ' . google_auth_url($g, $state, $nonce, $verifier, google_redirect_uri()), true, 302);
+    google_save_state($config, ['state' => $state, 'nonce' => $nonce, 'verifier' => $verifier, 'confirmar' => $current !== null]);
+    header('Location: ' . google_auth_url($g, $state, $nonce, $verifier, google_redirect_uri(), $current['email'] ?? ''), true, 302);
     exit;
 }
 
@@ -103,18 +108,25 @@ if ($user === null || !(int) $user['activo']) {
     google_back('google_sin_usuario');
 }
 
-// La contraseña propia se sigue necesitando para reconfirmar operaciones sensibles
-// (certificado de ARCA, cambio de contraseña, segundo factor): si había una temporal
-// pendiente, la aplicación pide elegir la propia igual que con el ingreso por contraseña.
-$pdo->prepare('UPDATE usuarios SET ultimo_ingreso = NOW() WHERE id = ?')->execute([$user['id']]);
+// Con Google no hace falta contraseña: una temporal pendiente se anula (nadie más puede
+// usarla) y las operaciones sensibles se reconfirman con Google.
+$annulled = (bool) (int) $user['debe_cambiar'];
+if ($annulled) {
+    $pdo->prepare('UPDATE usuarios SET clave_hash = ?, debe_cambiar = 0, ultimo_ingreso = NOW() WHERE id = ?')
+        ->execute([user_hash(google_random(32)), $user['id']]);
+} else {
+    $pdo->prepare('UPDATE usuarios SET ultimo_ingreso = NOW() WHERE id = ?')->execute([$user['id']]);
+}
 attempts_clear($pdo, 'ingreso', $email);
 
 if ((int) $user['totp_activo']) {
-    session_pending_totp((int) $user['id']);
+    session_pending_totp((int) $user['id'], 'google');
     google_back('codigo');
 }
-session_login($pdo, (int) $user['id']);
-audit_event($pdo, 'Ingreso al sistema', [
-    'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => (int) $user['id'], 'clave' => $user['nombre'], 'detalle' => 'con Google',
+session_login($pdo, (int) $user['id'], 'google');
+$confirm = !empty($saved['confirmar']);
+audit_event($pdo, $confirm ? 'Identidad confirmada con Google' : 'Ingreso al sistema', [
+    'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => (int) $user['id'], 'clave' => $user['nombre'],
+    'detalle' => 'con Google' . ($annulled ? '; se anuló la contraseña temporal pendiente' : ''),
 ]);
-google_back();
+google_back($confirm ? 'confirmado' : '');

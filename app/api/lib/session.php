@@ -13,6 +13,9 @@
  *   segundo factor o desactivarlo la incrementa y cierra todas sus otras sesiones.
  * - Con segundo factor activo, la contraseña deja la sesión «pendiente» hasta
  *   validar el código TOTP.
+ * - La sesión recuerda cómo se abrió (contraseña o Google) y cuándo se confirmó la
+ *   identidad por última vez: una sesión de Google reconfirma las operaciones sensibles
+ *   volviendo a pasar por Google, sin contraseña (ver user_confirm_password).
  * - Toda escritura con sesión exige el token CSRF en la cabecera X-CSRF-Token.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
@@ -24,6 +27,10 @@ declare(strict_types=1);
 const SESSION_NAME = 'remitos_sid';
 const SESSION_IDLE_SECONDS = 8 * 3600;
 const SESSION_MAX_SECONDS = 12 * 3600;
+/** Plazo en que un ingreso con Google vale como confirmación de identidad para operaciones sensibles. */
+const SESSION_CONFIRM_SECONDS = 15 * 60;
+/** Formas de abrir la sesión. */
+const SESSION_METHODS = ['clave', 'google'];
 
 /** Roles de usuario y sus permisos. */
 const USER_ROLES = [
@@ -101,11 +108,33 @@ function session_user(PDO $pdo): ?array
         'rol' => (string) $row['rol'],
         'debe_cambiar' => (bool) (int) $row['debe_cambiar'],
         'segundo_factor' => (bool) (int) $row['totp_activo'],
+        'ingreso' => session_method($_SESSION),
+        'confirmado' => session_confirmation_valid($_SESSION, $now),
     ];
 }
 
+/** Cómo se abrió la sesión: 'clave' o 'google'. */
+function session_method(array $session): string
+{
+    $method = (string) ($session['metodo'] ?? 'clave');
+
+    return in_array($method, SESSION_METHODS, true) ? $method : 'clave';
+}
+
+/**
+ * ¿La sesión se abrió con Google hace menos de SESSION_CONFIRM_SECONDS? En ese plazo
+ * las operaciones sensibles no piden contraseña; después se vuelve a pasar por Google.
+ */
+function session_confirmation_valid(array $session, ?int $now = null): bool
+{
+    $now ??= time();
+    $at = (int) ($session['confirmado'] ?? 0);
+
+    return session_method($session) === 'google' && $at > 0 && $now - $at >= 0 && $now - $at <= SESSION_CONFIRM_SECONDS;
+}
+
 /** Abre la sesión de un usuario autenticado (con la versión de sesión vigente). */
-function session_login(PDO $pdo, int $userId): void
+function session_login(PDO $pdo, int $userId, string $method = 'clave'): void
 {
     $st = $pdo->prepare('SELECT sesion_version FROM usuarios WHERE id = ?');
     $st->execute([$userId]);
@@ -117,15 +146,38 @@ function session_login(PDO $pdo, int $userId): void
         'inicio' => time(),
         'visto' => time(),
         'csrf' => bin2hex(random_bytes(32)),
+        'metodo' => in_array($method, SESSION_METHODS, true) ? $method : 'clave',
+        'confirmado' => time(),
     ];
 }
 
+/**
+ * Renueva la sesión del usuario actual tras un cambio de credenciales (las demás quedan
+ * invalidadas), conservando cómo se abrió y cuándo se confirmó la identidad.
+ */
+function session_renew(PDO $pdo, int $userId): void
+{
+    session_begin();
+    $method = session_method($_SESSION);
+    $confirmed = (int) ($_SESSION['confirmado'] ?? 0);
+    session_login($pdo, $userId, $method);
+    $_SESSION['confirmado'] = $confirmed;
+}
+
 /** Deja la sesión a la espera del segundo factor (sin acceso a datos). */
-function session_pending_totp(int $userId): void
+function session_pending_totp(int $userId, string $method = 'clave'): void
 {
     session_begin();
     session_regenerate_id(true);
-    $_SESSION = ['totp_uid' => $userId, 'totp_desde' => time()];
+    $_SESSION = ['totp_uid' => $userId, 'totp_desde' => time(), 'metodo' => in_array($method, SESSION_METHODS, true) ? $method : 'clave'];
+}
+
+/** Forma de ingreso de la sesión pendiente del segundo factor. */
+function session_pending_method(): string
+{
+    session_begin();
+
+    return session_method($_SESSION);
 }
 
 /** Usuario que validó la contraseña y debe ingresar el código TOTP (5 minutos de plazo). */

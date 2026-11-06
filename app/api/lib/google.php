@@ -81,10 +81,14 @@ function google_redirect_uri(): string
     return google_base_url() . '/api/google.php';
 }
 
-/** URL de autorización de Google para iniciar el ingreso. */
-function google_auth_url(array $g, string $state, string $nonce, string $verifier, string $redirect): string
+/**
+ * URL de autorización de Google para iniciar el ingreso. Para el ingreso se ofrece elegir
+ * la cuenta; para reconfirmar la identidad se sugiere la cuenta de la sesión (login_hint)
+ * y Google la usa directamente si ya está abierta en el navegador.
+ */
+function google_auth_url(array $g, string $state, string $nonce, string $verifier, string $redirect, string $loginHint = ''): string
 {
-    return GOOGLE_AUTH_URL . '?' . http_build_query([
+    $params = [
         'client_id' => $g['client_id'],
         'redirect_uri' => $redirect,
         'response_type' => 'code',
@@ -94,9 +98,15 @@ function google_auth_url(array $g, string $state, string $nonce, string $verifie
         'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '='),
         'code_challenge_method' => 'S256',
         'hd' => $g['dominio'],
-        'prompt' => 'select_account',
         'access_type' => 'online',
-    ], '', '&', PHP_QUERY_RFC3986);
+    ];
+    if ($loginHint !== '') {
+        $params['login_hint'] = $loginHint;
+    } else {
+        $params['prompt'] = 'select_account';
+    }
+
+    return GOOGLE_AUTH_URL . '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 }
 
 /** Guarda el estado del pedido en la cookie cifrada de 10 minutos. */

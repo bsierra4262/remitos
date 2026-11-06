@@ -24,6 +24,7 @@ require $api . '/totp.php';
 require $api . '/arca.php';
 require $api . '/normativa.php';
 require $api . '/google.php';
+require $api . '/session.php';
 
 $fallas = 0;
 $total = 0;
@@ -127,6 +128,18 @@ $url = google_auth_url($g, 'S', 'N', 'verificador', 'https://intellihelp.tech/re
 parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
 verificar($q['code_challenge_method'] === 'S256' && $q['hd'] === 'intellihelp.tech' && $q['scope'] === 'openid email profile'
     && $q['code_challenge'] === rtrim(strtr(base64_encode(hash('sha256', 'verificador', true)), '+/', '-_'), '='), 'URL de autorización con PKCE');
+
+$hint = [];
+parse_str((string) parse_url(google_auth_url($g, 'S', 'N', 'v', 'https://x/api/google.php', 'ana@intellihelp.tech'), PHP_URL_QUERY), $hint);
+verificar(($q['prompt'] ?? '') === 'select_account' && ($hint['login_hint'] ?? '') === 'ana@intellihelp.tech' && !isset($hint['prompt']),
+    'reconfirmación con la cuenta de la sesión');
+
+// Sesión abierta con Google: plazo en que vale como confirmación de identidad.
+verificar(session_confirmation_valid(['metodo' => 'google', 'confirmado' => 1000], 1000 + SESSION_CONFIRM_SECONDS), 'Google reciente confirma');
+verificar(!session_confirmation_valid(['metodo' => 'google', 'confirmado' => 1000], 1001 + SESSION_CONFIRM_SECONDS), 'Google vencido no confirma');
+verificar(!session_confirmation_valid(['metodo' => 'clave', 'confirmado' => 1000], 1001), 'contraseña no confirma sin pedirla');
+verificar(!session_confirmation_valid(['metodo' => 'otro', 'confirmado' => 1000], 1001) && session_method(['metodo' => 'otro']) === 'clave', 'método desconocido');
+verificar(!session_confirmation_valid(['metodo' => 'google'], 1001), 'sin hora de confirmación');
 
 echo $fallas === 0 ? "Pruebas unitarias del servidor: los $total casos pasaron\n" : "$fallas de $total casos fallaron\n";
 exit($fallas === 0 ? 0 : 1);

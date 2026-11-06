@@ -1,5 +1,6 @@
 # Secretos y datos del servidor
 app/api/config.php
+client_secret*.json
 *.key
 *.pem
 *.crt

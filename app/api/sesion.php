@@ -10,12 +10,15 @@
  *   POST sesion.php {accion: 'ingresar', email, clave}       Inicia sesión (o pide el código del segundo factor).
  *   POST sesion.php {accion: 'verificar_codigo', codigo}     Completa el ingreso con el código TOTP.
  *   POST sesion.php {accion: 'salir'}                        Cierra la sesión.
- *   POST sesion.php {accion: 'cambiar_clave', actual, nueva} Cambia la contraseña propia.
+ *   POST sesion.php {accion: 'cambiar_clave', actual, nueva} Cambia la contraseña propia (con una sesión de
+ *                                                            Google confirmada, `actual` puede ir vacía).
  *   POST sesion.php {accion: 'totp_iniciar', clave}          Genera un secreto TOTP (sin activarlo todavía).
  *   POST sesion.php {accion: 'totp_activar', codigo}         Activa el segundo factor con un código válido.
  *   POST sesion.php {accion: 'totp_desactivar', clave, codigo} Desactiva el segundo factor.
  *
  * Cambiar la contraseña o el segundo factor cierra todas las demás sesiones del usuario.
+ * Con una sesión abierta con Google, las confirmaciones de identidad no piden contraseña
+ * (ver user_confirm_password): `ingreso` y `confirmado` en la respuesta lo indican.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -41,6 +44,8 @@ function session_payload(array $user): array
             'rol' => $user['rol'],
             'debe_cambiar' => $user['debe_cambiar'],
             'segundo_factor' => $user['segundo_factor'],
+            'ingreso' => $user['ingreso'],
+            'confirmado' => $user['confirmado'],
             'permisos' => USER_ROLES[$user['rol']],
         ],
         'csrf' => session_csrf(),
@@ -164,10 +169,12 @@ if ($action === 'verificar_codigo') {
     $counter = session_check_code($pdo, $config, $row, $body['codigo'] ?? '', true);
     $pdo->prepare('UPDATE usuarios SET totp_ultimo = ? WHERE id = ?')->execute([$counter, $id]);
 
-    session_login($pdo, $id);
+    $method = session_pending_method();
+    session_login($pdo, $id, $method);
     $user = session_user($pdo);
     audit_event($pdo, 'Ingreso al sistema', [
-        'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => $user['id'], 'clave' => $user['nombre'], 'detalle' => 'con segundo factor',
+        'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => $user['id'], 'clave' => $user['nombre'],
+        'detalle' => $method === 'google' ? 'con Google y segundo factor' : 'con segundo factor',
     ]);
     api_respond(200, session_payload($user));
 }
@@ -201,7 +208,7 @@ if ($action === 'cambiar_clave') {
     $pdo->prepare(
         'UPDATE usuarios SET clave_hash = ?, debe_cambiar = 0, clave_cambiada = NOW(), sesion_version = sesion_version + 1 WHERE id = ?'
     )->execute([user_hash($new), $user['id']]);
-    session_login($pdo, $user['id']);              // nueva sesión; las demás quedan invalidadas
+    session_renew($pdo, $user['id']);              // nueva sesión; las demás quedan invalidadas
     audit_event($pdo, 'Contraseña cambiada', ['categoria' => 'acceso', 'recurso' => 'sesion', 'detalle' => 'se cerraron las demás sesiones']);
     api_respond(200, session_payload(session_user($pdo)));
 }
@@ -227,7 +234,7 @@ if ($action === 'totp_activar') {
     $counter = session_check_code($pdo, $config, $row, $body['codigo'] ?? '', false);
     $pdo->prepare('UPDATE usuarios SET totp_activo = 1, totp_ultimo = ?, sesion_version = sesion_version + 1 WHERE id = ?')
         ->execute([$counter, $user['id']]);
-    session_login($pdo, $user['id']);
+    session_renew($pdo, $user['id']);
     audit_event($pdo, 'Segundo factor activado', ['categoria' => 'acceso', 'recurso' => 'sesion', 'detalle' => 'se cerraron las demás sesiones']);
     api_respond(200, session_payload(session_user($pdo)));
 }
@@ -242,7 +249,7 @@ if ($action === 'totp_desactivar') {
     session_check_code($pdo, $config, $row, $body['codigo'] ?? '', false);
     $pdo->prepare('UPDATE usuarios SET totp_activo = 0, totp_secret = NULL, totp_ultimo = NULL, sesion_version = sesion_version + 1 WHERE id = ?')
         ->execute([$user['id']]);
-    session_login($pdo, $user['id']);
+    session_renew($pdo, $user['id']);
     audit_event($pdo, 'Segundo factor desactivado', ['categoria' => 'acceso', 'recurso' => 'sesion']);
     api_respond(200, session_payload(session_user($pdo)));
 }

@@ -7,9 +7,9 @@
 <meta name="description" content="Remitos, facturas, recibos y notas de crédito y débito de Intellihelp.">
 <meta name="robots" content="noindex, nofollow">
 <title>Remitos y Comprobantes · Intellihelp</title>
-<link rel="stylesheet" href="css/fuentes.css?v=240">
+<link rel="stylesheet" href="css/fuentes.css?v=241">
 <link rel="icon" href="assets/logos/favicon.png">
-<link rel="stylesheet" href="css/styles.css?v=240">
+<link rel="stylesheet" href="css/styles.css?v=241">
 </head>
 <body data-view="inicio" class="sin-sesion">
 <div class="app">
@@ -324,7 +324,7 @@
             <div class="cfg-alert" id="apiAlert" hidden></div>
             <div class="cfg-actions">
               <button class="btn primary" id="apiSave">Guardar</button>
-              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=240" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
+              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=241" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
             </div>
           </div>
 
@@ -510,7 +510,8 @@
       <div class="field full"><label>Certificado <span class="note">(.crt o .pem emitido por ARCA)</span></label><div class="file-pick"><input type="file" id="certFile" accept=".crt,.pem,.cer,application/x-x509-ca-cert"><label for="certFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="certFile">Ningún archivo elegido</span></div></div>
       <div class="field full"><label>Clave privada <span class="note">(.key generada con el pedido)</span></label><div class="file-pick"><input type="file" id="keyFile" accept=".key,.pem"><label for="keyFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="keyFile">Ningún archivo elegido</span></div></div>
       <div class="field full"><label for="keyPass">Contraseña de la clave <span class="note">(solo si la clave está protegida)</span></label><input type="password" id="keyPass" autocomplete="off"></div>
-      <div class="field full"><label for="certConfirm">Tu contraseña <span class="note">(para confirmar la operación)</span></label><input type="password" id="certConfirm" placeholder="Tu contraseña" autocomplete="current-password" required></div>
+      <div class="field full" id="certConfirmFila"><label for="certConfirm">Tu contraseña <span class="note">(para confirmar la operación)</span></label><input type="password" id="certConfirm" placeholder="Tu contraseña" autocomplete="current-password"></div>
+      <p class="hint full" id="certConfirmGoogle" hidden>La operación se confirma con tu ingreso con Google. Si pasaron más de 15 minutos desde que ingresaste, se te pide confirmar con Google de nuevo.</p>
     </div>
     <div class="cfg-alert" id="certFormAlert" hidden></div>
   </form>
@@ -560,9 +561,10 @@
       <span id="cuentaEmail"></span>
       <span class="cal-mode ov" id="cuentaRol"></span>
     </div>
-    <p class="sub-tit">Cambiar la contraseña</p>
+    <p class="sub-tit" id="cuentaClaveTit">Cambiar la contraseña</p>
+    <p class="hint" id="cuentaClaveGoogle" hidden>Ingresás con Google, así que no necesitás contraseña. Si querés, podés definir una para ingresar también con correo y contraseña.</p>
     <div class="grid">
-      <div class="field full"><label for="cuentaActual">Contraseña actual</label><input type="password" id="cuentaActual" placeholder="Tu contraseña actual" autocomplete="current-password" required></div>
+      <div class="field full" id="cuentaActualFila"><label for="cuentaActual">Contraseña actual</label><input type="password" id="cuentaActual" placeholder="Tu contraseña actual" autocomplete="current-password" required></div>
       <div class="field full"><label for="cuentaNueva">Contraseña nueva</label><input type="password" id="cuentaNueva" placeholder="Al menos 12 caracteres" autocomplete="new-password" minlength="12" required></div>
       <div class="field full"><label for="cuentaRepetir">Repetir la contraseña nueva</label><input type="password" id="cuentaRepetir" placeholder="Repetila" autocomplete="new-password" minlength="12" required></div>
     </div>
@@ -639,18 +641,20 @@
   <div class="acceso-panel">
     <form class="acceso-form" id="formIngreso" autocomplete="on">
       <h2>Ingresar</h2>
-      <p class="muted">Con tu correo y contraseña.</p>
-      <div class="field"><label for="ingresoEmail">Correo</label><input type="email" id="ingresoEmail" placeholder="nombre@intellihelp.tech" autocomplete="username" required></div>
-      <div class="field"><label for="ingresoClave">Contraseña</label><input type="password" id="ingresoClave" placeholder="Tu contraseña" autocomplete="current-password" required></div>
-      <button class="btn primary block" type="submit" id="ingresoEnviar">Ingresar</button>
+      <p class="muted" id="ingresoSub">Con tu correo y contraseña.</p>
       <div class="ingreso-google" id="ingresoGoogleFila" hidden>
-        <span class="separador">o</span>
         <a class="btn block google" id="ingresoGoogle" href="api/google.php?accion=inicio">
           <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.3 0-9.7-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
           <span>Ingresar con Google</span></a>
-        <p class="hint">Con tu cuenta de Intellihelp (@intellihelp.tech).</p>
+        <p class="hint">Con tu cuenta de Intellihelp (@intellihelp.tech), sin contraseña.</p>
+        <button class="btn ghost block sm" type="button" id="ingresoConClave">Ingresar con correo y contraseña</button>
       </div>
-      <p class="hint">¿Olvidaste la contraseña? Pedile a un administrador que genere una temporal.</p>
+      <div id="ingresoClaveBloque">
+        <div class="field"><label for="ingresoEmail">Correo</label><input type="email" id="ingresoEmail" placeholder="nombre@intellihelp.tech" autocomplete="username" required></div>
+        <div class="field"><label for="ingresoClave">Contraseña</label><input type="password" id="ingresoClave" placeholder="Tu contraseña" autocomplete="current-password" required></div>
+        <button class="btn primary block" type="submit" id="ingresoEnviar">Ingresar</button>
+        <p class="hint">¿Olvidaste la contraseña? Pedile a un administrador que genere una temporal.</p>
+      </div>
     </form>
     <form class="acceso-form" id="formCodigo" autocomplete="off" hidden>
       <h2>Verificación en dos pasos</h2>
@@ -676,10 +680,10 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="js/config.js?v=240"></script>
-<script src="js/calculos.js?v=240"></script>
-<script src="js/lib/qrcode.js?v=240"></script>
-<script src="js/app.js?v=240"></script>
-<script src="js/servidor.js?v=240"></script>
+<script src="js/config.js?v=241"></script>
+<script src="js/calculos.js?v=241"></script>
+<script src="js/lib/qrcode.js?v=241"></script>
+<script src="js/app.js?v=241"></script>
+<script src="js/servidor.js?v=241"></script>
 </body>
 </html>

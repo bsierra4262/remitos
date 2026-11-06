@@ -1609,6 +1609,9 @@ function limpiarFormCert() {
 }
 function abrirCargaCert() {
   limpiarFormCert();
+  const google = typeof sesionGoogle === 'function' && sesionGoogle();
+  $('#certConfirmFila').hidden = google;
+  $('#certConfirmGoogle').hidden = !google;
   $('#certAmbiente').value = $('#apiAmbiente').value;
   openPanel($('#certModal'), $('#backdrop5'));
 }
@@ -1617,7 +1620,7 @@ async function enviarCertificado(e) {
   const btn = $('#certSend');
   const ambiente = $('#certAmbiente').value;
   const confirmacion = $('#certConfirm').value;
-  if (!confirmacion)
+  if (!confirmacion && !$('#certConfirmFila').hidden)
     return avisoCert('warn', 'Falta tu contraseña', ' Se pide para confirmar la operación.', '#certFormAlert');
   let certificado, clave;
   try {
@@ -1655,7 +1658,7 @@ async function enviarCertificado(e) {
       ' Se validó contra su clave privada y quedó guardado cifrado en el servidor.'
     );
   } catch (err) {
-    avisoCert('err', 'El certificado no se cargó', ' ' + esc(err.message), '#certFormAlert');
+    avisoCert('err', 'El certificado no se cargó', detalleError(err), '#certFormAlert');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Validar y guardar';
@@ -1683,10 +1686,15 @@ async function probarConexionArca() {
 }
 async function quitarCertificado() {
   const ambiente = $('#apiAmbiente').value;
-  const confirmacion = prompt(
-    'Para quitar el certificado de ' + ambienteNombre(ambiente) + ', confirmá con tu contraseña:'
-  );
-  if (!confirmacion) return;
+  let confirmacion = '';
+  if (sesionGoogle()) {
+    if (!confirm('¿Quitar el certificado de ' + ambienteNombre(ambiente) + '? Se borra del servidor.')) return;
+  } else {
+    confirmacion = prompt(
+      'Para quitar el certificado de ' + ambienteNombre(ambiente) + ', confirmá con tu contraseña:'
+    );
+    if (!confirmacion) return;
+  }
   try {
     await api('arca.php', { method: 'POST', body: { accion: 'quitar', ambiente, confirmacion } });
     certEstado[ambiente] = null;
@@ -1697,7 +1705,7 @@ async function quitarCertificado() {
       ' Se eliminaron del servidor el certificado, la clave privada y los accesos vigentes.'
     );
   } catch (e) {
-    avisoCert('err', 'No se pudo quitar el certificado', ' ' + esc(e.message));
+    avisoCert('err', 'No se pudo quitar el certificado', detalleError(e));
   }
 }
 function avisoApi(tipo, titulo, detalle) {

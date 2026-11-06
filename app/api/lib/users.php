@@ -147,13 +147,24 @@ function user_authenticate(PDO $pdo, string $email, string $password): array
 }
 
 /**
- * Reconfirma la contraseña del usuario con sesión (operaciones sensibles y cambio de
+ * Reconfirma la identidad del usuario con sesión (operaciones sensibles y cambio de
  * contraseña). Cinco fallos en 15 minutos cierran la sesión: con una sesión robada no
  * se puede probar contraseñas sin límite.
+ *
+ * Con una sesión abierta con Google no se pide contraseña: vale el ingreso con Google
+ * de los últimos SESSION_CONFIRM_SECONDS y, pasado ese plazo, la respuesta pide volver
+ * a confirmar con Google (`reconfirmar_google`). Quien tenga contraseña propia puede
+ * escribirla igual.
  */
 function user_confirm_password(PDO $pdo, array $user, mixed $password, string $motivo): void
 {
     $key = 'u' . $user['id'];
+    if (($user['ingreso'] ?? 'clave') === 'google' && (!is_string($password) || $password === '')) {
+        if (!empty($user['confirmado'])) {
+            return;
+        }
+        api_error(403, 'Por seguridad, confirmá tu identidad con Google y repetí la operación.', ['reconfirmar_google' => true]);
+    }
     if (attempts_count($pdo, 'reconfirmar', $key, false, USER_WINDOW_MINUTES) >= USER_MAX_ATTEMPTS) {
         session_end();
         api_error(429, 'Demasiados intentos fallidos. La sesión se cerró: ingresá de nuevo.', ['sesion' => false]);
