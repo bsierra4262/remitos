@@ -343,10 +343,9 @@ php test/unitarias/importes.test.php          # unitarias del servidor
 
 ## Autor
 
-**Brian Gabriel Sierra**
-Jefe de Sistemas e Infraestructura IT — Intellihelp
+**Brian Sierra** — Administrador de sistemas (SysAdmin) en Intellihelp · [LinkedIn](https://www.linkedin.com/in/brian-gabriel-sierra/) · [GitHub](https://github.com/bsierra4262)
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-brian--gabriel--sierra-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/brian-gabriel-sierra)
+Diseño, desarrollo e implementación completos: emisión de remitos y comprobantes, integración con los web services de ARCA, remito digital con QR, usuarios y roles, API para otros sistemas y despliegue.
 
 ---
 
