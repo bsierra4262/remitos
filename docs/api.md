@@ -251,14 +251,14 @@ Remitos, comprobantes y clientes en JSON, para la copia descargable de la aplica
 |---|---|---|
 | `GET arca.php` | Datos públicos del certificado de cada ambiente (titular, CUIT, vigencia, huella) | `leer` |
 | `POST arca.php` `{accion: "cargar", ambiente, cuit?, certificado, clave, frase?}` | Valida el par y lo guarda cifrado. Solo por HTTPS; con sesión exige la identidad confirmada con Google | admin |
-| `POST arca.php` `{accion: "probar", ambiente}` | Verifica los servidores de WSFEv1 y obtiene el ticket de WSAA | `crear` |
+| `POST arca.php` `{accion: "probar", ambiente}` | Verifica los servidores de WSFEv1, obtiene el ticket de WSAA y consulta en nombre del emisor los puntos de venta habilitados (`puntos_venta`, y `aviso` si el configurado no está entre ellos). Devuelve `cuit` (emisor) y `cuit_certificado` (titular del certificado: el emisor o su representante) | `crear` |
 | `POST arca.php` `{accion: "quitar", ambiente}` | Elimina el certificado, la clave y los tickets del ambiente (con sesión, con la identidad confirmada con Google) | admin |
 | `DELETE arca.php?ambiente={ambiente}` | Ídem, solo con la clave maestra (integraciones) | admin |
 | `GET proximo.php?ambiente=&tipo=&subtipo=&letra=&pv=` | Próximo número según ARCA (último autorizado + 1), solo informativo | `leer` |
 
-`ambiente`: `homologacion` o `produccion`. `tipo`: `factura`, `recibo` o `nota` (`subtipo` `credito` o `debito`). `letra`: `A`, `B` o `C`.
+`ambiente`: `homologacion` o `produccion`. `tipo`: `factura` o `nota` (`subtipo` `credito` o `debito`); el recibo es de cobranza y no se numera en ARCA. `letra`: `A` o `B` (Intellihelp es Responsable Inscripto).
 
-Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que la clave privada sea **RSA** de 2048 bits o más y le corresponda, y que el CUIT del titular coincida con el informado o, si no se informa, con el del emisor configurado. Las respuestas nunca incluyen el certificado ni la clave, y los mensajes de error de ARCA o de la conexión se informan de forma genérica (el detalle queda en el log del servidor).
+Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que la clave privada sea **RSA** de 2048 bits o más y le corresponda, El titular puede ser el emisor o un representante a quien la empresa le delegó el servicio en el Administrador de Relaciones de ARCA: los pedidos se hacen siempre en nombre del emisor (`Auth.Cuit`) y «Probar conexión» confirma la relación. Las respuestas nunca incluyen el certificado ni la clave, y los mensajes de error de ARCA o de la conexión se informan de forma genérica (el detalle queda en el log del servidor).
 
 ## Auditoría y claves
 

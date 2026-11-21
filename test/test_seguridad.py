@@ -68,7 +68,7 @@ def arca_carga_valida():
         pedir(f"/arca.php?ambiente={AMBIENTE}", "DELETE", clave_maestra())
 
 
-@caso("ARCA: se rechazan clave ajena, PEM inválido, CUIT distinto y RSA débil")
+@caso("ARCA: se rechazan clave ajena, PEM inválido y RSA débil")
 def arca_validaciones():
     cert, clave = _certificado()
     _, otra_clave = _certificado()
@@ -76,7 +76,6 @@ def arca_validaciones():
         "clave ajena": _cargar(cert, otra_clave)[0],
         "certificado inválido": _cargar("hola", clave)[0],
         "clave inválida": _cargar(cert, "-----BEGIN PRIVATE KEY-----\nxx\n-----END PRIVATE KEY-----")[0],
-        "CUIT distinto": _cargar(cert, clave, cuit="30711409757")[0],
         "RSA 1024": _cargar(*_certificado(bits=1024))[0],
         "ambiente inválido": pedir("/arca.php", "POST", clave_maestra(),
                                    {"accion": "cargar", "ambiente": "x", "certificado": cert, "clave": clave})[0],
@@ -246,3 +245,62 @@ def sin_restos_temporales():
     pedir(f"/arca.php?ambiente={AMBIENTE}", "DELETE", clave_maestra())
     nuevos = [f for f in set(os.listdir(tempfile.gettempdir())) - antes if f.startswith(("tra", "cms"))]
     return not nuevos, f"quedaron: {nuevos}" if nuevos else "sin restos"
+
+
+@caso("Emisión: certificado de un representante del emisor y reglas oficiales de ARCA antes de pedir el CAE")
+def emision_reglas_oficiales():
+    """El certificado puede ser de un representante (persona) con el servicio delegado por
+    la empresa. Antes de llamar a ARCA se aplican sus reglas (RG 5616 y validaciones de
+    WSFEv1): la letra según la condición frente al IVA del receptor, la identificación del
+    consumidor final desde $ 10.000.000, el comprobante asociado de las notas, la letra C
+    (un Responsable Inscripto no la emite) y el recibo de cobranza, que no lleva CAE."""
+    if not es_local():
+        return True, "solo en el entorno local"
+    m = clave_maestra()
+    cert, clave = _certificado()                       # CUIT del representante: 20-12345678-6
+    creados = []
+    try:
+        cargado = _cargar(cert, clave)[0]
+        activar = pedir("/ajustes.php", "POST", m, {"seccion": "emisor", "valores": {
+            "ambiente": AMBIENTE, "cuit": "30-71140975-7", "ptoVenta": "3", "emision": True}})[0]
+
+        def emitir(letra, cond, cuit="", tipo="factura", precio="1.000", subtipo="", asoc=None):
+            cuerpo = {"tipo": tipo, "subtipo": subtipo, "letra": letra, "conceptoTipo": 2,
+                      "cliente": {"razonSocial": "CLIENTE DE PRUEBA", "cuit": cuit, "condIVA": cond},
+                      "items": [{"descripcion": "Servicio", "cantidad": "1", "precio": precio}]}
+            if asoc:
+                cuerpo["compAsoc"] = asoc
+            s, d = pedir("/comprobantes.php", "POST", m, cuerpo)
+            if s not in (200, 201):
+                return s, d.get("error", "")
+            creados.append(d["comprobante"]["id"])
+            s, d = pedir("/comprobantes.php", "POST", m, {"accion": "emitir", "id": d["comprobante"]["id"]})
+            return s, d.get("error", "")
+
+        casos = {
+            "B a responsable inscripto": emitir("B", "Responsable Inscripto", "30-50001091-2"),
+            "A a consumidor final": emitir("A", "Consumidor Final", "30-50001091-2"),
+            "A a exento": emitir("A", "Exento", "30-50001091-2"),
+            "B de $15 M sin identificar": emitir("B", "Consumidor Final", precio="15.000.000"),
+            "nota de crédito sin asociado": emitir("A", "Responsable Inscripto", "30-50001091-2", tipo="nota",
+                                                   subtipo="credito", asoc={"tipo": "Factura", "letra": "A", "pv": "", "nro": ""}),
+            "letra C": emitir("C", "Consumidor Final"),
+            "recibo A con CAE": emitir("A", "Responsable Inscripto", "30-50001091-2", tipo="recibo"),
+        }
+        esperado = {
+            "B a responsable inscripto": "corresponde un comprobante A",
+            "A a consumidor final": "corresponde un comprobante B",
+            "A a exento": "corresponde un comprobante B",
+            "B de $15 M sin identificar": "identificar al comprador",
+            "nota de crédito sin asociado": "comprobante asociado",
+            "letra C": "Responsable Inscripto",
+            "recibo A con CAE": "recibo de cobranza",
+        }
+        malos = {k: v for k, v in casos.items() if v[0] != 422 or esperado[k] not in v[1]}
+        ok = cargado == 201 and activar == 200 and not malos
+        return ok, f"certificado_representante={cargado} activar_emision={activar} " + (f"fallas={malos}" if malos else f"{len(casos)} reglas aplicadas")
+    finally:
+        for cid in creados:
+            pedir(f"/comprobantes.php?id={cid}", "DELETE", m)
+        pedir("/ajustes.php", "POST", m, {"seccion": "emisor", "valores": {"ambiente": AMBIENTE, "cuit": "", "ptoVenta": "", "emision": False}})
+        pedir(f"/arca.php?ambiente={AMBIENTE}", "DELETE", m)

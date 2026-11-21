@@ -1665,10 +1665,20 @@ async function probarConexionArca() {
   try {
     const j = await api('arca.php', { method: 'POST', body: { accion: 'probar', ambiente } });
     const s = j.servidores || {};
+    const pvs = (j.puntos_venta || [])
+      .filter(p => !p.bloqueado && !p.baja)
+      .map(p => p.numero + ' (' + p.tipo + ')')
+      .join(', ');
+    const quien =
+      j.cuit_certificado && j.cuit_certificado !== j.cuit
+        ? `Emisor ${esc(fmtCuit(j.cuit))}, con el certificado de su representante ${esc(fmtCuit(j.cuit_certificado))}. `
+        : `Emisor ${esc(fmtCuit(j.cuit))}. `;
     avisoCert(
-      'ok',
-      'Conexión con ARCA verificada',
-      ` Servidores: aplicación ${esc(s.app)}, base ${esc(s.db)}, autenticación ${esc(s.auth)}. Acceso vigente hasta el ${esc(fmtFechaHora(j.ticket_vence))} a las ${esc((j.ticket_vence || '').slice(11, 16))}.`
+      j.aviso ? 'warn' : 'ok',
+      j.aviso ? 'Conexión verificada, con un aviso' : 'Conexión con ARCA verificada',
+      ` ${quien}Puntos de venta para web services: ${esc(pvs || 'ninguno')}.` +
+        (j.aviso ? ` <b>${esc(j.aviso)}</b>` : '') +
+        ` Servidores: aplicación ${esc(s.app)}, base ${esc(s.db)}, autenticación ${esc(s.auth)}. Acceso vigente hasta el ${esc(fmtFechaHora(j.ticket_vence))} a las ${esc((j.ticket_vence || '').slice(11, 16))}.`
     );
   } catch (e) {
     avisoCert('err', 'ARCA no aceptó la conexión', ' ' + esc(e.message));
@@ -2013,6 +2023,7 @@ const CLI_FIELDS = {
   razonSocial: 'cliRazon',
   cuit: 'cliCuit',
   telefono: 'cliTel',
+  condIVA: 'cliCond',
   senores: 'cliSenores',
   domicilio: 'cliDom',
   localidad: 'cliLoc',
@@ -2311,7 +2322,7 @@ let compDoc = null,
    y C no tienen número hasta que ARCA los autoriza; mientras tanto se imprimen
    marcados «SIN AUTORIZAR». */
 const apiActiva = () => !!emisor().emision;
-const esElectronico = d => apiActiva() && /^[ABC]$/.test(d.letra);
+const esElectronico = d => apiActiva() && d.tipo !== 'recibo' && /^[AB]$/.test(d.letra);
 const compAutorizado = d => !!d && (d.estado === 'autorizado' || !!d.cae);
 const pv5 = v => String(parseInt(String(v || '').replace(/\D/g, ''), 10) || 1).padStart(5, '0');
 
@@ -2428,8 +2439,12 @@ function renderComprobanteEditor() {
     <div class="doc-aviso" ${aut ? '' : 'hidden'}>Comprobante autorizado por ARCA (CAE ${esc(d.cae)}): no se modifica. Para corregirlo, emití una nota de crédito.</div>
     <div class="section"><h3>${COMP_INFO[t].badge}</h3><div class="section-body">
       <div class="grid">
-        <div class="field"><label>Comprobante (letra)</label><select data-cpath="letra">
-          ${['A', 'B', 'C', 'X'].map(l => `<option ${d.letra === l ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        ${
+          rec
+            ? `<div class="field"><label>Comprobante (letra)</label><input value="X" readonly title="Recibo de cobranza: no vale como factura ni lleva CAE (RG 1415, art. 10)"></div>`
+            : `<div class="field"><label>Comprobante (letra)</label><select data-cpath="letra">
+          ${['A', 'B', 'X'].map(l => `<option ${d.letra === l ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`
+        }
         ${
           nota
             ? `<div class="field"><label>Clase</label><select data-cpath="subtipo">
@@ -2449,7 +2464,9 @@ function renderComprobanteEditor() {
         <div class="field full"><label>Razón Social / Nombre</label><input data-cpath="cliente.razonSocial" value="${escA(d.cliente.razonSocial)}"></div>
         <div class="field"><label>CUIT / DNI</label><input data-cpath="cliente.cuit" inputmode="numeric" maxlength="13" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]|[0-9]{7,8}" placeholder="30-71140975-7" value="${escA(d.cliente.cuit)}"></div>
         <div class="field"><label>Condición IVA</label><select data-cpath="cliente.condIVA">
-          ${['Consumidor Final', 'Responsable Inscripto', 'Monotributo', 'Exento'].map(o => `<option ${d.cliente.condIVA === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+          ${Object.keys(CONDICIONES_IVA)
+            .map(o => `<option ${d.cliente.condIVA === o ? 'selected' : ''}>${o}</option>`)
+            .join('')}</select></div>
         <div class="field full"><label>Domicilio</label><input data-cpath="cliente.domicilio" value="${escA(d.cliente.domicilio)}"></div>
         <div class="field"><label>Localidad</label><input data-cpath="cliente.localidad" value="${escA(d.cliente.localidad)}"></div>
         <div class="field"><label>C.P.</label><input data-cpath="cliente.cp" maxlength="8" pattern="[A-Za-z]?[0-9]{4}[A-Za-z]{0,3}" placeholder="B1636 o 1636" value="${escA(d.cliente.cp)}"></div>
@@ -2463,7 +2480,7 @@ function renderComprobanteEditor() {
         <div class="field"><label>Tipo</label><select data-cpath="compAsoc.tipo">
           ${['Factura', 'Nota de débito', 'Nota de crédito'].map(o => `<option ${d.compAsoc.tipo === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
         <div class="field"><label>Letra</label><select data-cpath="compAsoc.letra">
-          ${['A', 'B', 'C', 'X'].map(o => `<option ${d.compAsoc.letra === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+          ${['A', 'B'].map(o => `<option ${d.compAsoc.letra === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
         <div class="field"><label>Pto. venta</label><input data-cpath="compAsoc.pv" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" value="${escA(d.compAsoc.pv)}"></div>
         <div class="field"><label>Número</label><input data-cpath="compAsoc.nro" inputmode="numeric" pattern="[0-9]{1,8}" maxlength="8" value="${escA(d.compAsoc.nro)}"></div>
       </div></div></div>`;
@@ -2517,7 +2534,7 @@ function renderComprobanteEditor() {
           : elec
             ? 'Con «Emitir CAE» se guarda el comprobante y ARCA le asigna número y CAE. Hasta entonces se imprime marcado <b>SIN AUTORIZAR</b>.'
             : 'Sin CAE, el comprobante se imprime marcado <b>' +
-              (/^[ABC]$/.test(d.letra) ? 'SIN AUTORIZAR' : 'BORRADOR') +
+              (/^[AB]$/.test(d.letra) ? 'SIN AUTORIZAR' : 'BORRADOR') +
               '</b>.'
       }</p>
     </div></div>
@@ -2620,6 +2637,22 @@ function bindCompForm() {
     }
     setPath(compDoc, p, esFecha(el) ? isoADmy(el.value) : el.value);
     if (p === 'conceptoTipo') compDoc.conceptoTipo = +el.value;
+    // La condición frente al IVA define la clase (RG 5616): A para inscriptos y
+    // monotributistas, B para el resto. Un comprobante fiscal se ajusta solo.
+    if (p === 'cliente.condIVA' && compDoc.letra !== 'X' && CONDICIONES_IVA[el.value]) {
+      const clase = CONDICIONES_IVA[el.value].clase;
+      if (clase !== compDoc.letra && !compAutorizado(compDoc)) {
+        compDoc.letra = clase;
+        compDoc.compAsoc.letra = compDoc.tipo === 'nota' ? clase : compDoc.compAsoc.letra;
+        if (!compDoc.id) compDoc.numero = '';
+        if (esElectronico(compDoc)) compDoc.ptoVenta = pv5(emisor().ptoVenta);
+        touchComp();
+        renderComprobanteEditor();
+        renderComprobante();
+        toast('Comprobante ' + clase + ': es el que corresponde a un cliente «' + el.value + '»', 2600);
+        return;
+      }
+    }
     if (p === 'letra' || p === 'subtipo' || p === 'ptoVenta' || p === 'conceptoTipo') {
       if (!compDoc.id && p !== 'conceptoTipo') compDoc.numero = '';
       if (p === 'letra' && esElectronico(compDoc)) compDoc.ptoVenta = pv5(emisor().ptoVenta);
@@ -2661,7 +2694,11 @@ function renderComprobante() {
   const head = `
     <div class="cmp-head">
       ${emisor}
-      <div class="cmp-letra"><span class="L">${esc(d.letra || 'X')}</span><span class="cod">COD. ${esc(codigo)}</span></div>
+      <div class="cmp-letra"><span class="L">${esc(d.letra || 'X')}</span>${
+        d.letra === 'X' || !d.letra
+          ? '<span class="cod">NO VÁLIDO COMO FACTURA</span>'
+          : `<span class="cod">COD. ${esc(codigo)}</span>`
+      }</div>
       <div class="cmp-tipo">
         <h1>${esc(title)}</h1>
         <p><b>Punto de Venta:</b> ${esc(pv5(d.ptoVenta))} &nbsp;&nbsp; <b>Comp. Nro:</b> ${esc(numero || '—')}</p>
@@ -2763,7 +2800,7 @@ function renderComprobante() {
         <b>Fecha de Vto. de CAE:</b> ${esc(caeVto || '—')}
       </div>
     </div>`;
-  const marca = cae || enPrueba() ? '' : /^[ABC]$/.test(d.letra) ? 'SIN AUTORIZAR' : 'BORRADOR';
+  const marca = cae || enPrueba() ? '' : /^[AB]$/.test(d.letra) ? 'SIN AUTORIZAR' : 'BORRADOR';
   page.innerHTML = `<div class="cmp-doc">${marca ? `<div class="cmp-borrador">${marca}</div>` : ''}
     <div class="cmp-copia">${esc(copia)}</div>${head}${periodo}${receptor}${body}${foot}</div>`;
 }

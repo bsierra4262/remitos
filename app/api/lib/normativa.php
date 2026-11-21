@@ -14,15 +14,29 @@
 
 declare(strict_types=1);
 
-/** Condición del destinatario frente al IVA → leyenda que exige el Anexo V, apartado II. */
-const REMITO_LEYENDAS_IVA = [
-    'Responsable Inscripto' => 'IVA RESPONSABLE INSCRIPTO',
-    'Exento' => 'IVA EXENTO',
-    'No Responsable' => 'NO RESPONSABLE IVA',
-    'Monotributo' => 'RESPONSABLE MONOTRIBUTO',
-    'Consumidor Final' => 'A CONSUMIDOR FINAL',
-    'Sujeto no categorizado' => 'SUJETO NO CATEGORIZADO',
+/**
+ * Condición frente al IVA del receptor: tabla oficial de ARCA (FEParamGetCondicionIvaReceptor,
+ * RG 5616/2024), con el código que se informa en WSFEv1, la leyenda que se imprime (RG 1415,
+ * Anexo V, apartado II, para el remito) y las clases de comprobante que admite: A para
+ * responsables inscriptos y monotributistas, B para el resto. Misma tabla en
+ * app/js/calculos.js (CONDICIONES_IVA).
+ */
+const IVA_CONDICIONES = [
+    'Responsable Inscripto' => ['codigo' => 1, 'leyenda' => 'IVA RESPONSABLE INSCRIPTO', 'clase' => 'A'],
+    'Monotributo' => ['codigo' => 6, 'leyenda' => 'RESPONSABLE MONOTRIBUTO', 'clase' => 'A'],
+    'Monotributista Social' => ['codigo' => 13, 'leyenda' => 'MONOTRIBUTISTA SOCIAL', 'clase' => 'A'],
+    'Monotributo Trabajador Independiente Promovido' => ['codigo' => 16, 'leyenda' => 'MONOTRIBUTO TRABAJADOR INDEPENDIENTE PROMOVIDO', 'clase' => 'A'],
+    'Exento' => ['codigo' => 4, 'leyenda' => 'IVA SUJETO EXENTO', 'clase' => 'B'],
+    'Consumidor Final' => ['codigo' => 5, 'leyenda' => 'A CONSUMIDOR FINAL', 'clase' => 'B'],
+    'Sujeto no categorizado' => ['codigo' => 7, 'leyenda' => 'SUJETO NO CATEGORIZADO', 'clase' => 'B'],
+    'Proveedor del Exterior' => ['codigo' => 8, 'leyenda' => 'PROVEEDOR DEL EXTERIOR', 'clase' => 'B'],
+    'Cliente del Exterior' => ['codigo' => 9, 'leyenda' => 'CLIENTE DEL EXTERIOR', 'clase' => 'B'],
+    'IVA Liberado - Ley 19.640' => ['codigo' => 10, 'leyenda' => 'IVA LIBERADO - LEY N° 19.640', 'clase' => 'B'],
+    'IVA No Alcanzado' => ['codigo' => 15, 'leyenda' => 'IVA NO ALCANZADO', 'clase' => 'B'],
 ];
+
+/** Condiciones de receptores sin CUIT argentino: no se les exige CUIT en el remito. */
+const IVA_SIN_CUIT = ['Consumidor Final', 'Cliente del Exterior', 'Proveedor del Exterior'];
 
 /** Tipos de transporte: propio (no se informa transportista) o por terceros (Anexo V, apartado IV). */
 const REMITO_TRANSPORTES = ['', 'propio', 'tercero'];
@@ -46,9 +60,9 @@ function remito_faltantes(array $doc): array
     if (trim((string) ($cliente['razonSocial'] ?? '')) === '' && trim((string) ($cliente['senores'] ?? '')) === '') {
         $faltan[] = 'el nombre o la razón social del destinatario';
     }
-    if (!isset(REMITO_LEYENDAS_IVA[$cond])) {
+    if (!isset(IVA_CONDICIONES[$cond])) {
         $faltan[] = 'la condición del destinatario frente al IVA';
-    } elseif ($cond !== 'Consumidor Final') {
+    } elseif (!in_array($cond, IVA_SIN_CUIT, true)) {
         if (!api_cuit_valid((string) ($cliente['cuit'] ?? ''))) {
             $faltan[] = 'el CUIT del destinatario';
         }

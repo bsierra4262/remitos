@@ -142,5 +142,18 @@ verificar(google_config(['google' => $g + ['token_url' => 'http://127.0.0.1:8766
 verificar(google_config(['google' => $g + ['token_url' => 'http://malicioso.example/token']])['token_url'] === GOOGLE_TOKEN_URL
     && google_config(['google' => $g + ['token_url' => 'https://127.0.0.1.malicioso.example/']])['token_url'] === GOOGLE_TOKEN_URL, 'endpoint de tokens ajeno ignorado');
 
+// WSFEv1: Auth.Cuit es el CUIT representado (emisor), aunque el certificado sea de un representante.
+$auth = arca_wsfe_auth(['token' => 'T', 'sign' => 'S', 'cuit' => '20123456786', 'cuit_representado' => '30711409757']);
+verificar(str_contains($auth, '<ar:Cuit>30711409757</ar:Cuit>'), 'Auth.Cuit con el CUIT del emisor');
+verificar(str_contains(arca_wsfe_auth(['token' => 'T', 'sign' => 'S', 'cuit' => '20123456786']), '<ar:Cuit>20123456786</ar:Cuit>'), 'Auth.Cuit sin emisor configurado');
+
+// Condición frente al IVA: tabla de FEParamGetCondicionIvaReceptor (homologación, noviembre de 2026).
+$arca = ['A' => [1, 6, 13, 16], 'B' => [4, 5, 7, 8, 9, 10, 15]];
+foreach ($arca as $clase => $codigos) {
+    $nuestros = array_values(array_map(static fn ($c) => $c['codigo'], array_filter(IVA_CONDICIONES, static fn ($c) => $c['clase'] === $clase)));
+    sort($nuestros);
+    verificar($nuestros === $codigos, "condiciones de IVA de la clase $clase");
+}
+
 echo $fallas === 0 ? "Pruebas unitarias del servidor: los $total casos pasaron\n" : "$fallas de $total casos fallaron\n";
 exit($fallas === 0 ? 0 : 1);

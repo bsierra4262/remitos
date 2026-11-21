@@ -93,7 +93,7 @@ function remito_from_input(array $body): array
         'telefono' => 40, 'cp' => 10, 'mail' => 120, 'nombre' => 120, 'otrosDatos' => 160,
     ]);
     $cliente['cuit'] = api_require_cuit($cliente['cuit'], 'CUIT del cliente', true);
-    if ($cliente['condIVA'] !== '' && !isset(REMITO_LEYENDAS_IVA[$cliente['condIVA']])) {
+    if ($cliente['condIVA'] !== '' && !isset(IVA_CONDICIONES[$cliente['condIVA']])) {
         $cliente['condIVA'] = '';
     }
 

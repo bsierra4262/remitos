@@ -180,10 +180,15 @@
                 <option value="">Elegí…</option>
                 <option>Responsable Inscripto</option>
                 <option>Monotributo</option>
+                <option>Monotributista Social</option>
+                <option>Monotributo Trabajador Independiente Promovido</option>
                 <option>Exento</option>
-                <option>No Responsable</option>
                 <option>Consumidor Final</option>
                 <option>Sujeto no categorizado</option>
+                <option>Proveedor del Exterior</option>
+                <option>Cliente del Exterior</option>
+                <option>IVA Liberado - Ley 19.640</option>
+                <option>IVA No Alcanzado</option>
               </select></div>
               <div class="field"><label>Teléfono</label><input type="tel" data-path="cliente.telefono" inputmode="tel" maxlength="40"></div>
               <div class="field full"><label>Domicilio</label><input data-path="cliente.domicilio" maxlength="160"></div>
@@ -478,6 +483,20 @@
       <div class="field full"><label for="cliRazon">Razón social</label><input id="cliRazon" maxlength="160"></div>
       <div class="field"><label for="cliCuit">CUIT</label><input id="cliCuit" inputmode="numeric" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]" maxlength="13" placeholder="30-12345678-9"></div>
       <div class="field"><label for="cliTel">Teléfono</label><input type="tel" id="cliTel" inputmode="tel" maxlength="40"></div>
+      <div class="field full"><label for="cliCond">Condición frente al IVA</label><select id="cliCond">
+                <option value="">Elegí…</option>
+                <option>Responsable Inscripto</option>
+                <option>Monotributo</option>
+                <option>Monotributista Social</option>
+                <option>Monotributo Trabajador Independiente Promovido</option>
+                <option>Exento</option>
+                <option>Consumidor Final</option>
+                <option>Sujeto no categorizado</option>
+                <option>Proveedor del Exterior</option>
+                <option>Cliente del Exterior</option>
+                <option>IVA Liberado - Ley 19.640</option>
+                <option>IVA No Alcanzado</option>
+              </select></div>
       <div class="field full"><label for="cliSenores">Señor/es <span class="note">(opcional)</span></label><input id="cliSenores" maxlength="160"></div>
       <div class="field full"><label for="cliDom">Domicilio</label><input id="cliDom" maxlength="160"></div>
       <div class="field"><label for="cliLoc">Localidad</label><input id="cliLoc" maxlength="80"></div>

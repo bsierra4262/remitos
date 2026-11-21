@@ -39,12 +39,15 @@ const ARCA_PEM_MAX = 16384;
 /** Margen con el que se renueva el ticket de acceso antes de su vencimiento. */
 const ARCA_TICKET_MARGIN_SECONDS = 300;
 
-/** Tipos de comprobante de WSFEv1 (tabla de comprobantes de ARCA), por familia y letra. */
+/**
+ * Tipos de comprobante de WSFEv1 (tabla de comprobantes de ARCA) que emite un Responsable
+ * Inscripto que factura sus operaciones: facturas y notas A y B. Sus recibos son de
+ * cobranza (RG 1415, art. 10) y no se autorizan en ARCA.
+ */
 const ARCA_CBTE_TIPOS = [
-    'factura' => ['A' => 1, 'B' => 6, 'C' => 11],
-    'nd' => ['A' => 2, 'B' => 7, 'C' => 12],
-    'nc' => ['A' => 3, 'B' => 8, 'C' => 13],
-    'recibo' => ['A' => 4, 'B' => 9, 'C' => 15],
+    'factura' => ['A' => 1, 'B' => 6],
+    'nd' => ['A' => 2, 'B' => 7],
+    'nc' => ['A' => 3, 'B' => 8],
 ];
 
 /** Error informado por ARCA (falla del servicio o rechazo de la operación). */
@@ -67,7 +70,7 @@ function arca_is_environment(mixed $environment): bool
 function arca_cbte_tipo(string $type, string $subtype, string $letter): ?int
 {
     $family = match ($type) {
-        'recibo' => 'recibo',
+        'recibo' => '',
         'nota' => $subtype === 'debito' ? 'nd' : 'nc',
         default => 'factura',
     };
@@ -274,9 +277,10 @@ function arca_ticket(PDO $pdo, array $config, string $environment, string $servi
         );
     }
 
+    $represented = arca_represented_cuit($pdo, $credentials['cuit']);
     $cached = arca_cached_ticket($pdo, $config, $environment, $service, $credentials['cuit']);
     if ($cached !== null) {
-        return $cached;
+        return $cached + ['cuit_representado' => $represented];
     }
 
     // Un solo pedido de ticket a la vez: ARCA rechaza un segundo LoginCms mientras el
@@ -286,10 +290,25 @@ function arca_ticket(PDO $pdo, array $config, string $environment, string $servi
     try {
         $cached = arca_cached_ticket($pdo, $config, $environment, $service, $credentials['cuit']);
 
-        return $cached ?? arca_request_ticket($pdo, $config, $environment, $service, $credentials);
+        return ($cached ?? arca_request_ticket($pdo, $config, $environment, $service, $credentials))
+            + ['cuit_representado' => $represented];
     } finally {
         api_unlock($pdo, $lock);
     }
+}
+
+/**
+ * CUIT representado: el del emisor configurado en los ajustes. El certificado puede ser
+ * del propio emisor o de un representante (persona) a quien la empresa le delegó el
+ * servicio desde el Administrador de Relaciones de ARCA; en los dos casos los web
+ * services se invocan en nombre del emisor (Auth.Cuit de WSFEv1 y WSCDC). Si no hay un
+ * emisor configurado, se usa el CUIT del certificado.
+ */
+function arca_represented_cuit(PDO $pdo, string $certificateCuit): string
+{
+    $cuit = preg_replace('/\D/', '', (string) (settings_get($pdo, 'emisor')['cuit'] ?? ''));
+
+    return strlen($cuit) === 11 && api_cuit_valid($cuit) ? $cuit : $certificateCuit;
 }
 
 /** Ticket vigente guardado, o null. */
@@ -328,7 +347,17 @@ function arca_request_ticket(PDO $pdo, array $config, string $environment, strin
         . '<soapenv:Header/><soapenv:Body><wsaa:loginCms><wsaa:in0>' . $cms . '</wsaa:in0></wsaa:loginCms>'
         . '</soapenv:Body></soapenv:Envelope>';
 
-    $response = arca_soap(ARCA_WSAA_URL[$environment], $envelope, '');
+    try {
+        $response = arca_soap(ARCA_WSAA_URL[$environment], $envelope, '');
+    } catch (ArcaException $e) {
+        if (str_contains($e->getMessage(), 'no tiene autorizado el servicio')) {
+            $names = ['wsfe' => 'de facturación electrónica (wsfe)', 'wscdc' => 'de constatación de comprobantes (wscdc)'];
+            throw new ArcaException('El certificado no tiene autorizado el servicio ' . ($names[$service] ?? $service)
+                . ' en ' . ARCA_ENVIRONMENT_NAMES[$environment] . '. Hay que asociarlo desde el Administrador de'
+                . ' Relaciones de ARCA (en homologación, desde WSASS).');
+        }
+        throw $e;
+    }
     $return = $response->getElementsByTagName('loginCmsReturn')->item(0);
     if ($return === null) {
         throw new ArcaException('ARCA no devolvió el ticket de acceso');
@@ -476,7 +505,7 @@ function arca_fault_message(string $code, string $message): string
         'cms.cert.untrusted' => 'ARCA no reconoce el certificado en este ambiente: verificá que sea el emitido '
             . 'para homologación o para producción, según corresponda.',
         'cms.cert.expired' => 'ARCA informa que el certificado está vencido.',
-        'notAuthorized' => 'El certificado no tiene autorizado el servicio de facturación electrónica (wsfe). '
+        'notAuthorized' => 'El certificado no tiene autorizado el servicio pedido. '
             . 'Hay que asociarlo desde el Administrador de Relaciones de ARCA.',
         'generationTime' => 'ARCA rechazó el pedido por la hora del servidor. Volvé a intentar en unos minutos.',
     ];
@@ -516,6 +545,11 @@ function arca_wsfe_assert(DOMDocument $doc): void
     foreach ($errors as $error) {
         $code = trim((string) $error->getElementsByTagNameNS(ARCA_WSFE_NS, 'Code')->item(0)?->textContent);
         $msg = trim((string) $error->getElementsByTagNameNS(ARCA_WSFE_NS, 'Msg')->item(0)?->textContent);
+        if ($code === '600' && str_contains($msg, 'lista de relaciones')) {
+            throw new ArcaException('ARCA no encuentra la relación entre el certificado y el CUIT del emisor: el titular'
+                . ' del certificado tiene que tener delegado el servicio de facturación electrónica de la empresa'
+                . ' (Administrador de Relaciones de ARCA). Detalle: ' . $msg);
+        }
         $messages[] = ($code !== '' ? '[' . $code . '] ' : '') . $msg;
     }
     throw new ArcaException('ARCA: ' . implode(' · ', $messages));
@@ -537,14 +571,14 @@ function arca_fe_dummy(string $environment): array
     ];
 }
 
-/** Bloque de autenticación de WSFEv1. */
+/** Bloque de autenticación de WSFEv1 (Auth.Cuit es el CUIT representado: el emisor). */
 function arca_wsfe_auth(array $ticket): string
 {
     $x = static fn (string $v): string => htmlspecialchars($v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
 
     return '<ar:Auth><ar:Token>' . $x($ticket['token']) . '</ar:Token>'
         . '<ar:Sign>' . $x($ticket['sign']) . '</ar:Sign>'
-        . '<ar:Cuit>' . $x($ticket['cuit']) . '</ar:Cuit></ar:Auth>';
+        . '<ar:Cuit>' . $x($ticket['cuit_representado'] ?? $ticket['cuit']) . '</ar:Cuit></ar:Auth>';
 }
 
 /** Último número autorizado por ARCA para un punto de venta y tipo de comprobante. */
@@ -559,6 +593,39 @@ function arca_last_authorized(PDO $pdo, array $config, string $environment, int 
     arca_wsfe_assert($doc);
 
     return (int) arca_wsfe_value($doc, 'CbteNro');
+}
+
+/**
+ * Puntos de venta habilitados en ARCA para web services (FEParamGetPtosVenta).
+ *
+ * @return array<int, array{numero: int, tipo: string, bloqueado: bool, baja: string}>
+ */
+function arca_points_of_sale(PDO $pdo, array $config, string $environment): array
+{
+    $doc = arca_wsfe($environment, 'FEParamGetPtosVenta', arca_wsfe_auth(arca_ticket($pdo, $config, $environment)));
+    $out = [];
+    foreach ($doc->getElementsByTagNameNS(ARCA_WSFE_NS, 'PtoVenta') as $node) {
+        $get = static fn (string $n): string => trim((string) $node->getElementsByTagNameNS(ARCA_WSFE_NS, $n)->item(0)?->textContent);
+        $baja = $get('FchBaja');
+        $out[] = [
+            'numero' => (int) $get('Nro'),
+            'tipo' => $get('EmisionTipo'),
+            'bloqueado' => $get('Bloqueado') === 'S',
+            'baja' => $baja === 'NULL' ? '' : $baja,
+        ];
+    }
+    if (!$out) {
+        // Sin puntos de venta ARCA responde el error 602; cualquier otro error se informa.
+        $codes = [];
+        foreach ($doc->getElementsByTagNameNS(ARCA_WSFE_NS, 'Err') as $err) {
+            $codes[] = trim((string) $err->getElementsByTagNameNS(ARCA_WSFE_NS, 'Code')->item(0)?->textContent);
+        }
+        if (array_diff($codes, ['602'])) {
+            arca_wsfe_assert($doc);
+        }
+    }
+
+    return $out;
 }
 
 /** Importe con dos decimales y punto, como lo espera WSFEv1 (a partir de centavos). */
@@ -719,7 +786,7 @@ function arca_constatar_request(array $ticket, string $cuitEmisor, int $pointOfS
         . '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsf="' . ARCA_WSCDC_NS . '">'
         . '<soap:Body><wsf:ComprobanteConstatar>'
         . '<wsf:Auth><wsf:Token>' . $x($ticket['token']) . '</wsf:Token><wsf:Sign>' . $x($ticket['sign']) . '</wsf:Sign>'
-        . '<wsf:Cuit>' . $x($ticket['cuit']) . '</wsf:Cuit></wsf:Auth>'
+        . '<wsf:Cuit>' . $x($ticket['cuit_representado'] ?? $ticket['cuit']) . '</wsf:Cuit></wsf:Auth>'
         . '<wsf:CmpReq><wsf:CbteModo>CAI</wsf:CbteModo><wsf:CuitEmisor>' . $x($cuitEmisor) . '</wsf:CuitEmisor>'
         . '<wsf:PtoVta>' . $pointOfSale . '</wsf:PtoVta><wsf:CbteTipo>' . $cbteTipo . '</wsf:CbteTipo>'
         . '<wsf:CbteNro>' . $number . '</wsf:CbteNro><wsf:CbteFch>' . $x($dateYmd) . '</wsf:CbteFch>'

@@ -89,16 +89,16 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
             api_error(422, $e->getMessage());
         }
 
-        $expectedCuit = preg_replace('/\D/', '', (string) ($body['cuit'] ?? ''))
-            ?: preg_replace('/\D/', '', (string) (settings_get($pdo, 'emisor')['cuit'] ?? ''));
-        if ($expectedCuit !== '' && $expectedCuit !== $data['cuit']) {
-            api_error(422, 'El certificado pertenece al CUIT ' . $data['cuit'] . ', no al ' . $expectedCuit);
-        }
+        // El certificado puede ser del emisor o de un representante con el servicio delegado
+        // (Administrador de Relaciones de ARCA): la relación la verifica «Probar conexión».
+        $emisorCuit = preg_replace('/\D/', '', (string) (settings_get($pdo, 'emisor')['cuit'] ?? ''));
 
         arca_save_credentials($pdo, $config, $environment, $data, $auth['nombre']);
         audit_event($pdo, 'Certificado de ARCA cargado (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
             'categoria' => 'arca',
-            'detalle' => 'CUIT ' . $data['cuit'] . ' · vence ' . date('d/m/Y', (int) strtotime($data['valido_hasta']))
+            'detalle' => 'CUIT ' . $data['cuit']
+                . ($emisorCuit !== '' && $emisorCuit !== $data['cuit'] ? ' (representante del emisor ' . $emisorCuit . ')' : '')
+                . ' · vence ' . date('d/m/Y', (int) strtotime($data['valido_hasta']))
                 . ' · huella ' . substr($data['huella'], 0, 16) . '…',
         ]);
         api_respond(201, ['ok' => true, 'ambiente' => $environment, 'credencial' => arca_credentials_status($pdo, $environment)]);
@@ -116,6 +116,7 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
         try {
             $servers = arca_fe_dummy($environment);
             $ticket = arca_ticket($pdo, $config, $environment);
+            $points = arca_points_of_sale($pdo, $config, $environment);
         } catch (ArcaException $e) {
             audit_event($pdo, 'Conexión con ARCA fallida (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
                 'categoria' => 'arca', 'nivel' => 'error', 'detalle' => $e->getMessage(), 'estado' => 502,
@@ -123,14 +124,35 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
             api_error(502, $e->getMessage());
         }
 
+        // El punto de venta configurado tiene que estar habilitado en ARCA para web services.
+        $configured = (int) (settings_get($pdo, 'emisor')['ptoVenta'] ?? 0);
+        $numbers = [];
+        foreach ($points as $p) {
+            if (!$p['bloqueado'] && $p['baja'] === '') {
+                $numbers[] = $p['numero'];
+            }
+        }
+        $warning = null;
+        if (!$numbers) {
+            $warning = 'ARCA no informa puntos de venta habilitados para web services en este CUIT: hay que darlo de alta'
+                . ' en «Administración de puntos de venta y domicilios» con el sistema «Factura Electrónica - Web Services».';
+        } elseif ($configured > 0 && !in_array($configured, $numbers, true)) {
+            $warning = 'El punto de venta ' . $configured . ' no está habilitado en ARCA para web services. Habilitados: '
+                . implode(', ', $numbers) . '.';
+        }
         audit_event($pdo, 'Conexión con ARCA verificada (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
-            'categoria' => 'arca', 'detalle' => 'CUIT ' . $ticket['cuit'],
+            'categoria' => 'arca',
+            'detalle' => 'emisor ' . $ticket['cuit_representado'] . ' · certificado ' . $ticket['cuit']
+                . ' · puntos de venta ' . (implode(', ', $numbers) ?: 'ninguno'),
         ]);
         api_respond(200, [
             'ok' => true,
             'ambiente' => $environment,
             'servidores' => $servers,
-            'cuit' => $ticket['cuit'],
+            'cuit' => $ticket['cuit_representado'],
+            'cuit_certificado' => $ticket['cuit'],
+            'puntos_venta' => $points,
+            'aviso' => $warning,
             'ticket_vence' => $ticket['expira'],
         ]);
     }

@@ -227,15 +227,29 @@ function problemaCuit(v) {
 /* ---- Remitos: contenido obligatorio (RG 1415, Anexo V) ----
    Mismas reglas que api/lib/normativa.php: el servidor no autoriza un remito incompleto. */
 
-/** Condición del destinatario frente al IVA → leyenda que se imprime en el remito. */
-const LEYENDAS_IVA = {
-  'Responsable Inscripto': 'IVA RESPONSABLE INSCRIPTO',
-  Exento: 'IVA EXENTO',
-  'No Responsable': 'NO RESPONSABLE IVA',
-  Monotributo: 'RESPONSABLE MONOTRIBUTO',
-  'Consumidor Final': 'A CONSUMIDOR FINAL',
-  'Sujeto no categorizado': 'SUJETO NO CATEGORIZADO',
+/** Condición frente al IVA del receptor: tabla oficial de ARCA (RG 5616), con la clase de
+   comprobante que admite y la leyenda que se imprime. Misma tabla que api/lib/normativa.php. */
+const CONDICIONES_IVA = {
+  'Responsable Inscripto': { codigo: 1, clase: 'A', leyenda: 'IVA RESPONSABLE INSCRIPTO' },
+  Monotributo: { codigo: 6, clase: 'A', leyenda: 'RESPONSABLE MONOTRIBUTO' },
+  'Monotributista Social': { codigo: 13, clase: 'A', leyenda: 'MONOTRIBUTISTA SOCIAL' },
+  'Monotributo Trabajador Independiente Promovido': {
+    codigo: 16,
+    clase: 'A',
+    leyenda: 'MONOTRIBUTO TRABAJADOR INDEPENDIENTE PROMOVIDO',
+  },
+  Exento: { codigo: 4, clase: 'B', leyenda: 'IVA SUJETO EXENTO' },
+  'Consumidor Final': { codigo: 5, clase: 'B', leyenda: 'A CONSUMIDOR FINAL' },
+  'Sujeto no categorizado': { codigo: 7, clase: 'B', leyenda: 'SUJETO NO CATEGORIZADO' },
+  'Proveedor del Exterior': { codigo: 8, clase: 'B', leyenda: 'PROVEEDOR DEL EXTERIOR' },
+  'Cliente del Exterior': { codigo: 9, clase: 'B', leyenda: 'CLIENTE DEL EXTERIOR' },
+  'IVA Liberado - Ley 19.640': { codigo: 10, clase: 'B', leyenda: 'IVA LIBERADO - LEY N° 19.640' },
+  'IVA No Alcanzado': { codigo: 15, clase: 'B', leyenda: 'IVA NO ALCANZADO' },
 };
+/** Leyenda que se imprime en el remito (RG 1415, Anexo V, apartado II). */
+const LEYENDAS_IVA = Object.fromEntries(Object.entries(CONDICIONES_IVA).map(([k, v]) => [k, v.leyenda]));
+/** Condiciones de receptores sin CUIT argentino. */
+const IVA_SIN_CUIT = ['Consumidor Final', 'Cliente del Exterior', 'Proveedor del Exterior'];
 
 /** Lo que le falta a un remito para poder autorizarse (vacío si está completo). */
 function faltantesRemito(d) {
@@ -246,7 +260,7 @@ function faltantesRemito(d) {
   if (!/^\d{2}\/\d{2}\/\d{4}$/.test(d.fecha || '')) faltan.push('la fecha de emisión');
   if (vacio(c.razonSocial) && vacio(c.senores)) faltan.push('el nombre o la razón social del destinatario');
   if (!LEYENDAS_IVA[c.condIVA]) faltan.push('la condición del destinatario frente al IVA');
-  else if (c.condIVA !== 'Consumidor Final') {
+  else if (!IVA_SIN_CUIT.includes(c.condIVA)) {
     if (!cuitValido(c.cuit)) faltan.push('el CUIT del destinatario');
     if (vacio(c.domicilio)) faltan.push('el domicilio comercial del destinatario');
   }
@@ -276,6 +290,7 @@ if (typeof module !== 'undefined' && module.exports) {
     formatoCuitODni,
     problemaCuit,
     LEYENDAS_IVA,
+    CONDICIONES_IVA,
     faltantesRemito,
   };
 }

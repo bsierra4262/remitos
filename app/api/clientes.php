@@ -38,7 +38,6 @@ const CLIENT_IMPORT_MAX = 2000;
 const CLIENT_LIST_MAX = 5000;
 
 /** Condiciones frente al IVA admitidas. */
-const CLIENT_COND_IVA = ['', 'Responsable Inscripto', 'Monotributo', 'Exento', 'Consumidor Final'];
 
 /** CUIT normalizado (99-99999999-9), DNI (solo dígitos) o vacío; null si no es válido. */
 function client_cuit(string $value): ?string
@@ -68,7 +67,7 @@ function client_from_input(array $input): array
     $cuit = client_cuit($client['cuit']);
     $client['cuit'] = $cuit ?? '';
     $client['cuit_invalido'] = $cuit === null ? $client['cuit'] ?: api_str($input['cuit'] ?? '', 13) : '';
-    if (!in_array($client['condIVA'], CLIENT_COND_IVA, true)) {
+    if (!isset(IVA_CONDICIONES[$client['condIVA']])) {
         $client['condIVA'] = '';
     }
     $client['cp'] = strtoupper($client['cp']);

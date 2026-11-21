@@ -87,3 +87,19 @@ test('contenido obligatorio del remito (RG 1415, Anexo V)', () => {
   assert.equal(c.faltantesRemito(tercero).length, 3);
   assert.equal(c.LEYENDAS_IVA['Consumidor Final'], 'A CONSUMIDOR FINAL');
 });
+
+test('condiciones frente al IVA: misma tabla oficial que el servidor (RG 5616)', () => {
+  const codigos = clase =>
+    Object.values(c.CONDICIONES_IVA)
+      .filter(x => x.clase === clase)
+      .map(x => x.codigo)
+      .sort((a, b) => a - b);
+  assert.deepEqual(codigos('A'), [1, 6, 13, 16]);
+  assert.deepEqual(codigos('B'), [4, 5, 7, 8, 9, 10, 15]);
+  const php = require('fs').readFileSync(require('path').join(__dirname, '../../app/api/lib/normativa.php'), 'utf8');
+  for (const [nombre, v] of Object.entries(c.CONDICIONES_IVA))
+    assert.ok(
+      php.includes(`'${nombre}' => ['codigo' => ${v.codigo}, 'leyenda' => '${v.leyenda}', 'clase' => '${v.clase}']`),
+      nombre
+    );
+});

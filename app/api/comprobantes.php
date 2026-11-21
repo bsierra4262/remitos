@@ -5,6 +5,13 @@
  *
  * Facturas, recibos y notas de crédito y débito compartidos, y su emisión electrónica.
  *
+ * Qué emite Intellihelp (Responsable Inscripto que factura sus operaciones):
+ *  - Facturas y notas de crédito y débito A o B, con CAE (RG 1415 y RG 4291).
+ *  - Recibos de cobranza (RG 1415, art. 10): respaldan el pago de una factura ya emitida,
+ *    no valen como factura y no llevan CAE; son siempre letra X. Los recibos A/B con CAE
+ *    (tipos 4 y 9) los usa solo quien eligió documentar sus servicios con recibos en lugar
+ *    de facturas (art. 8): emitirlos además de la factura informaría dos veces la venta.
+ *
  *   GET    comprobantes.php?pagina=1&por_pagina=50&buscar=… (leer)  Del más reciente al más antiguo.
  *   GET    comprobantes.php?id=…                      (leer)   Un comprobante.
  *   POST   comprobantes.php {id?, id_local?, tipo, letra, …}  (crear) Alta o edición de un borrador.
@@ -36,12 +43,23 @@ api_headers('GET, POST, DELETE, OPTIONS');
 $pdo = api_db($config);
 
 const COMP_TYPES = ['factura', 'recibo', 'nota'];
-const COMP_LETTERS = ['A', 'B', 'C', 'X'];
+/** Letras admitidas: Intellihelp es Responsable Inscripto (no emite C); X es interno, sin valor fiscal. */
+const COMP_LETTERS = ['A', 'B', 'X'];
 const COMP_MAX_ITEMS = 60;
 const COMP_LOCK = 'remitos_comprobantes';
 
-/** Condición frente al IVA del receptor → código de WSFEv1 (RG 5616/2024). */
-const COMP_COND_IVA = ['Responsable Inscripto' => 1, 'Exento' => 4, 'Consumidor Final' => 5, 'Monotributo' => 6];
+/**
+ * Letras que emite Intellihelp: es Responsable Inscripto en IVA (su punto de venta en ARCA
+ * es «CAE - RI IVA»), así que factura A o B; la C es de monotributistas y exentos.
+ * X es un comprobante interno sin valor fiscal.
+ */
+const COMP_LETRAS_EMISOR = ['A', 'B', 'X'];
+
+/**
+ * Desde este importe (en centavos) una factura B a consumidor final tiene que identificar
+ * al comprador con su documento: ARCA rechaza el comprobante (observación 10015) si no.
+ */
+const COMP_IDENTIFICAR_CF_DESDE = 1000000000;
 
 /** Concepto de WSFEv1: 1 productos, 2 servicios, 3 productos y servicios. */
 const COMP_CONCEPTOS = [1, 2, 3];
@@ -67,6 +85,13 @@ function comp_from_input(array $body): array
     };
     $type = in_array($body['tipo'] ?? '', COMP_TYPES, true) ? $body['tipo'] : 'factura';
     $letter = strtoupper((string) ($body['letra'] ?? 'X'));
+    if ($letter === 'C') {
+        api_error(422, 'Intellihelp es Responsable Inscripto: emite comprobantes A o B (la C es de monotributistas y exentos)');
+    }
+    if ($type === 'recibo' && in_array($letter, ['A', 'B'], true)) {
+        api_error(422, 'El recibo de cobranza respalda el pago de una factura ya emitida: no vale como factura ni lleva'
+            . ' CAE, y es letra X (RG 1415, art. 10)');
+    }
     $client = is_array($body['cliente'] ?? null) ? $body['cliente'] : [];
     $assoc = is_array($body['compAsoc'] ?? null) ? $body['compAsoc'] : [];
 
@@ -103,7 +128,7 @@ function comp_from_input(array $body): array
         'cliente' => [
             'razonSocial' => $str($client['razonSocial'] ?? '', 160),
             'cuit' => api_require_cuit($str($client['cuit'] ?? '', 13), 'CUIT del cliente', true),
-            'condIVA' => isset(COMP_COND_IVA[$condIva]) ? $condIva : 'Consumidor Final',
+            'condIVA' => isset(IVA_CONDICIONES[$condIva]) ? $condIva : 'Consumidor Final',
             'domicilio' => $str($client['domicilio'] ?? '', 160),
             'localidad' => $str($client['localidad'] ?? '', 80),
             'cp' => $str($client['cp'] ?? '', 10),
@@ -177,9 +202,9 @@ function comp_find(PDO $pdo, string $id): ?array
 }
 
 /** ¿Este comprobante se numera y autoriza en ARCA según los ajustes actuales? */
-function comp_is_electronic(array $emisor, string $letter): bool
+function comp_is_electronic(array $emisor, string $letter, string $type = 'factura'): bool
 {
-    return !empty($emisor['emision']) && in_array($letter, ['A', 'B', 'C'], true);
+    return !empty($emisor['emision']) && $type !== 'recibo' && in_array($letter, ['A', 'B'], true);
 }
 
 /** aaaammdd → dd/mm/aaaa. */
@@ -234,8 +259,17 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
     if ($doc['letra'] === 'A' && $docTipo !== 80) {
         api_error(422, 'Un comprobante A requiere el CUIT del cliente');
     }
-    if ($doc['letra'] === 'A' && $doc['cliente']['condIVA'] === 'Consumidor Final') {
-        api_error(422, 'Un comprobante A no se emite a un consumidor final: revisá la letra o la condición frente al IVA');
+    if (!in_array($doc['letra'], COMP_LETRAS_EMISOR, true)) {
+        api_error(422, 'Intellihelp es Responsable Inscripto: emite comprobantes A o B (la C es de monotributistas y exentos)');
+    }
+    $cond = IVA_CONDICIONES[$doc['cliente']['condIVA']];
+    if ($cond['clase'] !== $doc['letra']) {
+        api_error(422, 'A un cliente «' . $doc['cliente']['condIVA'] . '» corresponde un comprobante ' . $cond['clase']
+            . ', no ' . $doc['letra'] . ' (tabla de condiciones frente al IVA de ARCA, RG 5616)');
+    }
+    if ($doc['letra'] === 'B' && $docTipo === 99 && $totals['total'] >= COMP_IDENTIFICAR_CF_DESDE) {
+        api_error(422, 'Una factura B desde $ ' . number_format(COMP_IDENTIFICAR_CF_DESDE / 100, 0, ',', '.')
+            . ' tiene que identificar al comprador: cargá su CUIT o DNI');
     }
 
     $concept = (int) $doc['conceptoTipo'];
@@ -250,7 +284,7 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
         'iva' => $totals['iva'],
         'exento' => 0,
         'no_gravado' => 0,
-        'cond_iva_receptor' => COMP_COND_IVA[$doc['cliente']['condIVA']],
+        'cond_iva_receptor' => $cond['codigo'],
         'alicuotas' => [],
         'asociados' => [],
     ];
@@ -355,7 +389,7 @@ if ($method === 'POST') {
             api_respond(200, ['ok' => true, 'ya_autorizado' => true, 'comprobante' => comp_public($row)]);
         }
         $emisor = settings_get($pdo, 'emisor');
-        if (!comp_is_electronic($emisor, (string) $row['letra'])) {
+        if (!comp_is_electronic($emisor, (string) $row['letra'], (string) $row['tipo'])) {
             api_error(409, 'La emisión electrónica no está activa para este comprobante (Configuración → Conexión con ARCA)');
         }
         $environment = (string) $emisor['ambiente'];
@@ -368,6 +402,10 @@ if ($method === 'POST') {
         $pointOfSale = (int) $doc['ptoVenta'];
         $cbteTipo = arca_cbte_tipo($doc['tipo'], $doc['subtipo'], $doc['letra']);
         $today = date('d/m/Y');
+        // Se valida contra las reglas de ARCA antes de llamarla: un comprobante que ARCA
+        // rechazaría (letra, condición frente al IVA, identificación, asociado) no consume
+        // ningún pedido ni reserva número.
+        comp_cae_detail($pdo, $doc, $emisor, 1, comp_date_to_arca($today));
 
         $lock = 'remitos_cae_' . $environment . '_' . $pointOfSale . '_' . $cbteTipo;
         api_lock($pdo, $lock, 60);
@@ -489,7 +527,7 @@ if ($method === 'POST') {
     $doc['importes'] = ['neto' => $totals['neto'], 'iva' => $totals['iva'], 'total' => $totals['total']];
     $now = (int) round(microtime(true) * 1000);
     $emisor = settings_get($pdo, 'emisor');
-    $electronic = comp_is_electronic($emisor, $doc['letra']);
+    $electronic = comp_is_electronic($emisor, $doc['letra'], $doc['tipo']);
     if ($electronic) {
         $doc['ptoVenta'] = comp_pv($emisor['ptoVenta']);
         $doc['numero'] = '';

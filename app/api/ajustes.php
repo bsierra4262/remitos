@@ -64,9 +64,9 @@ if ($method === 'POST') {
                 $missing[] = 'certificado de ' . ARCA_ENVIRONMENT_NAMES[$environment];
             } elseif ($credential['vencido']) {
                 $missing[] = 'certificado vigente (el cargado está vencido)';
-            } elseif ($cuit !== '' && $credential['cuit'] !== $cuit) {
-                $missing[] = 'certificado del CUIT ' . $cuit . ' (el cargado es del ' . $credential['cuit'] . ')';
             }
+            // El certificado puede ser del emisor o de un representante con el servicio
+            // delegado en ARCA: la relación la confirma «Probar conexión» (y ARCA en cada pedido).
             if ($missing) {
                 api_error(422, 'Para activar la emisión electrónica falta: ' . implode(', ', $missing), ['faltan' => $missing]);
             }

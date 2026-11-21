@@ -61,10 +61,23 @@ En el modo «sobre pre-impreso», el número, el C.A.I. y los datos fijos los tr
 | IVA contenido en las facturas B a consumidores | Ley 27.743 (Régimen de Transparencia Fiscal al Consumidor) | Leyenda con el IVA contenido |
 | Comprobante asociado en las notas | RG 4291 | `CbtesAsoc` con tipo, punto de venta y número |
 | Corrección de un comprobante autorizado | RG 1415 | No se modifica: se emite una nota de crédito |
+| Letras que emite Intellihelp | RG 1415 (Responsable Inscripto) | Solo A y B; la C (monotributistas y exentos) se rechaza al guardar. El punto de venta de ARCA es «CAE - RI IVA» |
+| Clase según la condición del receptor | RG 5616 · `FEParamGetCondicionIvaReceptor` | A: inscripto (1), monotributo (6), monotributista social (13), monotributo trabajador independiente promovido (16). B: exento (4), consumidor final (5), no categorizado (7), proveedor y cliente del exterior (8 y 9), IVA liberado Ley 19.640 (10) y no alcanzado (15). Se valida antes de pedir el CAE (ARCA rechaza con 10243) y la interfaz ajusta la letra sola |
+| Identificación del consumidor final | Validación 10015 de WSFEv1 | Una factura B desde $ 10.000.000 exige CUIT o DNI del comprador |
+| Notas sin comprobante asociado | Validación 10197 de WSFEv1 | Se exige el comprobante asociado (`CbtesAsoc`) antes de llamar a ARCA |
+| Recibos | RG 1415, arts. 8 y 10 | Intellihelp factura sus operaciones, así que su recibo es **de cobranza** (art. 10): respalda el pago de una factura ya emitida, no vale como factura, no lleva CAE y es letra X con la leyenda «no válido como factura». Los recibos A/B con CAE (tipos 4 y 9) son para quien eligió documentar sus servicios con recibos *en lugar de* facturas (art. 8): emitir ambos informaría dos veces la venta |
+| CUIT en los web services | Manual de WSFEv1 (`Auth.Cuit`: CUIT representado) | Los pedidos se hacen en nombre del emisor configurado. El certificado puede ser del emisor o de un representante con el servicio delegado en el Administrador de Relaciones; «Probar conexión» lo verifica y lista los puntos de venta habilitados (`FEParamGetPtosVenta`) |
+
+### Pendiente de definir: Factura de Crédito Electrónica MiPyME (Ley 27.440)
+
+Si Intellihelp es MiPyME y le factura a una empresa del listado de «grandes empresas» de ARCA por un importe igual o mayor al mínimo vigente ($ 5.549.862 desde el 14/04/2026), tiene que emitir Factura de Crédito Electrónica (tipos 201/206, con CBU y plazo de aceptación de 21 días). Entre MiPyMEs es optativa. El sistema todavía no la emite: hace falta confirmar con el contador si aplica a los clientes de Intellihelp (los organismos públicos cargados hoy no son «grandes empresas» del listado) y asociar el servicio `wsfecred` al certificado.
 
 ## Fuentes
 
 - [RG 1415/2003, texto actualizado](https://www.argentina.gob.ar/normativa/nacional/resoluci%C3%B3n-1415-2003-81316/actualizacion) y [Anexo V (biblioteca de ARCA)](https://biblioteca.afip.gob.ar/pdfp/ANEXO_V_RG1415_V4290.pdf)
 - [RG ARCA 5678/2025](https://contadoresenred.com/resolucion-general-5678-2025/) ([PDF, Consejo de Salta](https://consejosalta.org.ar/wp-content/uploads/ARCA-5678.pdf))
+- [RG 4291/2018 (biblioteca de ARCA)](http://biblioteca.afip.gob.ar/dcp/REAG01004291_2018_08_02)
+- [Factura de Crédito Electrónica MiPyME (argentina.gob.ar)](https://www.argentina.gob.ar/servicio/emitir-una-factura-de-credito-electronica-mipyme)
+- Tablas oficiales de WSFEv1 consultadas en homologación el 21/11/2026: `FEParamGetTiposCbte`, `FEParamGetCondicionIvaReceptor`, `FEParamGetTiposIva`, `FEParamGetTiposDoc`, `FEParamGetPtosVenta`
 - [Manual del desarrollador de WSCDC v4 (ARCA)](https://www.afip.gob.ar/ws/WSCDCV1/WSCDC-manual-desarrollador-v4.pdf)
 - [Autorización de Impresión de Comprobantes: instructivo](https://www.cpcelapampa.org.ar/media/Varios/Instructivos/AFIP/Autorizacion%20Impresion%20Comprobantes.pdf)

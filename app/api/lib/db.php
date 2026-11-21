@@ -51,6 +51,10 @@ function api_db(array $config): PDO
     }
 
     $pdo->exec("SET time_zone = '" . API_DB_TIMEZONE . "'");
+    // El hosting corta las conexiones inactivas a los 20 segundos. Una emisión espera a ARCA
+    // (WSAA, último número y CAE) con el bloqueo tomado: sin este margen la conexión se
+    // cerraría en medio y el CAE autorizado no se podría guardar.
+    $pdo->exec('SET SESSION wait_timeout = 300');
     if (PHP_SAPI !== 'cli' && api_schema_version($pdo) < API_SCHEMA_VERSION) {
         error_log('[remitos] La base está en la versión ' . api_schema_version($pdo) . ' y el código espera la ' . API_SCHEMA_VERSION);
         api_error(503, 'El sistema se está actualizando. Volvé a intentar en unos minutos.');
