@@ -163,6 +163,14 @@ openssl req -new -key intellihelp.key \
   <p>Repetir la autorización con el servicio <code>wscdc – Constatación de Comprobantes</code>. Es el
   que usa el sistema para <b>verificar con ARCA el C.A.I. de los remitos</b> al cargar cada talonario
   (paso 8).</p>
+  <p>Si la empresa es MiPyME, repetirla también con <code>wsfecred – Factura de Crédito Electrónica
+  MiPyME</code>: el sistema lo usa para saber si un cliente está obligado a recibir Factura de Crédito.</p>
+  <p>Los tres servicios se autorizan sobre el <b>mismo certificado</b>: agregar uno después no exige
+  un certificado nuevo ni volver a cargarlo en el sistema. «Probar conexión» (paso 5) indica en una
+  ventana cuál falta.</p>
+  <p>El certificado puede ser de la empresa o de una persona que la representa (por ejemplo, quien
+  administra los sistemas), siempre que la empresa le haya delegado los servicios. El sistema siempre
+  opera en nombre del CUIT de la empresa.</p>
 
   <div class="paso-tit"><span class="n">5</span><h2>Cargar las credenciales en el sistema</h2></div>
   <p>Lo hace un usuario <b>administrador</b>, una sola vez por ambiente. El certificado y la clave
@@ -177,7 +185,8 @@ openssl req -new -key intellihelp.key \
       <tbody>
         <tr><td>Ambiente</td><td>Homologación para las pruebas; Producción para operar</td></tr>
         <tr><td>CUIT del emisor</td><td>30-71140975-7</td></tr>
-        <tr><td>Punto de venta</td><td>El que se dio de alta como <i>Web Services</i> en ARCA</td></tr>
+        <tr><td>Punto de venta</td><td>El que se dio de alta como <i>Web Services</i> en ARCA. En homologación, el que ARCA asignó (para Intellihelp, el 3). «Probar conexión» muestra los habilitados</td></tr>
+        <tr><td>Empresa MiPyME, CBU y transferencia</td><td>Solo si la empresa tiene Certificado MiPyME: el CBU donde cobra y la opción de transferencia de la Factura de Crédito (SCA, la habitual)</td></tr>
         <tr><td>Punto de venta de remitos</td><td>El de los remitos con C.A.I. (ver paso 7)</td></tr>
       </tbody>
     </table>
@@ -186,11 +195,14 @@ openssl req -new -key intellihelp.key \
     usa todo el equipo.</p></div>
   <div class="sub"><span class="n">3</span><p>En la tarjeta <b>Certificado digital</b>, presionar
     <b>Cargar certificado</b>, elegir el archivo <code>intellihelp.crt</code> y el archivo
-    <code>intellihelp.key</code> y presionar <b>Validar y guardar</b> (si pasaron más de 15 minutos desde
-    que ingresaste, el sistema pide confirmar tu identidad con Google). Si la clave privada no corresponde al certificado, está vencido o es de
-    otro CUIT, el sistema lo indica y no lo guarda.</p></div>
+    <code>intellihelp.key</code> (o, si se recibieron como texto, desplegar «…o pegá el texto» y pegar
+    cada uno completo, desde <code>-----BEGIN</code> hasta <code>-----END</code>) y presionar <b>Validar y guardar</b> (si pasaron más de 15 minutos desde
+    que ingresaste, el sistema pide confirmar tu identidad con Google). Si la clave privada no corresponde al certificado, o está vencido, el sistema
+    lo indica y no lo guarda.</p></div>
   <div class="sub"><span class="n">4</span><p>Presionar <b>Probar conexión</b>: el sistema verifica los
-    servidores de ARCA y obtiene el acceso con el certificado cargado.</p></div>
+    servidores de ARCA, obtiene el acceso con el certificado cargado, lista los puntos de venta
+    habilitados y revisa los servicios autorizados. Si falta alguno, una ventana indica cuál y cómo
+    activarlo.</p></div>
   <div class="sub"><span class="n">5</span><p>Activar el interruptor <b>Emisión electrónica</b>. Si falta
     algún dato, el sistema indica cuál y no permite activarlo.</p></div>
 
@@ -204,10 +216,15 @@ openssl req -new -key intellihelp.key \
   <ol>
     <li>Generar el certificado productivo desde <b>Administrador de Relaciones de Clave Fiscal</b>
       (Computador Fiscal → WSAA). Para producción no se usa WSASS.</li>
-    <li>Asociar a ese certificado los servicios <b>Facturación Electrónica</b> (wsfe) y
-      <b>Constatación de Comprobantes</b> (wscdc). Los C.A.I. reales solo existen en producción: la
+    <li>Asociar a ese certificado los servicios <b>Facturación Electrónica</b> (wsfe),
+      <b>Constatación de Comprobantes</b> (wscdc) y, si la empresa es MiPyME, <b>Factura de Crédito
+      Electrónica MiPyME</b> (wsfecred). Si el certificado es de un representante, la empresa le delega
+      esos servicios desde el mismo Administrador de Relaciones. Los C.A.I. reales solo existen en producción: la
       constatación de los talonarios usa siempre el certificado productivo.</li>
-    <li>Dar de alta el <b>punto de venta</b> de tipo Web Services.</li>
+    <li>Dar de alta el <b>punto de venta</b> de tipo Web Services («Administración de puntos de venta
+      y domicilios»).</li>
+    <li>Verificar que la empresa tenga presentada la <b>habilitación para emitir comprobantes clase
+      A</b>: en homologación ARCA avisa con la observación 10234 cuando falta.</li>
     <li>En Configuración → Conexión con ARCA, elegir el ambiente <b>Producción</b> y cargar el
       certificado productivo con su clave privada, igual que en el paso 5.</li>
   </ol>

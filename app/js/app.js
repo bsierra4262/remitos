@@ -2592,7 +2592,12 @@ function renderComprobanteEditor() {
         <div class="field full"><label>En concepto de</label><textarea data-cpath="concepto" rows="2">${esc(d.concepto)}</textarea></div>
       </div></div></div>`;
   }
-  html += `
+  html += rec
+    ? `
+    <div class="section"><h3>Recibo de cobranza</h3><div class="section-body">
+      <p class="hint">Respalda el pago de una factura ya emitida (RG 1415, art. 10): no vale como factura y no lleva CAE. Se numera en forma correlativa y, una vez guardado, se imprime sin la marca de borrador. Indicá en «En concepto de» qué factura cancela.</p>
+    </div></div>`
+    : `
     <div class="section"><h3>Autorización fiscal (CAE)</h3><div class="section-body">
       <p class="cal-mode-wrap">Numeración:
         <span class="cal-mode ${elec ? 'full' : 'ov'}">${elec ? 'ARCA · ' + ambienteNombre(emisor().ambiente) : 'Correlativa del sistema'}</span></p>
@@ -2605,11 +2610,12 @@ function renderComprobanteEditor() {
           ? 'Autorizado por ARCA.'
           : elec
             ? 'Con «Emitir CAE» se guarda el comprobante y ARCA le asigna número y CAE. Hasta entonces se imprime marcado <b>SIN AUTORIZAR</b>.'
-            : 'Sin CAE, el comprobante se imprime marcado <b>' +
-              (/^[AB]$/.test(d.letra) ? 'SIN AUTORIZAR' : 'BORRADOR') +
-              '</b>.'
+            : /^[AB]$/.test(d.letra)
+              ? 'Sin CAE, el comprobante se imprime marcado <b>SIN AUTORIZAR</b>.'
+              : 'Letra X: documento interno, «no válido como factura». Se imprime marcado <b>BORRADOR</b> hasta guardarlo.'
       }</p>
-    </div></div>
+    </div></div>`;
+  html += `
     <div class="section"><h3>Observaciones</h3><div class="section-body">
       <div class="field full"><textarea data-cpath="observaciones" rows="2" maxlength="600">${esc(d.observaciones)}</textarea></div>
     </div></div>`;
@@ -2856,7 +2862,7 @@ function renderComprobante() {
         <div class="row total"><span>Importe Total: $</span><span class="n">${esc(fmtMoney(tot.total))}</span></div>
         ${
           d.fce && d.tipo === 'factura'
-            ? `<div class="row transparencia"><span>CBU del emisor: ${esc(emisor().cbu || '—')} · Transferencia: ${esc(emisor().transferencia === 'ADC' ? 'Agente de Depósito Colectivo' : 'Sistema de Circulación Abierta')}</span><span class="n"></span></div>`
+            ? `<div class="row transparencia"><span>CBU del emisor: ${esc(datos.ajustes.emisor.cbu || '—')} · Transferencia: ${esc(datos.ajustes.emisor.transferencia === 'ADC' ? 'Agente de Depósito Colectivo' : 'Sistema de Circulación Abierta')}</span><span class="n"></span></div>`
             : ''
         }
         ${
@@ -2884,7 +2890,9 @@ function renderComprobante() {
         <b>Fecha de Vto. de CAE:</b> ${esc(caeVto || '—')}
       </div>
     </div>`;
-  const marca = cae || enPrueba() ? '' : /^[AB]$/.test(d.letra) ? 'SIN AUTORIZAR' : 'BORRADOR';
+  /* A y B sin CAE: «SIN AUTORIZAR». X (interno, «no válido como factura», como el recibo de
+     cobranza): «BORRADOR» solo hasta guardarlo; guardado y numerado se imprime limpio. */
+  const marca = cae || enPrueba() ? '' : /^[AB]$/.test(d.letra) ? 'SIN AUTORIZAR' : d.id && d.numero ? '' : 'BORRADOR';
   page.innerHTML = `<div class="cmp-doc">${marca ? `<div class="cmp-borrador">${marca}</div>` : ''}
     <div class="cmp-copia">${esc(copia)}</div>${head}${periodo}${receptor}${body}${foot}</div>`;
 }

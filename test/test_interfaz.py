@@ -145,6 +145,41 @@ def cae_por_comprobante():
     return _con_pagina(prueba)
 
 
+@caso("Factura de Crédito MiPyME impresa con su código, título y CBU; el recibo de cobranza guardado sale sin marca")
+def fce_y_recibo_impresos():
+    def prueba(pg, errores):
+        ir_a(pg, "factura")
+        r = pg.evaluate("""() => {
+            const real = clone(compDoc), ajustes = clone(datos.ajustes.emisor);
+            Object.assign(datos.ajustes.emisor, { mipyme: true, cbu: '0170099222000000678900', transferencia: 'SCA' });
+            Object.assign(compDoc, { letra: 'A', fce: true, estado: 'autorizado', cae: '86471092874771', caeVto: '01/12/2026',
+                                     numero: '00000012', items: [{ descripcion: 'x', cantidad: '1', precio: '9.000.000' }] });
+            renderComprobanteEditor(); renderComprobante();
+            const pagina = document.querySelector('#compPage').textContent;
+            const fce = { titulo: pagina.includes('FACTURA DE CRÉDITO ELECTRÓNICA MiPyME'), codigo: pagina.includes('COD. 201'),
+                          cbu: pagina.includes('0170099222000000678900') };
+            datos.ajustes.emisor = ajustes; compDoc = real; renderComprobanteEditor(); renderComprobante();
+            return fce;
+        }""")
+        ir_a(pg, "recibo")
+        rec = pg.evaluate("""() => {
+            const real = clone(compDoc);
+            renderComprobante();
+            const nuevo = (document.querySelector('#compPage .cmp-borrador') || {}).textContent || '';
+            Object.assign(compDoc, { id: 'r1', numero: '00000001', monto: '1.000' });
+            renderComprobante();
+            const guardado = !!document.querySelector('#compPage .cmp-borrador');
+            const leyenda = document.querySelector('#compPage').textContent.includes('NO VÁLIDO COMO FACTURA');
+            const sinCae = !document.querySelector('#compCae');
+            compDoc = real; renderComprobanteEditor(); renderComprobante();
+            return { nuevo, guardado, leyenda, sinCae };
+        }""")
+        ok = (all(r.values()) and rec["nuevo"] == "BORRADOR" and not rec["guardado"] and rec["leyenda"]
+              and rec["sinCae"] and not errores)
+        return ok, f"fce={r} recibo={rec} errores={errores}"
+    return _con_pagina(prueba)
+
+
 @caso("Los importes en formato argentino dan el total correcto en la factura")
 def importes_formato_argentino():
     def prueba(pg, _):

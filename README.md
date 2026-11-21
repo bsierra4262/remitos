@@ -78,19 +78,27 @@ Diseño tomado de los comprobantes que emite ARCA: banda de ejemplar, letra y c�
 
 <table>
   <tr>
-    <td width="50%"><b>Factura A</b><br><img src="docs/screenshots/factura.png" alt="Factura"></td>
-    <td width="50%"><b>Recibo con importe en letras</b><br><img src="docs/screenshots/recibo.png" alt="Recibo"></td>
+    <td width="50%"><b>Factura A autorizada</b><br><img src="docs/screenshots/factura.png" alt="Factura"></td>
+    <td width="50%"><b>Factura de Crédito Electrónica MiPyME</b><br><img src="docs/screenshots/factura-credito.png" alt="Factura de Crédito MiPyME"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Recibo de cobranza (no válido como factura)</b><br><img src="docs/screenshots/recibo.png" alt="Recibo"></td>
+    <td width="50%"></td>
   </tr>
 </table>
 
 ### Conexión con ARCA
 
-El certificado y la clave privada se cargan una vez por ambiente. El servidor valida que se correspondan y los guarda cifrados; la pantalla solo muestra titular, CUIT, vigencia y huella.
+El certificado y la clave privada se cargan una vez por ambiente, como archivo o pegando su texto. El servidor valida que se correspondan y los guarda cifrados; la pantalla solo muestra titular, CUIT, vigencia y huella. «Probar conexión» lista los puntos de venta habilitados y, si al certificado le falta un servicio de ARCA, una ventana indica cuál y cómo activarlo.
 
 <table>
   <tr>
     <td width="50%"><b>Datos del emisor y certificado</b><br><img src="docs/screenshots/conexion-arca.png" alt="Conexión con ARCA"></td>
-    <td width="50%"><b>Carga segura del certificado</b><br><img src="docs/screenshots/carga-certificado.png" alt="Carga del certificado"></td>
+    <td width="50%"><b>Carga del certificado (archivo o texto)</b><br><img src="docs/screenshots/carga-certificado.png" alt="Carga del certificado"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Aviso de servicio de ARCA sin activar</b><br><img src="docs/screenshots/aviso-servicio-arca.png" alt="Servicio de ARCA sin activar"></td>
+    <td width="50%"></td>
   </tr>
 </table>
 
@@ -141,10 +149,14 @@ El certificado y la clave privada se cargan una vez por ambiente. El servidor va
 - Impresión de prueba con datos ficticios, hoja con grilla en milímetros y prueba de posiciones para calibrar.
 
 ### Facturas, recibos y notas de crédito y débito
-- Letras A, B, C y X con el código oficial de cada comprobante.
-- Ítems, alícuotas de IVA de la tabla de ARCA, concepto (productos o servicios con su período), condición frente al IVA del receptor, comprobante asociado en las notas e importe en letras en el recibo.
+- Letras **A y B**, las que emite Intellihelp como Responsable Inscripto (la C, de monotributistas y exentos, se rechaza), y X para documentos internos «no válidos como factura», con el código oficial de cada comprobante.
+- **Condición frente al IVA del receptor** con la tabla oficial de ARCA (RG 5616): la letra se ajusta sola (A para inscriptos y monotributistas, B para el resto) y se valida antes de pedir el CAE.
+- Ítems, alícuotas de IVA de la tabla de ARCA, concepto (productos o servicios con su período) y comprobante asociado obligatorio en las notas.
+- **Recibo de cobranza** (RG 1415, art. 10): respalda el pago de una factura ya emitida, con importe en letras; no vale como factura ni lleva CAE.
+- **Factura de Crédito Electrónica MiPyME** (Ley 27.440): si la empresa es MiPyME, al facturar a un CUIT se consulta a ARCA si el cliente está obligado a recibirla y sale como tal, con CBU y opción de transferencia; sus notas siguen al comprobante asociado.
+- Una factura B desde $ 10.000.000 exige identificar al comprador, como valida ARCA.
 - Importes en formato argentino (`1.234,56`) con cuentas en centavos: la interfaz y el servidor calculan exactamente lo mismo y el servidor recalcula antes de emitir.
-- **Emisión electrónica**: el servidor toma el número siguiente al último autorizado y pide el **CAE** (`FECAESolicitar`); si la respuesta se pierde, el reintento la recupera de ARCA sin pedir otro número.
+- **Emisión electrónica**: el servidor toma el número siguiente al último autorizado y pide el **CAE** (`FECAESolicitar`) en nombre del CUIT de la empresa, aunque el certificado sea de un representante; si la respuesta se pierde, el reintento la recupera de ARCA sin pedir otro número.
 - **QR fiscal** (RG 4892) generado en el navegador. Un comprobante autorizado no se modifica: se corrige con una nota de crédito.
 
 ### Datos y operación
@@ -195,12 +207,14 @@ flowchart LR
 | **WSAA** | Autenticación: el servidor firma el pedido de acceso (CMS/PKCS#7) con el certificado y guarda el ticket mientras está vigente (hasta 12 horas) |
 | **WSFEv1 · FEDummy** | Verificación del estado de los servidores de ARCA |
 | **WSFEv1 · FECompUltimoAutorizado** | Último número autorizado por punto de venta y tipo: el comprobante toma el siguiente |
-| **WSFEv1 · FECAESolicitar** | Emisión: CAE y vencimiento de facturas, notas y recibos A, B y C |
+| **WSFEv1 · FECAESolicitar** | Emisión: CAE y vencimiento de facturas y notas A y B, y de la Factura de Crédito MiPyME y sus notas (con sus opcionales) |
+| **WSFEv1 · FEParamGetPtosVenta** | Puntos de venta habilitados para web services, que muestra «Probar conexión» |
+| **WSFECRED · consultarMontoObligadoRecepcion** | Si el cliente está obligado a recibir Factura de Crédito MiPyME y desde qué importe |
 | **WSFEv1 · FECompConsultar** | Recupera el CAE de un comprobante cuya respuesta se perdió, antes de pedir otro número |
 | **WSCDC · ComprobanteConstatar** | Constata cada talonario de C.A.I. (CUIT, punto de venta, tipo, rango y vigencia) al cargarlo |
 | **C.A.I.** | ARCA no ofrece web service para solicitarlo: se tramita con Clave Fiscal y se carga en el panel una vez por rango |
 
-Ambientes de **homologación** y **producción**, cada uno con su propio certificado. El instructivo paso a paso para obtener el certificado está en [`app/docs/guia-credenciales-arca.pdf`](app/docs/guia-credenciales-arca.pdf) y la referencia de la API en [`docs/api.md`](docs/api.md).
+Todos los servicios se invocan en nombre del CUIT de la empresa (`Auth.Cuit`): el certificado puede ser de la empresa o de un representante con los servicios delegados. Ambientes de **homologación** y **producción**, cada uno con su propio certificado. El instructivo paso a paso para obtener el certificado está en [`app/docs/guia-credenciales-arca.pdf`](app/docs/guia-credenciales-arca.pdf) y la referencia de la API en [`docs/api.md`](docs/api.md).
 
 ## Arquitectura
 
@@ -339,7 +353,7 @@ node --test test/unitarias/calculos.test.js   # unitarias de la interfaz
 php test/unitarias/importes.test.php          # unitarias del servidor
 ```
 
-**97 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
+**99 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 

@@ -76,9 +76,9 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_formulario.py` | Tipos de dato, fechas dd/mm/aaaa, CUIT, ajustes de fábrica, independencia entre modos |
 | `test_documentos.py` | Instructivo en PDF y remito en documento completo |
 | `test_inicio.py` | Inicio, paginado, recuperación de borradores e indicador de conexión |
-| `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, copias de seguridad, certificado, respaldo, celular |
+| `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, Factura de Crédito MiPyME y recibo de cobranza impresos, copias de seguridad, certificado (archivo o texto pegado), respaldo, celular |
 | `test_api.py` | Autenticación, permisos y ciclo de vida de las claves, auditoría |
-| `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA), validación de datos, cabeceras, archivos internos |
+| `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA y el certificado de un representante), reglas oficiales de emisión antes de pedir el CAE (letra según la condición frente al IVA, identificación del consumidor final, nota sin asociado, letra C, recibo con CAE, Factura de Crédito MiPyME), validación de datos, cabeceras, archivos internos |
 | `test_sesion.py` | Ingreso con Google de punta a punta y sus rechazos (sin usuario, otro dominio, correo sin verificar, otra aplicación, token vencido, PKCE ajeno, estado manipulado), ausencia de contraseñas y segundo factor, alta solo con correos del dominio, cookie y CSRF, otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, traspaso de datos de versiones anteriores |
 | `test_cai.py` | Talonarios, numeración correlativa, autorizaciones simultáneas, inmutabilidad del autorizado, C.A.I. vencido, talonarios usados y autorización desde la aplicación |
 | `test_normativa.py` | Contenido obligatorio del remito (Anexo V), talonario sin constatar, conformidad del remito digital por API y desde la página pública en celular, PDF digital con QR |
