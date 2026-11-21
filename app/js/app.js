@@ -1436,8 +1436,13 @@ function renderConfig() {
   $('#apiPv').value = e.ptoVenta || '';
   $('#remPvCfg').value = String(parseInt(fiscal.ptoVenta, 10) || '');
   $('#apiEnabled').checked = !!e.emision;
+  $('#apiMipyme').checked = !!e.mipyme;
+  $('#apiCbu').value = e.cbu || '';
+  $('#apiTransf').value = e.transferencia || 'SCA';
   const admin = esAdmin();
-  ['#apiAmbiente', '#apiCuit', '#apiPv', '#remPvCfg', '#apiEnabled'].forEach(id => ($(id).disabled = !admin));
+  ['#apiAmbiente', '#apiCuit', '#apiPv', '#remPvCfg', '#apiEnabled', '#apiMipyme', '#apiCbu', '#apiTransf'].forEach(
+    id => ($(id).disabled = !admin)
+  );
   ['#apiSave', '#certUpload', '#certDelete'].forEach(id => ($(id).hidden = !admin));
   updateModeUI();
   renderCertificado();
@@ -1564,12 +1569,28 @@ const ocultar = id => {
 
 /* Lee un archivo PEM elegido por el usuario. Se valida la forma acá para dar un
    aviso inmediato; la validación criptográfica la hace el servidor. */
-function leerPem(input, marca) {
+/* El certificado y la clave se pueden subir como archivo o pegar como texto (a veces se
+   reciben copiados en un mensaje o un .txt). Si hay texto pegado, se usa ese. */
+function leerPem(input, marca, texto) {
   return new Promise((resolve, reject) => {
+    const pegado = String((texto && texto.value) || '').trim();
+    const nombre = marca === 'CERTIFICATE' ? 'el certificado' : 'la clave privada';
+    if (pegado) {
+      if (pegado.length > 16384) return reject(new Error('El texto pegado es demasiado largo para ' + nombre));
+      if (!pegado.includes('-----BEGIN') || !pegado.includes(marca) || !pegado.includes('-----END'))
+        return reject(
+          new Error('El texto pegado no es ' + nombre + ' en formato PEM (tiene que empezar con «-----BEGIN»)')
+        );
+      return resolve(pegado.replace(/\r\n?/g, '\n'));
+    }
     const f = input.files && input.files[0];
     if (!f)
       return reject(
-        new Error('Elegí el archivo ' + (marca === 'CERTIFICATE' ? 'del certificado' : 'de la clave privada'))
+        new Error(
+          'Elegí el archivo ' +
+            (marca === 'CERTIFICATE' ? 'del certificado' : 'de la clave privada') +
+            ' o pegá su texto'
+        )
       );
     if (f.size > 16384) return reject(new Error('El archivo «' + f.name + '» es demasiado grande para ser un PEM'));
     const r = new FileReader();
@@ -1600,7 +1621,7 @@ function nombreArchivo(input) {
   el.classList.toggle('on', !!f);
 }
 function limpiarFormCert() {
-  ['#certFile', '#keyFile', '#keyPass'].forEach(id => {
+  ['#certFile', '#keyFile', '#keyPass', '#certText', '#keyText'].forEach(id => {
     const el = $(id);
     if (el) el.value = '';
   });
@@ -1619,8 +1640,8 @@ async function enviarCertificado(e) {
   let certificado, clave;
   try {
     [certificado, clave] = await Promise.all([
-      leerPem($('#certFile'), 'CERTIFICATE'),
-      leerPem($('#keyFile'), 'PRIVATE KEY'),
+      leerPem($('#certFile'), 'CERTIFICATE', $('#certText')),
+      leerPem($('#keyFile'), 'PRIVATE KEY', $('#keyText')),
     ]);
   } catch (err) {
     return avisoCert('warn', 'Revisá los archivos', ' ' + esc(err.message), '#certFormAlert');
@@ -1657,6 +1678,32 @@ async function enviarCertificado(e) {
     btn.textContent = 'Validar y guardar';
   }
 }
+/* Ventana con el error exacto de ARCA y qué hay que activar en el portal. */
+const PASOS_SERVICIO_ARCA = {
+  homologacion:
+    'En el portal de testing de ARCA (WSASS, con la clave fiscal de quien cargó el certificado): «Crear autorización a servicio», elegir el mismo certificado (alias) y el servicio indicado. No hace falta un certificado nuevo ni volver a cargarlo acá.',
+  produccion:
+    'En ARCA con clave fiscal de la empresa: «Administrador de Relaciones de Clave Fiscal» → «Nueva relación» → buscar el servicio indicado y asociarlo al certificado (o al representante). No hace falta un certificado nuevo ni volver a cargarlo acá.',
+};
+function avisoArca(titulo, html) {
+  const d = $('#avisoArca');
+  $('#avisoArcaTitulo').textContent = titulo;
+  $('#avisoArcaCuerpo').innerHTML = html;
+  if (typeof d.showModal === 'function' && !d.open) d.showModal();
+  else d.setAttribute('open', '');
+}
+/** Si el error es un servicio de ARCA sin autorizar, lo explica en una ventana. */
+function avisoServicioArca(mensaje, ambiente) {
+  const m = String(mensaje || '');
+  const servicio = (m.match(/\((wsfe|wscdc|wsfecred)\)/) || [])[1];
+  if (!servicio || !/no tiene autorizado|no se pudo consultar/i.test(m)) return false;
+  avisoArca(
+    'Falta activar un servicio de ARCA',
+    `<p>${esc(m)}</p><p class="pasos"><b>Cómo se activa:</b> ${esc(PASOS_SERVICIO_ARCA[ambiente || emisor().ambiente] || PASOS_SERVICIO_ARCA.produccion)}</p>`
+  );
+  return true;
+}
+
 async function probarConexionArca() {
   const btn = $('#certTest'),
     ambiente = $('#apiAmbiente').value;
@@ -1673,9 +1720,17 @@ async function probarConexionArca() {
       j.cuit_certificado && j.cuit_certificado !== j.cuit
         ? `Emisor ${esc(fmtCuit(j.cuit))}, con el certificado de su representante ${esc(fmtCuit(j.cuit_certificado))}. `
         : `Emisor ${esc(fmtCuit(j.cuit))}. `;
+    const faltan = Object.entries(j.servicios || {}).filter(([, v]) => !v.ok);
+    if (faltan.length)
+      avisoArca(
+        'Faltan servicios de ARCA para este certificado',
+        `<p>La conexión funciona, pero el certificado no tiene autorizados estos servicios en ${esc(ambienteNombre(ambiente))}:</p><ul>${faltan
+          .map(([k, v]) => `<li><b>${esc(k)}</b> — ${esc(v.uso)}</li>`)
+          .join('')}</ul><p class="pasos"><b>Cómo se activa:</b> ${esc(PASOS_SERVICIO_ARCA[ambiente])}</p>`
+      );
     avisoCert(
-      j.aviso ? 'warn' : 'ok',
-      j.aviso ? 'Conexión verificada, con un aviso' : 'Conexión con ARCA verificada',
+      j.aviso || faltan.length ? 'warn' : 'ok',
+      j.aviso || faltan.length ? 'Conexión verificada, con avisos' : 'Conexión con ARCA verificada',
       ` ${quien}Puntos de venta para web services: ${esc(pvs || 'ninguno')}.` +
         (j.aviso ? ` <b>${esc(j.aviso)}</b>` : '') +
         ` Servidores: aplicación ${esc(s.app)}, base ${esc(s.db)}, autenticación ${esc(s.auth)}. Acceso vigente hasta el ${esc(fmtFechaHora(j.ticket_vence))} a las ${esc((j.ticket_vence || '').slice(11, 16))}.`
@@ -1714,6 +1769,9 @@ async function saveApiCfg(silencioso) {
     cuit: $('#apiCuit').value,
     ptoVenta: $('#apiPv').value.trim(),
     emision: $('#apiEnabled').checked,
+    mipyme: $('#apiMipyme').checked,
+    cbu: $('#apiCbu').value.replace(/\D/g, ''),
+    transferencia: $('#apiTransf').value,
   };
   try {
     await api('ajustes.php', { method: 'POST', body: { seccion: 'emisor', valores } });
@@ -1729,6 +1787,7 @@ async function saveApiCfg(silencioso) {
     return true;
   } catch (e) {
     $('#apiEnabled').checked = emisor().emision;
+    $('#apiMipyme').checked = !!emisor().mipyme;
     const faltan = e.respuesta && e.respuesta.faltan;
     if (faltan) {
       avisoApi(
@@ -2348,6 +2407,8 @@ function emptyComprobante(tipo) {
     servDesde: '',
     servHasta: '',
     vtoPago: '',
+    fce: false,
+    fceAnulacion: false,
     compAsoc: { tipo: 'Factura', letra: 'B', pv: '00001', nro: '' },
     cae: '',
     caeVto: '',
@@ -2501,6 +2562,17 @@ function renderComprobanteEditor() {
               .map(([v, n]) => `<option value="${v}" ${+d.conceptoTipo === v ? 'selected' : ''}>${n}</option>`)
               .join('')}</select></div>
           ${
+            emisor().mipyme && /^[AB]$/.test(d.letra)
+              ? `<label class="check full"><input type="checkbox" data-cpath="fce" ${d.fce ? 'checked' : ''}> ${nota ? 'Nota de una Factura de Crédito Electrónica MiPyME' : 'Factura de Crédito Electrónica MiPyME'} <span class="note">(si el cliente está obligado a recibirla, ARCA lo indica y sale así sola)</span></label>
+              ${nota && d.fce ? `<label class="check full"><input type="checkbox" data-cpath="fceAnulacion" ${d.fceAnulacion ? 'checked' : ''}> Anula una Factura de Crédito rechazada por el cliente</label>` : ''}`
+              : ''
+          }
+          ${
+            +d.conceptoTipo === 1 && d.fce && !nota
+              ? `<div class="field"><label>Vencimiento del pago</label><input type="date" data-cpath="vtoPago" value="${escA(dmyAIso(d.vtoPago))}"></div>`
+              : ''
+          }
+          ${
             +d.conceptoTipo !== 1
               ? `<div class="field"><label>Servicio desde</label><input type="date" data-cpath="servDesde" value="${escA(dmyAIso(d.servDesde))}"></div>
           <div class="field"><label>Servicio hasta</label><input type="date" data-cpath="servHasta" value="${escA(dmyAIso(d.servHasta))}"></div>
@@ -2635,7 +2707,13 @@ function bindCompForm() {
       if (v !== el.value) el.value = v;
       el.setCustomValidity(problemaCuit(v).length && v.replace(/\D/g, '').length >= 11 ? problemaCuit(v) : '');
     }
-    setPath(compDoc, p, esFecha(el) ? isoADmy(el.value) : el.value);
+    setPath(compDoc, p, el.type === 'checkbox' ? el.checked : esFecha(el) ? isoADmy(el.value) : el.value);
+    if (p === 'fce' || p === 'fceAnulacion') {
+      touchComp();
+      renderComprobanteEditor();
+      renderComprobante();
+      return;
+    }
     if (p === 'conceptoTipo') compDoc.conceptoTipo = +el.value;
     // La condición frente al IVA define la clase (RG 5616): A para inscriptos y
     // monotributistas, B para el resto. Un comprobante fiscal se ajusta solo.
@@ -2676,11 +2754,12 @@ function renderComprobante() {
     rec = d.tipo === 'recibo';
   let title = COMP_INFO[d.tipo].title;
   if (d.tipo === 'nota') title = 'NOTA DE ' + (d.subtipo === 'debito' ? 'DÉBITO' : 'CRÉDITO');
+  if (d.fce) title = (d.tipo === 'nota' ? title : 'FACTURA DE CRÉDITO') + ' ELECTRÓNICA MiPyME (FCE)';
   const numero = d.numero || (esElectronico(d) || compAutorizado(d) ? '' : nextCompNumero(d));
   const cli = d.cliente;
   /* Diseño tomado de facturas emitidas por ARCA:
      banda "ORIGINAL" arriba · emisor izq · letra + código al centro · tipo y numeración der. */
-  const codigo = codigoComprobante(d.tipo, d.subtipo, d.letra);
+  const codigo = codigoComprobante(d.tipo, d.subtipo, d.letra, d.fce);
   const emisor = `
     <div class="cmp-emisor">
       <div class="cmp-emisor-top">
@@ -2776,6 +2855,11 @@ function renderComprobante() {
         <div class="row"><span>Importe Otros Tributos: $</span><span class="n">${esc(fmtMoney(0))}</span></div>
         <div class="row total"><span>Importe Total: $</span><span class="n">${esc(fmtMoney(tot.total))}</span></div>
         ${
+          d.fce && d.tipo === 'factura'
+            ? `<div class="row transparencia"><span>CBU del emisor: ${esc(emisor().cbu || '—')} · Transferencia: ${esc(emisor().transferencia === 'ADC' ? 'Agente de Depósito Colectivo' : 'Sistema de Circulación Abierta')}</span><span class="n"></span></div>`
+            : ''
+        }
+        ${
           d.letra === 'B'
             ? `<div class="row transparencia"><span>Régimen de Transparencia Fiscal al Consumidor (Ley 27.743) · IVA contenido: $</span><span class="n">${esc(fmtMoney(tot.iva))}</span></div>`
             : ''
@@ -2809,7 +2893,7 @@ function renderComprobante() {
    base64. Se dibuja localmente (js/lib/qrcode.js), sin servicios externos. */
 function qrFiscal(d) {
   if (typeof qrcode !== 'function') return '';
-  const tipo = codigoComprobante(d.tipo, d.subtipo, d.letra);
+  const tipo = codigoComprobante(d.tipo, d.subtipo, d.letra, d.fce);
   const doc = String(d.cliente.cuit || '').replace(/\D/g, '');
   const iso = dmyAIso(d.fecha);
   const datosQr = {
@@ -2987,8 +3071,15 @@ async function emitirComprobante() {
     renderComprobante();
     updateCrumb();
     const obs = (j.observaciones || []).length ? ' · Observaciones de ARCA: ' + j.observaciones.join(' · ') : '';
-    toast('Autorizado · Nº ' + compDoc.ptoVenta + '-' + compDoc.numero + ' · CAE ' + compDoc.cae + obs, 5200, true);
+    const aviso = j.aviso ? ' · ' + j.aviso : '';
+    toast(
+      'Autorizado · Nº ' + compDoc.ptoVenta + '-' + compDoc.numero + ' · CAE ' + compDoc.cae + obs + aviso,
+      7000,
+      true
+    );
+    if (j.aviso) avisoServicioArca(j.aviso);
   } catch (e) {
+    if (avisoServicioArca(e.message)) return;
     avisarError(e, 'ARCA no autorizó el comprobante');
   } finally {
     _emitiendo = false;
@@ -3207,6 +3298,7 @@ function wireDigital() {
   $('#digitalClose').addEventListener('click', closePanels);
   $('#digitalCancelar').addEventListener('click', closePanels);
   $('#backdrop8').addEventListener('click', closePanels);
+  $('#avisoArcaCerrar').addEventListener('click', () => $('#avisoArca').close());
   $('#digitalRenovar').addEventListener('click', renovarDigital);
   $('#digitalPdf').addEventListener('click', pdfDigital);
   $('#digitalCopiar').addEventListener('click', async () => {

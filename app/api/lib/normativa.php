@@ -38,6 +38,28 @@ const IVA_CONDICIONES = [
 /** Condiciones de receptores sin CUIT argentino: no se les exige CUIT en el remito. */
 const IVA_SIN_CUIT = ['Consumidor Final', 'Cliente del Exterior', 'Proveedor del Exterior'];
 
+/**
+ * ¿Es un CBU válido? 22 dígitos con los dos dígitos verificadores del BCRA: el del bloque
+ * de banco y sucursal (posición 8) y el de la cuenta (posición 22).
+ */
+function cbu_valid(string $cbu): bool
+{
+    if (!preg_match('/^\d{22}$/', $cbu)) {
+        return false;
+    }
+    $check = static function (string $digits, array $weights): int {
+        $sum = 0;
+        foreach (str_split($digits) as $i => $d) {
+            $sum += (int) $d * $weights[$i];
+        }
+
+        return (10 - $sum % 10) % 10;
+    };
+
+    return $check(substr($cbu, 0, 7), [7, 1, 3, 9, 7, 1, 3]) === (int) $cbu[7]
+        && $check(substr($cbu, 8, 13), [3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3]) === (int) $cbu[21];
+}
+
 /** Tipos de transporte: propio (no se informa transportista) o por terceros (Anexo V, apartado IV). */
 const REMITO_TRANSPORTES = ['', 'propio', 'tercero'];
 

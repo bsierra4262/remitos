@@ -7,6 +7,11 @@
  *
  * Qué emite Intellihelp (Responsable Inscripto que factura sus operaciones):
  *  - Facturas y notas de crédito y débito A o B, con CAE (RG 1415 y RG 4291).
+ *  - Factura de Crédito Electrónica MiPyME y sus notas (Ley 27.440), si la empresa es
+ *    MiPyME: al emitir una factura a un CUIT se consulta a ARCA (wsfecred) si el cliente
+ *    está obligado a recibirla y desde qué importe; si lo está, sale como Factura de
+ *    Crédito (201/206) con el CBU y la opción de transferencia. Las notas siguen al
+ *    comprobante que ajustan.
  *  - Recibos de cobranza (RG 1415, art. 10): respaldan el pago de una factura ya emitida,
  *    no valen como factura y no llevan CAE; son siempre letra X. Los recibos A/B con CAE
  *    (tipos 4 y 9) los usa solo quien eligió documentar sus servicios con recibos en lugar
@@ -150,6 +155,8 @@ function comp_from_input(array $body): array
             'nro' => preg_replace('/\D/', '', $str($assoc['nro'] ?? '', 8)),
         ],
         'observaciones' => $str($body['observaciones'] ?? '', 600),
+        'fce' => in_array($type, ['factura', 'nota'], true) && in_array($letter, ['A', 'B'], true) && api_bool($body['fce'] ?? false),
+        'fceAnulacion' => api_bool($body['fceAnulacion'] ?? false),
     ];
 }
 
@@ -300,18 +307,55 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
         }
     }
 
+    $fce = !empty($doc['fce']);
+    if ($fce) {
+        $cbu = preg_replace('/\D/', '', (string) ($emisor['cbu'] ?? ''));
+        if (empty($emisor['mipyme']) || !cbu_valid($cbu)) {
+            api_error(422, 'La Factura de Crédito Electrónica MiPyME necesita que la empresa esté marcada como MiPyME y su CBU'
+                . ' (Configuración → Conexión con ARCA)');
+        }
+        if ($doc['tipo'] === 'factura') {
+            if ($doc['vtoPago'] === '' || comp_date_to_arca($doc['vtoPago']) < $date) {
+                api_error(422, 'La Factura de Crédito necesita la fecha de vencimiento del pago, igual o posterior a la emisión');
+            }
+            $detail['vto_pago'] = comp_date_to_arca($doc['vtoPago']);
+            $detail['opcionales'] = [
+                ['id' => '2101', 'valor' => $cbu],
+                ['id' => '27', 'valor' => in_array($emisor['transferencia'] ?? 'SCA', ['SCA', 'ADC'], true) ? $emisor['transferencia'] : 'SCA'],
+            ];
+        } else {
+            // Notas de la Factura de Crédito: si anulan una factura rechazada (opcional 22).
+            $detail['opcionales'] = [['id' => '22', 'valor' => $doc['fceAnulacion'] ? 'S' : 'N']];
+            if ($concept === 1) {
+                unset($detail['vto_pago']);
+            } else {
+                $detail['vto_pago'] = '';
+            }
+        }
+    }
+
     if ($doc['tipo'] === 'nota') {
         $a = $doc['compAsoc'];
         [$assocType, $assocSub] = comp_assoc_type($a['tipo']);
-        $assocTipo = arca_cbte_tipo($assocType, $assocSub, $a['letra']);
+        $assocTipo = arca_cbte_tipo($assocType, $assocSub, $a['letra'], $fce);
         if ($assocTipo === null || (int) $a['pv'] < 1 || (int) $a['nro'] < 1) {
-            api_error(422, 'Indicá el comprobante asociado a la nota (tipo, letra A/B/C, punto de venta y número)');
+            api_error(422, 'Indicá el comprobante asociado a la nota (tipo, letra A o B, punto de venta y número)');
         }
         $st = $pdo->prepare(
-            'SELECT fecha FROM comprobantes WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ? AND numero_int = ? AND estado = \'autorizado\''
+            'SELECT fecha, data FROM comprobantes WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ? AND numero_int = ? AND estado = \'autorizado\''
         );
         $st->execute([$assocType, $assocSub, $a['letra'], str_pad((string) (int) $a['pv'], 5, '0', STR_PAD_LEFT), (int) $a['nro']]);
-        $assocDate = (string) ($st->fetchColumn() ?: '');
+        $assocRow = $st->fetch() ?: null;
+        $assocDate = (string) ($assocRow['fecha'] ?? '');
+        $assocFce = !empty((json_decode((string) ($assocRow['data'] ?? ''), true) ?: [])['fce']);
+        if ($assocRow !== null && $assocFce !== $fce) {
+            api_error(422, $assocFce
+                ? 'El comprobante asociado es una Factura de Crédito MiPyME: la nota también tiene que serlo'
+                : 'La nota de Factura de Crédito MiPyME tiene que asociarse a una Factura de Crédito');
+        }
+        if ($fce && $assocRow === null) {
+            api_error(422, 'La nota de una Factura de Crédito tiene que asociarse a una Factura de Crédito autorizada en el sistema');
+        }
         $detail['asociados'][] = [
             'tipo' => $assocTipo,
             'pv' => (int) $a['pv'],
@@ -322,6 +366,42 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
     }
 
     return $detail;
+}
+
+/**
+ * Decide si el comprobante sale como Factura de Crédito Electrónica MiPyME (Ley 27.440).
+ *  - Notas: siguen al comprobante asociado (se resuelve en comp_cae_detail).
+ *  - Facturas de una empresa MiPyME a un CUIT: se consulta a ARCA si el cliente está
+ *    obligado a recibirla y desde qué importe; si corresponde, se emite como tal.
+ *  - Si la consulta no se puede hacer (por ejemplo, el certificado no tiene el servicio
+ *    wsfecred), se respeta lo elegido y se devuelve un aviso.
+ *
+ * @return array{0: array, 1: ?string} comprobante y aviso
+ */
+function comp_resolve_fce(PDO $pdo, array $config, array $doc, array $emisor, string $environment): array
+{
+    if (!empty($doc['fce']) && empty($emisor['mipyme'])) {
+        api_error(422, 'Solo una empresa MiPyME emite Factura de Crédito Electrónica (Configuración → Conexión con ARCA)');
+    }
+    $cuit = preg_replace('/\D/', '', $doc['cliente']['cuit']);
+    if ($doc['tipo'] !== 'factura' || empty($emisor['mipyme']) || !empty($doc['fce']) || strlen($cuit) !== 11) {
+        return [$doc, null];
+    }
+    $total = importe_totales($doc)['total'];
+    try {
+        $r = arca_fce_obligado($pdo, $config, $environment, $cuit, (string) api_date_iso($doc['fecha'] ?: date('d/m/Y')));
+    } catch (ArcaException $e) {
+        return [$doc, 'No se pudo consultar en ARCA si el cliente está obligado a recibir Factura de Crédito MiPyME: '
+            . $e->getMessage()];
+    }
+    if ($r['obligado'] && $total >= $r['monto']) {
+        $doc['fce'] = true;
+
+        return [$doc, 'Se emitió como Factura de Crédito Electrónica MiPyME: ARCA informa que el cliente está obligado a'
+            . ' recibirla desde $ ' . number_format($r['monto'] / 100, 2, ',', '.')];
+    }
+
+    return [$doc, null];
 }
 
 /** Marca un comprobante como autorizado con el CAE recibido. */
@@ -400,8 +480,9 @@ if ($method === 'POST') {
         $doc = json_decode((string) $row['data'], true) ?: [];
         $doc = array_merge(comp_from_input($doc), ['ptoVenta' => comp_pv($emisor['ptoVenta'])]);
         $pointOfSale = (int) $doc['ptoVenta'];
-        $cbteTipo = arca_cbte_tipo($doc['tipo'], $doc['subtipo'], $doc['letra']);
         $today = date('d/m/Y');
+        [$doc, $fceNotice] = comp_resolve_fce($pdo, $config, $doc, $emisor, $environment);
+        $cbteTipo = arca_cbte_tipo($doc['tipo'], $doc['subtipo'], $doc['letra'], !empty($doc['fce']));
         // Se valida contra las reglas de ARCA antes de llamarla: un comprobante que ARCA
         // rechazaría (letra, condición frente al IVA, identificación, asociado) no consume
         // ningún pedido ni reserva número.
@@ -459,7 +540,7 @@ if ($method === 'POST') {
                     $result['cae'],
                     comp_date_from_arca($result['vencimiento']),
                     $today,
-                    ['ptoVenta' => $doc['ptoVenta'], 'observacionesArca' => $result['observaciones']],
+                    ['ptoVenta' => $doc['ptoVenta'], 'observacionesArca' => $result['observaciones'], 'fce' => !empty($doc['fce'])],
                     $auth['nombre']
                 );
                 $saved = comp_find($pdo, $row['id']);
@@ -467,7 +548,9 @@ if ($method === 'POST') {
                     'categoria' => 'comprobante',
                     'detalle' => 'CAE ' . $result['cae'] . ' · ' . ARCA_ENVIRONMENT_NAMES[$environment] . ' · total ' . arca_amount($detail['total']),
                 ]);
-                api_respond(200, ['ok' => true, 'comprobante' => comp_public($saved), 'observaciones' => $result['observaciones']]);
+                api_respond(200, [
+                    'ok' => true, 'comprobante' => comp_public($saved), 'observaciones' => $result['observaciones'], 'aviso' => $fceNotice,
+                ]);
             }
 
             $pdo->prepare("UPDATE comprobantes SET estado = 'borrador', numero = NULL, numero_int = NULL WHERE id = ?")

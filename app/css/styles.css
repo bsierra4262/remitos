@@ -2892,3 +2892,50 @@ body.es-admin .solo-operador {
   width: 18px;
   height: 18px;
 }
+
+/* Ventana con lo que falta activar en ARCA */
+.aviso-arca {
+  max-width: min(560px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 20px 60px rgba(30, 10, 60, 0.35);
+  color: var(--ink, #1d1530);
+}
+.aviso-arca::backdrop {
+  background: rgba(20, 10, 40, 0.45);
+}
+.aviso-arca h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.aviso-arca li {
+  margin-bottom: 8px;
+}
+.aviso-arca .pasos {
+  background: #f7f3fb;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+.aviso-arca-pie {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* Certificado y clave pegados como texto */
+.pegar-pem {
+  margin-top: 8px;
+}
+.pegar-pem summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted, #6b6478);
+}
+.pegar-pem textarea {
+  width: 100%;
+  margin-top: 6px;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+}

@@ -296,7 +296,33 @@ def emision_reglas_oficiales():
             "letra C": "Responsable Inscripto",
             "recibo A con CAE": "recibo de cobranza",
         }
+        # Factura de Crédito Electrónica MiPyME
+        sin_cbu = pedir("/ajustes.php", "POST", m, {"seccion": "emisor", "valores": {
+            "ambiente": AMBIENTE, "cuit": "30-71140975-7", "ptoVenta": "3", "emision": True, "mipyme": True}})[0]
+        cbu_malo = pedir("/ajustes.php", "POST", m, {"seccion": "emisor", "valores": {
+            "ambiente": AMBIENTE, "cuit": "30-71140975-7", "ptoVenta": "3", "emision": True, "mipyme": True,
+            "cbu": "0170099222000000678901"}})[0]
+
+        def emitir_fce(**extra):
+            cuerpo = {"tipo": "factura", "letra": "A", "conceptoTipo": 1, "fce": True,
+                      "cliente": {"razonSocial": "GRAN EMPRESA", "cuit": "30-50001091-2", "condIVA": "Responsable Inscripto"},
+                      "items": [{"descripcion": "Equipo", "cantidad": "1", "precio": "9.000.000"}]}
+            cuerpo.update(extra)
+            _, d = pedir("/comprobantes.php", "POST", m, cuerpo)
+            creados.append(d["comprobante"]["id"])
+            s, d = pedir("/comprobantes.php", "POST", m, {"accion": "emitir", "id": d["comprobante"]["id"]})
+            return s, d.get("error", "")
+
+        casos["FCE sin ser MiPyME"] = emitir_fce()
+        esperado["FCE sin ser MiPyME"] = "Solo una empresa MiPyME"
+        pedir("/ajustes.php", "POST", m, {"seccion": "emisor", "valores": {
+            "ambiente": AMBIENTE, "cuit": "30-71140975-7", "ptoVenta": "3", "emision": True, "mipyme": True,
+            "cbu": "0170099222000000678900", "transferencia": "SCA"}})
+        casos["FCE sin vencimiento del pago"] = emitir_fce()
+        esperado["FCE sin vencimiento del pago"] = "vencimiento del pago"
         malos = {k: v for k, v in casos.items() if v[0] != 422 or esperado[k] not in v[1]}
+        if sin_cbu != 422 or cbu_malo != 422:
+            malos["ajustes MiPyME"] = (sin_cbu, cbu_malo)
         ok = cargado == 201 and activar == 200 and not malos
         return ok, f"certificado_representante={cargado} activar_emision={activar} " + (f"fallas={malos}" if malos else f"{len(casos)} reglas aplicadas")
     finally:

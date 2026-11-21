@@ -68,9 +68,18 @@ En el modo «sobre pre-impreso», el número, el C.A.I. y los datos fijos los tr
 | Recibos | RG 1415, arts. 8 y 10 | Intellihelp factura sus operaciones, así que su recibo es **de cobranza** (art. 10): respalda el pago de una factura ya emitida, no vale como factura, no lleva CAE y es letra X con la leyenda «no válido como factura». Los recibos A/B con CAE (tipos 4 y 9) son para quien eligió documentar sus servicios con recibos *en lugar de* facturas (art. 8): emitir ambos informaría dos veces la venta |
 | CUIT en los web services | Manual de WSFEv1 (`Auth.Cuit`: CUIT representado) | Los pedidos se hacen en nombre del emisor configurado. El certificado puede ser del emisor o de un representante con el servicio delegado en el Administrador de Relaciones; «Probar conexión» lo verifica y lista los puntos de venta habilitados (`FEParamGetPtosVenta`) |
 
-### Pendiente de definir: Factura de Crédito Electrónica MiPyME (Ley 27.440)
+### Factura de Crédito Electrónica MiPyME (Ley 27.440)
 
-Si Intellihelp es MiPyME y le factura a una empresa del listado de «grandes empresas» de ARCA por un importe igual o mayor al mínimo vigente ($ 5.549.862 desde el 14/04/2026), tiene que emitir Factura de Crédito Electrónica (tipos 201/206, con CBU y plazo de aceptación de 21 días). Entre MiPyMEs es optativa. El sistema todavía no la emite: hace falta confirmar con el contador si aplica a los clientes de Intellihelp (los organismos públicos cargados hoy no son «grandes empresas» del listado) y asociar el servicio `wsfecred` al certificado.
+| Requisito | Norma / validación de ARCA | Cómo lo cumple el sistema |
+|---|---|---|
+| Cuándo es obligatoria | Ley 27.440: emisor MiPyME que le factura a una empresa del listado de «grandes empresas» desde el importe mínimo vigente | Si la empresa está marcada como MiPyME (Configuración → Conexión con ARCA), al emitir una factura a un CUIT se consulta a ARCA (`wsfecred`, `consultarMontoObligadoRecepcion`); si el cliente está obligado y el total alcanza el mínimo, sale como Factura de Crédito (201 A / 206 B). También se puede elegir a mano |
+| CBU del emisor | Validación 10168 (opcional 2101) | Obligatorio al marcar la empresa como MiPyME; se validan los dígitos verificadores |
+| Opción de transferencia | Opcional 27 | SCA (Sistema de Circulación Abierta) o ADC (Agente de Depósito Colectivo) |
+| Vencimiento del pago | Validación 10163 | Obligatorio en la factura, igual o posterior a la emisión |
+| Notas de crédito y débito | Validación 10162 (opcional 22) y tipos 202/203 y 207/208 | Siguen al comprobante asociado: si es Factura de Crédito, la nota también, e informa si anula una factura rechazada |
+| Condición MiPyME | Certificado MiPyME (Secretaría PyME) | El certificado digital de ARCA no informa si la empresa es MiPyME: se marca en Configuración y ARCA lo valida al autorizar |
+
+Probado en homologación el 21/11/2026: Factura de Crédito A, su nota de crédito y su nota de débito autorizadas; rechazos 10162, 10163 y 10168 reproducidos. Si el certificado no tiene el servicio `wsfecred`, la consulta no se puede hacer: la factura sale común y la aplicación lo avisa.
 
 ## Fuentes
 

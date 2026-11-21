@@ -50,6 +50,13 @@ const ARCA_CBTE_TIPOS = [
     'nc' => ['A' => 3, 'B' => 8],
 ];
 
+/** Factura de Crédito Electrónica MiPyME (Ley 27.440) y sus notas. */
+const ARCA_CBTE_TIPOS_FCE = [
+    'factura' => ['A' => 201, 'B' => 206],
+    'nd' => ['A' => 202, 'B' => 207],
+    'nc' => ['A' => 203, 'B' => 208],
+];
+
 /** Error informado por ARCA (falla del servicio o rechazo de la operación). */
 final class ArcaException extends RuntimeException
 {
@@ -67,7 +74,7 @@ function arca_is_environment(mixed $environment): bool
  * @param string $type    factura | recibo | nota
  * @param string $subtype credito | debito (solo notas)
  */
-function arca_cbte_tipo(string $type, string $subtype, string $letter): ?int
+function arca_cbte_tipo(string $type, string $subtype, string $letter, bool $fce = false): ?int
 {
     $family = match ($type) {
         'recibo' => '',
@@ -75,7 +82,7 @@ function arca_cbte_tipo(string $type, string $subtype, string $letter): ?int
         default => 'factura',
     };
 
-    return ARCA_CBTE_TIPOS[$family][strtoupper($letter)] ?? null;
+    return ($fce ? ARCA_CBTE_TIPOS_FCE : ARCA_CBTE_TIPOS)[$family][strtoupper($letter)] ?? null;
 }
 
 /**
@@ -351,7 +358,11 @@ function arca_request_ticket(PDO $pdo, array $config, string $environment, strin
         $response = arca_soap(ARCA_WSAA_URL[$environment], $envelope, '');
     } catch (ArcaException $e) {
         if (str_contains($e->getMessage(), 'no tiene autorizado el servicio')) {
-            $names = ['wsfe' => 'de facturación electrónica (wsfe)', 'wscdc' => 'de constatación de comprobantes (wscdc)'];
+            $names = [
+                'wsfe' => 'de facturación electrónica (wsfe)',
+                'wscdc' => 'de constatación de comprobantes (wscdc)',
+                'wsfecred' => 'de Factura de Crédito Electrónica MiPyME (wsfecred)',
+            ];
             throw new ArcaException('El certificado no tiene autorizado el servicio ' . ($names[$service] ?? $service)
                 . ' en ' . ARCA_ENVIRONMENT_NAMES[$environment] . '. Hay que asociarlo desde el Administrador de'
                 . ' Relaciones de ARCA (en homologación, desde WSASS).');
@@ -387,6 +398,33 @@ function arca_request_ticket(PDO $pdo, array $config, string $environment, strin
     ]);
 
     return ['token' => $token, 'sign' => $sign, 'cuit' => $credentials['cuit'], 'expira' => $expires];
+}
+
+/** Servicios de ARCA que usa la aplicación y para qué. */
+const ARCA_SERVICIOS = [
+    'wsfe' => 'Facturas y notas de crédito y débito (CAE)',
+    'wscdc' => 'Constatación del C.A.I. de los talonarios de remitos',
+    'wsfecred' => 'Factura de Crédito Electrónica MiPyME',
+];
+
+/**
+ * Qué servicios tiene autorizados el certificado: pide (o reutiliza) el ticket de cada uno.
+ *
+ * @return array<string, array{ok: bool, uso: string, detalle: string}>
+ */
+function arca_services_status(PDO $pdo, array $config, string $environment): array
+{
+    $out = [];
+    foreach (ARCA_SERVICIOS as $service => $use) {
+        try {
+            arca_ticket($pdo, $config, $environment, $service);
+            $out[$service] = ['ok' => true, 'uso' => $use, 'detalle' => ''];
+        } catch (ArcaException $e) {
+            $out[$service] = ['ok' => false, 'uso' => $use, 'detalle' => $e->getMessage()];
+        }
+    }
+
+    return $out;
 }
 
 /** Pedido de acceso (TRA) para un servicio, válido por unos minutos alrededor de ahora. */
@@ -661,8 +699,11 @@ function arca_cae_detail(array $c): string
         . '<ar:ImpIVA>' . arca_amount($c['iva']) . '</ar:ImpIVA>';
     if ($c['concepto'] !== 1) {
         $xml .= '<ar:FchServDesde>' . $x($c['serv_desde'] ?? '') . '</ar:FchServDesde>'
-            . '<ar:FchServHasta>' . $x($c['serv_hasta'] ?? '') . '</ar:FchServHasta>'
-            . '<ar:FchVtoPago>' . $x($c['vto_pago'] ?? '') . '</ar:FchVtoPago>';
+            . '<ar:FchServHasta>' . $x($c['serv_hasta'] ?? '') . '</ar:FchServHasta>';
+    }
+    // FchVtoPago: obligatoria con servicios y en la Factura de Crédito (validación 10163).
+    if ($c['concepto'] !== 1 || ($c['vto_pago'] ?? '') !== '') {
+        $xml .= '<ar:FchVtoPago>' . $x($c['vto_pago'] ?? '') . '</ar:FchVtoPago>';
     }
     $xml .= '<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz>'
         . '<ar:CondicionIVAReceptorId>' . $c['cond_iva_receptor'] . '</ar:CondicionIVAReceptorId>';
@@ -684,6 +725,14 @@ function arca_cae_detail(array $c): string
                 . '<ar:Importe>' . arca_amount($a['importe']) . '</ar:Importe></ar:AlicIva>';
         }
         $xml .= '</ar:Iva>';
+    }
+    // Opcionales de la Factura de Crédito: 2101 CBU, 27 transferencia, 22 anulación (notas).
+    if (!empty($c['opcionales'])) {
+        $xml .= '<ar:Opcionales>';
+        foreach ($c['opcionales'] as $o) {
+            $xml .= '<ar:Opcional><ar:Id>' . $x($o['id']) . '</ar:Id><ar:Valor>' . $x($o['valor']) . '</ar:Valor></ar:Opcional>';
+        }
+        $xml .= '</ar:Opcionales>';
     }
 
     return $xml . '</ar:FECAEDetRequest>';
@@ -763,6 +812,47 @@ function arca_cae_lookup(PDO $pdo, array $config, string $environment, int $poin
         'doc_nro' => arca_wsfe_value($doc, 'DocNro'),
         'fecha' => arca_wsfe_value($doc, 'CbteFch'),
     ];
+}
+
+/* ------------------- WSFECRED · Factura de Crédito Electrónica MiPyME ------------------- */
+
+const ARCA_WSFECRED_URL = [
+    'homologacion' => 'https://fwshomo.afip.gov.ar/wsfecred/FECredService',
+    'produccion' => 'https://serviciosjava.afip.gob.ar/wsfecred/FECredService',
+];
+
+const ARCA_WSFECRED_NS = 'http://ar.gob.afip.wsfecred/FECredService/';
+
+/**
+ * ¿El receptor está obligado a recibir Factura de Crédito Electrónica MiPyME, y desde qué
+ * importe? (consultarMontoObligadoRecepcion). Es «gran empresa» del listado de ARCA.
+ * Requiere el servicio «wsfecred» asociado al certificado.
+ *
+ * @return array{obligado: bool, monto: int}  monto en centavos
+ */
+function arca_fce_obligado(PDO $pdo, array $config, string $environment, string $cuitReceptor, string $dateIso): array
+{
+    $ticket = arca_ticket($pdo, $config, $environment, 'wsfecred');
+    $x = static fn (string $v): string => htmlspecialchars($v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    $envelope = '<?xml version="1.0" encoding="UTF-8"?>'
+        . '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:fec="' . ARCA_WSFECRED_NS . '">'
+        . '<soap:Body><fec:consultarMontoObligadoRecepcionRequest>'
+        . '<authRequest><token>' . $x($ticket['token']) . '</token><sign>' . $x($ticket['sign']) . '</sign>'
+        . '<cuitRepresentada>' . $x($ticket['cuit_representado'] ?? $ticket['cuit']) . '</cuitRepresentada></authRequest>'
+        . '<cuitConsultada>' . $x($cuitReceptor) . '</cuitConsultada><fechaEmision>' . $x($dateIso) . '</fechaEmision>'
+        . '</fec:consultarMontoObligadoRecepcionRequest></soap:Body></soap:Envelope>';
+    $doc = arca_soap(ARCA_WSFECRED_URL[$environment], $envelope, ARCA_WSFECRED_NS . 'consultarMontoObligadoRecepcion');
+    $xpath = new DOMXPath($doc);
+    $value = static fn (string $n): string => trim((string) $xpath->query('//*[local-name()="' . $n . '"]')->item(0)?->textContent);
+    $errors = [];
+    foreach ($xpath->query('//*[local-name()="arrayErrores" or local-name()="arrayErroresFormato"]/*') as $e) {
+        $errors[] = trim(preg_replace('/\s+/', ' ', (string) $e->textContent));
+    }
+    if ($errors) {
+        throw new ArcaException('ARCA (Factura de Crédito): ' . implode(' · ', $errors));
+    }
+
+    return ['obligado' => $value('obligado') === 'S', 'monto' => (int) round((float) $value('montoDesde') * 100)];
 }
 
 /* --------------------- WSCDC · Constatación de comprobantes --------------------- */

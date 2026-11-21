@@ -7,9 +7,9 @@
 <meta name="description" content="Remitos, facturas, recibos y notas de crédito y débito de Intellihelp.">
 <meta name="robots" content="noindex, nofollow">
 <title>Remitos y Comprobantes · Intellihelp</title>
-<link rel="stylesheet" href="css/fuentes.css?v=243">
+<link rel="stylesheet" href="css/fuentes.css?v=245">
 <link rel="icon" href="assets/logos/favicon.png">
-<link rel="stylesheet" href="css/styles.css?v=243">
+<link rel="stylesheet" href="css/styles.css?v=245">
 </head>
 <body data-view="inicio" class="sin-sesion">
 <div class="app">
@@ -322,6 +322,14 @@
               <div class="field"><label for="remPvCfg">Punto de venta de remitos <span class="note">(C.A.I.)</span></label><input id="remPvCfg" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="Ej. 1"></div>
             </div>
             <div class="switch cfg-switch">
+              <label for="apiMipyme">Empresa MiPyME<span class="hint">Con Certificado MiPyME vigente. A un cliente que ARCA obliga a recibirla (grandes empresas, desde el importe mínimo), la factura sale como Factura de Crédito Electrónica MiPyME (Ley 27.440).</span></label>
+              <label class="toggle"><input type="checkbox" id="apiMipyme"><span class="track"></span></label>
+            </div>
+            <div class="cfg-grid">
+              <div class="field"><label for="apiCbu">CBU de la empresa <span class="note">(Factura de Crédito)</span></label><input id="apiCbu" inputmode="numeric" pattern="[0-9]{22}" maxlength="22" placeholder="22 dígitos"></div>
+              <div class="field"><label for="apiTransf">Transferencia de la Factura de Crédito</label><select id="apiTransf"><option value="SCA">Sistema de Circulación Abierta (SCA)</option><option value="ADC">Agente de Depósito Colectivo (ADC)</option></select></div>
+            </div>
+            <div class="switch cfg-switch">
               <label for="apiEnabled">Emisión electrónica<span class="hint">La numeración de cada comprobante se toma de ARCA (último autorizado + 1).</span></label>
               <label class="toggle"><input type="checkbox" id="apiEnabled"><span class="track"></span></label>
             </div>
@@ -329,7 +337,7 @@
             <div class="cfg-alert" id="apiAlert" hidden></div>
             <div class="cfg-actions">
               <button class="btn primary" id="apiSave">Guardar</button>
-              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=243" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
+              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=245" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
             </div>
           </div>
 
@@ -526,8 +534,10 @@
     </div>
     <div class="grid">
       <div class="field full"><label for="certAmbiente">Ambiente</label><select id="certAmbiente"><option value="homologacion">Homologación (pruebas)</option><option value="produccion">Producción</option></select></div>
-      <div class="field full"><label>Certificado <span class="note">(.crt o .pem emitido por ARCA)</span></label><div class="file-pick"><input type="file" id="certFile" accept=".crt,.pem,.cer,application/x-x509-ca-cert"><label for="certFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="certFile">Ningún archivo elegido</span></div></div>
-      <div class="field full"><label>Clave privada <span class="note">(.key generada con el pedido)</span></label><div class="file-pick"><input type="file" id="keyFile" accept=".key,.pem"><label for="keyFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="keyFile">Ningún archivo elegido</span></div></div>
+      <div class="field full"><label>Certificado <span class="note">(.crt o .pem emitido por ARCA)</span></label><div class="file-pick"><input type="file" id="certFile" accept=".crt,.pem,.cer,application/x-x509-ca-cert"><label for="certFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="certFile">Ningún archivo elegido</span></div>
+        <details class="pegar-pem"><summary>…o pegá el texto del certificado</summary><textarea id="certText" rows="5" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"></textarea></details></div>
+      <div class="field full"><label>Clave privada <span class="note">(.key generada con el pedido)</span></label><div class="file-pick"><input type="file" id="keyFile" accept=".key,.pem"><label for="keyFile" class="btn sm">Elegir archivo</label><span class="file-name" data-for="keyFile">Ningún archivo elegido</span></div>
+        <details class="pegar-pem"><summary>…o pegá el texto de la clave privada</summary><textarea id="keyText" rows="5" spellcheck="false" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"></textarea></details></div>
       <div class="field full"><label for="keyPass">Contraseña de la clave <span class="note">(solo si la clave está protegida)</span></label><input type="password" id="keyPass" autocomplete="off"></div>
       <p class="hint full">La operación se confirma con tu ingreso con Google. Si pasaron más de 15 minutos desde que ingresaste, se te pide confirmar con Google de nuevo.</p>
     </div>
@@ -540,6 +550,12 @@
 </aside>
 
 <!-- ============================= Remito digital ============================= -->
+<dialog class="aviso-arca" id="avisoArca" aria-labelledby="avisoArcaTitulo">
+  <h3 id="avisoArcaTitulo"></h3>
+  <div id="avisoArcaCuerpo"></div>
+  <div class="aviso-arca-pie"><button class="btn primary" type="button" id="avisoArcaCerrar">Entendido</button></div>
+</dialog>
+
 <div class="backdrop" id="backdrop8"></div>
 <aside class="calib" id="digitalModal" aria-label="Remito digital">
   <div class="calib-head">
@@ -637,10 +653,10 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="js/config.js?v=243"></script>
-<script src="js/calculos.js?v=243"></script>
-<script src="js/lib/qrcode.js?v=243"></script>
-<script src="js/app.js?v=243"></script>
-<script src="js/servidor.js?v=243"></script>
+<script src="js/config.js?v=245"></script>
+<script src="js/calculos.js?v=245"></script>
+<script src="js/lib/qrcode.js?v=245"></script>
+<script src="js/app.js?v=245"></script>
+<script src="js/servidor.js?v=245"></script>
 </body>
 </html>

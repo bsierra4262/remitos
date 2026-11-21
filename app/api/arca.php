@@ -117,6 +117,7 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
             $servers = arca_fe_dummy($environment);
             $ticket = arca_ticket($pdo, $config, $environment);
             $points = arca_points_of_sale($pdo, $config, $environment);
+            $services = arca_services_status($pdo, $config, $environment);
         } catch (ArcaException $e) {
             audit_event($pdo, 'Conexión con ARCA fallida (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
                 'categoria' => 'arca', 'nivel' => 'error', 'detalle' => $e->getMessage(), 'estado' => 502,
@@ -143,7 +144,8 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
         audit_event($pdo, 'Conexión con ARCA verificada (' . ARCA_ENVIRONMENT_NAMES[$environment] . ')', [
             'categoria' => 'arca',
             'detalle' => 'emisor ' . $ticket['cuit_representado'] . ' · certificado ' . $ticket['cuit']
-                . ' · puntos de venta ' . (implode(', ', $numbers) ?: 'ninguno'),
+                . ' · puntos de venta ' . (implode(', ', $numbers) ?: 'ninguno')
+                . ' · servicios ' . implode(', ', array_map(static fn ($k, $v) => $k . ($v['ok'] ? ' sí' : ' no'), array_keys($services), $services)),
         ]);
         api_respond(200, [
             'ok' => true,
@@ -152,6 +154,7 @@ if ($method === 'POST' && ($body['accion'] ?? '') !== 'quitar') {
             'cuit' => $ticket['cuit_representado'],
             'cuit_certificado' => $ticket['cuit'],
             'puntos_venta' => $points,
+            'servicios' => $services,
             'aviso' => $warning,
             'ticket_vence' => $ticket['expira'],
         ]);

@@ -71,7 +71,19 @@ if ($method === 'POST') {
                 api_error(422, 'Para activar la emisión electrónica falta: ' . implode(', ', $missing), ['faltan' => $missing]);
             }
         }
-        $stored = ['ambiente' => $environment, 'cuit' => $cuit, 'ptoVenta' => $pointOfSale, 'emision' => $emission];
+        $mipyme = api_bool($values['mipyme'] ?? false);
+        $cbu = preg_replace('/\D/', '', (string) ($values['cbu'] ?? ''));
+        $transfer = in_array($values['transferencia'] ?? 'SCA', ['SCA', 'ADC'], true) ? (string) ($values['transferencia'] ?? 'SCA') : 'SCA';
+        if ($cbu !== '' && !cbu_valid($cbu)) {
+            api_error(422, 'El CBU no es válido (22 dígitos con los dígitos verificadores correctos)');
+        }
+        if ($mipyme && $cbu === '') {
+            api_error(422, 'Para emitir Factura de Crédito Electrónica MiPyME hace falta el CBU de la empresa');
+        }
+        $stored = [
+            'ambiente' => $environment, 'cuit' => $cuit, 'ptoVenta' => $pointOfSale, 'emision' => $emission,
+            'mipyme' => $mipyme, 'cbu' => $cbu, 'transferencia' => $transfer,
+        ];
     } else {
         $pointOfSale = preg_replace('/\D/', '', (string) ($values['ptoVenta'] ?? '1')) ?: '1';
         if ((int) $pointOfSale < 1 || (int) $pointOfSale > 99998) {

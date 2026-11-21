@@ -13,7 +13,13 @@ declare(strict_types=1);
 
 /** Valores por defecto de cada sección. */
 const SETTINGS_DEFAULTS = [
-    'emisor' => ['ambiente' => 'homologacion', 'cuit' => '', 'ptoVenta' => '', 'emision' => false],
+    'emisor' => [
+        'ambiente' => 'homologacion', 'cuit' => '', 'ptoVenta' => '', 'emision' => false,
+        // Factura de Crédito Electrónica MiPyME (Ley 27.440): condición MiPyME del emisor,
+        // CBU donde cobra y opción de transferencia (SCA: Sistema de Circulación Abierta;
+        // ADC: Agente de Depósito Colectivo).
+        'mipyme' => false, 'cbu' => '', 'transferencia' => 'SCA',
+    ],
     'remito' => ['ptoVenta' => '00001', 'copias' => 2],
 ];
 

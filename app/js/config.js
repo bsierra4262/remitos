@@ -38,9 +38,16 @@ const COMP_CODIGOS = {
   nc: { A: '003', B: '008', C: '013', M: '053', X: '—' }, // Nota de Crédito
   recibo: { A: '004', B: '009', C: '015', M: '054', X: '—' },
 };
-function codigoComprobante(tipo, subtipo, letra) {
+/* Factura de Crédito Electrónica MiPyME (Ley 27.440) y sus notas. */
+const COMP_CODIGOS_FCE = {
+  factura: { A: '201', B: '206' },
+  nd: { A: '202', B: '207' },
+  nc: { A: '203', B: '208' },
+};
+function codigoComprobante(tipo, subtipo, letra, fce) {
   const fam = tipo === 'recibo' ? 'recibo' : tipo === 'nota' ? (subtipo === 'debito' ? 'nd' : 'nc') : 'factura';
-  return (COMP_CODIGOS[fam] && COMP_CODIGOS[fam][letra]) || '—';
+  const tabla = fce ? COMP_CODIGOS_FCE : COMP_CODIGOS;
+  return (tabla[fam] && tabla[fam][letra]) || '—';
 }
 
 /* Tamaño del DOCUMENTO COMPLETO (lo generamos nosotros, no hay formulario preimpreso).
