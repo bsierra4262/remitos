@@ -15,7 +15,7 @@ def guia_formato():
         return False, "no está el PDF de la guía"
     d = fitz.open(GUIA)
     mm = [round(v / 2.834, 1) for v in (d[0].rect.width, d[0].rect.height)]
-    ok = 3 <= d.page_count <= 6 and abs(mm[0] - 210) < 2 and abs(mm[1] - 297) < 2
+    ok = 3 <= d.page_count <= 8 and abs(mm[0] - 210) < 2 and abs(mm[1] - 297) < 2
     return ok, f"{d.page_count} páginas de {mm[0]}×{mm[1]} mm"
 
 

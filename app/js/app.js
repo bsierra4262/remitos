@@ -1681,9 +1681,9 @@ async function enviarCertificado(e) {
 /* Ventana con el error exacto de ARCA y qué hay que activar en el portal. */
 const PASOS_SERVICIO_ARCA = {
   homologacion:
-    'En el portal de testing de ARCA (WSASS, con la clave fiscal de quien cargó el certificado): «Crear autorización a servicio», elegir el mismo certificado (alias) y el servicio indicado. No hace falta un certificado nuevo ni volver a cargarlo acá.',
+    'En WSASS (Autogestión Certificados Homologación, con la clave fiscal de quien creó el certificado): «Crear autorización a servicio» → elegir el mismo certificado («Nombre simbólico del DN a autorizar»), en «CUIT representado» el CUIT de la empresa y el servicio indicado. No hace falta un certificado nuevo ni volver a cargarlo acá.',
   produccion:
-    'En ARCA con clave fiscal de la empresa: «Administrador de Relaciones de Clave Fiscal» → «Nueva relación» → buscar el servicio indicado y asociarlo al certificado (o al representante). No hace falta un certificado nuevo ni volver a cargarlo acá.',
+    'En ARCA, con la clave fiscal de la empresa: «Administrador de Relaciones de Clave Fiscal» → «Nueva Relación» → «Buscar» → ARCA → Web Services → el servicio indicado, y como representante el alias del certificado. No hace falta un certificado nuevo ni volver a cargarlo acá.',
 };
 function avisoArca(titulo, html) {
   const d = $('#avisoArca');

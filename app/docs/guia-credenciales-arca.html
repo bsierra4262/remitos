@@ -105,6 +105,10 @@ tbody td:first-child{font-weight:700;color:#1f1c29;white-space:nowrap;width:38mm
 ol{margin:0 0 4mm;padding-left:6mm}
 ol li{margin-bottom:2.2mm;padding-left:1.5mm}
 .subtit{font-weight:700;color:#1f1c29;margin:6.5mm 0 3mm;font-size:10.4pt}
+
+table.fuentes{width:100%;table-layout:fixed;font-size:8.6pt}
+table.fuentes td,table.fuentes th{overflow-wrap:anywhere;word-break:break-word;vertical-align:top}
+table.fuentes td:first-child{white-space:normal}table.fuentes th:nth-child(1){width:30%}table.fuentes th:nth-child(2){width:36%}
 </style></head><body>
 <div class="hero">
   <div class="circulo"></div>
@@ -157,8 +161,8 @@ openssl req -new -key intellihelp.key \
   <code>intellihelp.crt</code>.</p>
 
   <div class="paso-tit"><span class="n">4</span><h2>Autorizar los servicios</h2></div>
-  <p>En <b>Crear Autorización a Servicio</b>: elegir el certificado recién creado, indicar el
-  <b>CUIT emisor</b> y seleccionar el servicio <code>wsfe – Facturación Electrónica</code>. Con esto
+  <p>En <b>Crear autorización a servicio</b>: elegir el certificado recién creado («Nombre simbólico del
+  DN a autorizar»), indicar en <b>CUIT representado</b> el CUIT de la empresa y seleccionar el servicio <code>wsfe – Facturación Electrónica</code>. Con esto
   el certificado queda habilitado para solicitar CAE.</p>
   <p>Repetir la autorización con el servicio <code>wscdc – Constatación de Comprobantes</code>. Es el
   que usa el sistema para <b>verificar con ARCA el C.A.I. de los remitos</b> al cargar cada talonario
@@ -214,17 +218,20 @@ openssl req -new -key intellihelp.key \
 
   <div class="paso-tit"><span class="n">6</span><h2>Pasaje a producción</h2></div>
   <ol>
-    <li>Generar el certificado productivo desde <b>Administrador de Relaciones de Clave Fiscal</b>
-      (Computador Fiscal → WSAA). Para producción no se usa WSASS.</li>
-    <li>Asociar a ese certificado los servicios <b>Facturación Electrónica</b> (wsfe),
+    <li>Generar el certificado productivo con el mismo pedido (<code>.csr</code>) en el servicio
+      <b>Administración de Certificados Digitales</b> (con Clave Fiscal), bajo un alias. Para producción
+      no se usa WSASS.</li>
+    <li>En <b>Administrador de Relaciones de Clave Fiscal</b> → <b>Nueva Relación</b> → <b>Buscar</b> →
+      ARCA → Web Services, asociar al alias del certificado los servicios <b>Facturación Electrónica</b> (wsfe),
       <b>Constatación de Comprobantes</b> (wscdc) y, si la empresa es MiPyME, <b>Factura de Crédito
       Electrónica MiPyME</b> (wsfecred). Si el certificado es de un representante, la empresa le delega
       esos servicios desde el mismo Administrador de Relaciones. Los C.A.I. reales solo existen en producción: la
       constatación de los talonarios usa siempre el certificado productivo.</li>
-    <li>Dar de alta el <b>punto de venta</b> de tipo Web Services («Administración de puntos de venta
-      y domicilios»).</li>
+    <li>Dar de alta el <b>punto de venta</b> para web services en <b>Administración de puntos de venta
+      y domicilios</b> (sistema «RECE para aplicativo y web services»).</li>
     <li>Verificar que la empresa tenga presentada la <b>habilitación para emitir comprobantes clase
-      A</b>: en homologación ARCA avisa con la observación 10234 cuando falta.</li>
+      A</b> (Formulario 856, servicio «Regímenes de Facturación y Registración (REAR/RECE/RFI)» →
+      «Habilitación de Comprobantes»). Si falta, ARCA lo avisa con la observación 10234.</li>
     <li>En Configuración → Conexión con ARCA, elegir el ambiente <b>Producción</b> y cargar el
       certificado productivo con su clave privada, igual que en el paso 5.</li>
   </ol>
@@ -308,5 +315,51 @@ openssl req -new -key intellihelp.key \
     forma correlativa y automática dentro del rango; no hace falta tipearlo. Un número anulado queda
     consumido y nunca se reutiliza, como exige la RG 1415.</p>
   </div>
+
+  <div class="paso-tit"><span class="n">10</span><h2>Fuentes oficiales consultadas</h2></div>
+  <p>Cada paso y cada regla del sistema sale de documentación oficial. Para ubicarla: la fuente, la
+  sección y las palabras a buscar dentro del documento. Revisado el 21/11/2026.</p>
+  <table class="fuentes">
+    <thead><tr><th>Tema</th><th>Fuente</th><th>Dónde está</th></tr></thead>
+    <tbody>
+      <tr><td>Certificado de testing y autorización de servicios (pasos 2 a 4)</td>
+        <td>Manual del usuario del WSASS, publicación 19.10.1 (afip.gob.ar/ws/WSASS/WSASS_manual.pdf)</td>
+        <td>Págs. 4 a 6 y 11, menú «Crear Autorización a Servicio»; buscar «CUIT representado»</td></tr>
+      <tr><td>Certificado de producción (paso 6)</td>
+        <td>ARCA, Web Services, Certificados (afip.gob.ar/ws/documentacion/certificados.asp)</td>
+        <td>Buscar «Administración de Certificados Digitales» y «Administrador de Relaciones de Clave Fiscal»</td></tr>
+      <tr><td>Los pedidos van en nombre de la empresa, aunque el certificado sea de un representante</td>
+        <td>Manual para el desarrollador, Facturación Electrónica RG 4291, proyecto FE v4.0, revisión del 17/03/2025 (afip.gob.ar/ws/documentacion/manuales/manual-desarrollador-ARCA-COMPG-v4-0.pdf)</td>
+        <td>Pág. 25, «Mensaje de solicitud» de FECAESolicitar, campo Auth: «Cuit contribuyente (representado o Emisora)»</td></tr>
+      <tr><td>Puntos de venta habilitados</td><td>Mismo manual</td>
+        <td>Pág. 111, «FEParamGetPtosVenta»</td></tr>
+      <tr><td>Condición frente al IVA del receptor y letra del comprobante (RG 5616)</td><td>Mismo manual</td>
+        <td>Págs. 190 a 193, «FEParamGetCondicionIvaReceptor»; pág. 69, validación «10243»</td></tr>
+      <tr><td>Factura B desde $ 10.000.000: identificar al comprador</td><td>Mismo manual</td>
+        <td>Pág. 40, «Validaciones y errores», código «10015»</td></tr>
+      <tr><td>Notas de crédito y débito con comprobante asociado</td><td>Mismo manual</td>
+        <td>Pág. 65, código «10197»</td></tr>
+      <tr><td>Factura de Crédito MiPyME: opcionales, CBU y vencimiento del pago</td><td>Mismo manual</td>
+        <td>Págs. 61 y 62, códigos «10162», «10163», «10165» y «10168»</td></tr>
+      <tr><td>Si el cliente está obligado a recibir Factura de Crédito</td>
+        <td>Servicio WSFECRED de ARCA (fwshomo.afip.gov.ar/wsfecred/FECredService?wsdl)</td>
+        <td>Método «consultarMontoObligadoRecepcion»: devuelve «obligado» y «montoDesde»</td></tr>
+      <tr><td>Factura de Crédito Electrónica MiPyME</td>
+        <td>Ley 27.440 y argentina.gob.ar, «Emitir una Factura de Crédito Electrónica MiPyME»</td>
+        <td>Buscar «empresas grandes» y «monto mínimo»</td></tr>
+      <tr><td>Habilitación para emitir comprobantes clase A</td>
+        <td>Manual del desarrollador (pág. 70, código «10234») y argentina.gob.ar, «Autorizar emisión de comprobantes clase A»</td>
+        <td>Formulario 856, servicio «Regímenes de Facturación y Registración (REAR/RECE/RFI)» → «Habilitación de Comprobantes»</td></tr>
+      <tr><td>Recibo de cobranza: no vale como factura</td>
+        <td>RG 1415, texto actualizado (argentina.gob.ar, norma 81316)</td>
+        <td>Art. 10, inc. d): «comprobante que respalda el pago»</td></tr>
+      <tr><td>Recibo en lugar de factura (no aplica a Intellihelp)</td><td>RG 1415, texto actualizado</td>
+        <td>Anexo IV, apartado B, punto 9 «Honorarios de profesionales»: «deberán optar por utilizar»</td></tr>
+      <tr><td>Contenido del remito y C.A.I. (pasos 7 y 8)</td><td>RG 1415, Anexo V</td>
+        <td>Apartados I a IV: emisor, destinatario, bienes y transportista</td></tr>
+      <tr><td>Remito digital (paso 9)</td><td>RG 5678/2025</td>
+        <td>Buscar «formato digital» y «conformidad»</td></tr>
+    </tbody>
+  </table>
 </div>
 </body></html>

@@ -15,7 +15,8 @@
  *  - Recibos de cobranza (RG 1415, art. 10): respaldan el pago de una factura ya emitida,
  *    no valen como factura y no llevan CAE; son siempre letra X. Los recibos A/B con CAE
  *    (tipos 4 y 9) los usa solo quien eligió documentar sus servicios con recibos en lugar
- *    de facturas (art. 8): emitirlos además de la factura informaría dos veces la venta.
+ *    de facturas (Anexo IV, apartado B, punto 9: «deberán optar»): emitirlos además de la factura
+ *    informaría dos veces la venta.
  *
  *   GET    comprobantes.php?pagina=1&por_pagina=50&buscar=… (leer)  Del más reciente al más antiguo.
  *   GET    comprobantes.php?id=…                      (leer)   Un comprobante.
