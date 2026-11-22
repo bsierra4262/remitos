@@ -31,7 +31,7 @@ function importe_numero(mixed $value): ?float
     }
     if (str_contains($text, ',')) {
         $text = str_replace(['.', ','], ['', '.'], $text);
-    } elseif (preg_match('/^\d{1,3}(\.\d{3})+$/', $text)) {
+    } elseif (preg_match('/^[1-9]\d{0,2}(\.\d{3})+$/', $text)) {   // 1.500 = mil quinientos; 0.500 = medio
         $text = str_replace('.', '', $text);
     }
 

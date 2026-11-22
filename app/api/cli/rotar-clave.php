@@ -64,6 +64,12 @@ try {
         }
     }
 
+    // Copia de la clave anterior (0600) antes de tocar config.php: si el proceso muere entre
+    // el cambio del archivo y el commit, con ella se recuperan los datos cifrados.
+    $backup = $configFile . '.anterior';
+    if (file_put_contents($backup, $source, LOCK_EX) === false || !chmod($backup, 0600)) {
+        throw new RuntimeException("No se pudo escribir la copia $backup");
+    }
     $temp = $configFile . '.tmp';
     $updated = preg_replace($pattern, "\${1}'" . $newKey . "'", $source);
     if (file_put_contents($temp, $updated, LOCK_EX) === false || !chmod($temp, 0600) || !rename($temp, $configFile)) {
@@ -83,6 +89,7 @@ try {
 }
 
 audit_event($pdo, 'Clave de cifrado rotada', ['categoria' => 'sistema', 'clave' => 'línea de comandos', 'detalle' => "$count secretos cifrados de nuevo"]);
+@unlink($configFile . '.anterior'); // la rotación terminó bien: la copia ya no hace falta
 echo "Listo: $count secretos cifrados con la clave nueva y config.php actualizado.\n";
 echo "app_key nueva (guardala en el gestor de contraseñas; no se vuelve a mostrar):\n$newKey\n\n";
 echo "Generando un respaldo con la clave nueva…\n";

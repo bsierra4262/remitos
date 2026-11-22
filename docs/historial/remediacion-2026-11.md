@@ -1,6 +1,8 @@
 # Remediación de la revisión de noviembre de 2026
 
-Estado de cada hallazgo de la revisión de código y auditoría de seguridad sobre el commit `9c22eb6`. Todos los puntos técnicos quedaron resueltos; los controles organizativos de ISO/IEC 27001 que no se evalúan desde el código quedan documentados en [`seguridad.md`](seguridad.md).
+> **Documento histórico.** Desde noviembre de 2026 se ingresa **solo con Google**: las contraseñas, el segundo factor (TOTP) y el cambio de contraseña que se describen abajo (H-03, H-05, H-06 y H-11) fueron eliminados, junto con sus pruebas. El estado vigente de la seguridad está en [`../seguridad.md`](../seguridad.md).
+
+Estado de cada hallazgo de la revisión de código y auditoría de seguridad sobre el commit `9c22eb6`. Todos los puntos técnicos quedaron resueltos; los controles organizativos de ISO/IEC 27001 que no se evalúan desde el código quedan documentados en [`seguridad.md`](../seguridad.md).
 
 ## Prioridades (resumen ejecutivo)
 

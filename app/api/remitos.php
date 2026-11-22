@@ -44,7 +44,6 @@ $pdo = api_db($config);
 const REMITO_MAX_ITEMS = 60;
 const REMITO_DOC_TYPES = ['', 'DNI', 'CI', 'Pasaporte', 'Otro'];
 const REMITO_LOCK = 'remitos_numero';
-const REMITO_CONFORMIDAD_DIAS = 60;
 
 /**
  * Arma un remito con forma, longitudes y formatos controlados a partir del cuerpo recibido.
@@ -140,7 +139,7 @@ function remito_public(array $row): array
     $doc['faltantes'] = $authorized ? [] : remito_faltantes($doc);
     $doc['conformidad'] = [
         'enlace_activo' => !empty($row['conformidad_hash'])
-            && strtotime((string) $row['conformidad_desde']) > time() - REMITO_CONFORMIDAD_DIAS * 86400,
+            && strtotime((string) $row['conformidad_desde']) > time() - CONFORMIDAD_DIAS * 86400,
         'enlace_desde' => $row['conformidad_desde'] ?? null,
         'conformado' => $row['conformado'] ?? null,
         'nombre' => $row['conformado_nombre'] ?? null,
@@ -245,12 +244,12 @@ if ($method === 'POST') {
         $pdo->prepare('UPDATE remitos SET conformidad_hash = ?, conformidad_desde = NOW(), updated = ? WHERE id = ?')
             ->execute([hash('sha256', $token), $now, $row['id']]);
         audit_event($pdo, 'Enlace de conformidad generado: remito ' . remito_label($row), [
-            'categoria' => 'remito', 'detalle' => 'vence en ' . REMITO_CONFORMIDAD_DIAS . ' días' . (!empty($row['conformidad_hash']) ? ' · reemplaza al anterior' : ''),
+            'categoria' => 'remito', 'detalle' => 'vence en ' . CONFORMIDAD_DIAS . ' días' . (!empty($row['conformidad_hash']) ? ' · reemplaza al anterior' : ''),
         ]);
         api_respond(200, [
             'ok' => true,
             'url' => api_base_url($config) . '/conformidad.html#' . $token,
-            'vence_dias' => REMITO_CONFORMIDAD_DIAS,
+            'vence_dias' => CONFORMIDAD_DIAS,
             'remito' => remito_public(remito_find($pdo, $row['id'])),
         ]);
     }
@@ -295,9 +294,18 @@ if ($method === 'POST') {
         $json = json_encode($document, JSON_UNESCAPED_UNICODE);
 
         if ($existing) {
-            $pdo->prepare(
-                'UPDATE remitos SET fecha = ?, fecha_emision = ?, cliente = ?, data = ?, updated = ?, actualizado_por = ? WHERE id = ?'
-            )->execute([$remito['fecha'], api_date_iso($remito['fecha']), $client, $json, $now, $by, $id]);
+            // La autorización (talonarios.php) no toma este bloqueo: la condición de estado
+            // evita pisar un remito que se autorizó entre la lectura y la escritura.
+            $st = $pdo->prepare(
+                "UPDATE remitos SET fecha = ?, fecha_emision = ?, cliente = ?, data = ?, updated = ?, actualizado_por = ?
+                  WHERE id = ? AND estado = 'borrador'"
+            );
+            $st->execute([$remito['fecha'], api_date_iso($remito['fecha']), $client, $json, $now, $by, $id]);
+            if ($st->rowCount() === 0 && ($row = remito_find($pdo, $id)) !== null && $row['estado'] === 'autorizado') {
+                api_error(409, 'El remito ' . remito_label($row) . ' ya está autorizado y no se puede modificar.', [
+                    'remito' => remito_public($row),
+                ]);
+            }
             $changed = array_keys(array_filter(
                 ['cliente' => 'cliente', 'fecha' => 'fecha', 'items' => 'ítems', 'recibi' => 'recepción', 'transporte' => 'transporte'],
                 static fn (string $label, string $key): bool => ($previous[$key] ?? null) != $remito[$key],
@@ -347,7 +355,11 @@ if ($method === 'DELETE') {
     if ($row['estado'] === 'autorizado') {
         api_error(409, 'Un remito autorizado no se elimina: su número y C.A.I. ya fueron asignados.');
     }
-    $pdo->prepare('DELETE FROM remitos WHERE id = ?')->execute([$id]);
+    $st = $pdo->prepare("DELETE FROM remitos WHERE id = ? AND estado = 'borrador'");
+    $st->execute([$id]);
+    if ($st->rowCount() === 0) {
+        api_error(409, 'El remito cambió mientras se eliminaba (se autorizó o ya no existe). Actualizá la lista.');
+    }
     audit_event($pdo, 'Remito eliminado (' . remito_label($row) . ')', [
         'categoria' => 'remito', 'detalle' => mb_substr((string) $row['cliente'], 0, 120),
     ]);

@@ -12,8 +12,8 @@
  *   GET proximo.php?ambiente=homologacion&tipo=factura&subtipo=&letra=A&pv=1   (leer)
  *       → { ok, numero, ultimo, ptoVenta, cbteTipo, fuente }
  *
- * Si no hay certificado cargado responde 409 con `sin_credenciales`, y la
- * aplicación continúa con su numeración local.
+ * Si no hay certificado cargado responde 409 con `sin_credenciales`. Es solo una consulta:
+ * el número definitivo lo asigna la emisión (comprobantes.php), bajo bloqueo.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -43,7 +43,9 @@ if ($pointOfSale < 1 || $pointOfSale > 99998) {
 
 $cbteTipo = arca_cbte_tipo($type, $subtype, $letter);
 if ($cbteTipo === null) {
-    api_error(422, 'Los comprobantes con letra ' . ($letter ?: '—') . ' no se numeran en ARCA');
+    api_error(422, $type === 'recibo'
+        ? 'Los recibos de cobranza no se numeran en ARCA (son documentos internos, letra X)'
+        : 'Los comprobantes con letra ' . ($letter ?: '—') . ' no se numeran en ARCA');
 }
 if (arca_credentials_status($pdo, $environment) === null) {
     api_error(409, 'No hay un certificado de ARCA cargado para ' . ARCA_ENVIRONMENT_NAMES[$environment], [

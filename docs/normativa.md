@@ -23,7 +23,7 @@ Cómo cumple el sistema cada requisito de ARCA sobre remitos y comprobantes. Las
 | Descripción y cantidad de los bienes | Tabla de ítems |
 | Transportista (cuando el traslado lo hace un tercero): razón social, domicilio comercial y CUIT | «Datos del transportista»; con transporte propio se indica «Transporte propio» |
 
-**Control al autorizar.** El servidor no autoriza un remito al que le falte alguno de esos datos (`api/lib/normativa.php`) y la interfaz avisa antes con las mismas reglas (`app/js/calculos.js`). Un remito sin autorizar se imprime con el sello «SIN AUTORIZAR».
+**Control al autorizar.** El servidor no autoriza un remito al que le falte alguno de esos datos (`app/api/lib/normativa.php`) y la interfaz avisa antes con las mismas reglas (`app/js/calculos.js`). Un remito sin autorizar se imprime con el sello «SIN AUTORIZAR».
 
 **C.A.I. vencido.** Un comprobante emitido con C.A.I. vencido no es válido: el sistema nunca autoriza con un talonario vencido.
 
@@ -84,11 +84,11 @@ Probado en homologación el 21/11/2026: Factura de Crédito A, su nota de crédi
 ## Fuentes
 
 - [RG 1415/2003, texto actualizado](https://www.argentina.gob.ar/normativa/nacional/resoluci%C3%B3n-1415-2003-81316/actualizacion) y [Anexo V (biblioteca de ARCA)](https://biblioteca.afip.gob.ar/pdfp/ANEXO_V_RG1415_V4290.pdf)
-- [RG ARCA 5678/2025](https://contadoresenred.com/resolucion-general-5678-2025/) ([PDF, Consejo de Salta](https://consejosalta.org.ar/wp-content/uploads/ARCA-5678.pdf))
+- [RG ARCA 5678/2025 (Boletín Oficial, 22/04/2025)](https://www.boletinoficial.gob.ar/detalleAviso/primera/324239/20250422) y [texto original (argentina.gob.ar)](https://www.argentina.gob.ar/normativa/nacional/resoluci%C3%B3n-5678-2025-411918/texto): reemplaza los arts. 27 y 30 de la RG 1415 (remito digital, conformidad del destinatario, 2 años de conservación; el C.A.I. sigue siendo obligatorio)
 - [Manual del usuario de WSASS (ARCA)](https://www.afip.gob.ar/ws/WSASS/WSASS_manual.pdf): certificados de homologación y «Crear autorización a servicio» con CUIT representado
 - [Certificados digitales para web services (ARCA)](https://www.afip.gob.ar/ws/documentacion/certificados.asp): en producción, «Administración de Certificados Digitales» y «Administrador de Relaciones de Clave Fiscal»
 - [Autorizar emisión de comprobantes clase A (argentina.gob.ar)](https://www.argentina.gob.ar/servicio/autorizar-emision-de-comprobantes-clase): Formulario 856 en «Regímenes de Facturación y Registración (REAR/RECE/RFI)»
-- [RG 4291/2018 (biblioteca de ARCA)](http://biblioteca.afip.gob.ar/dcp/REAG01004291_2018_08_02)
+- [RG 4291/2018 (biblioteca de ARCA)](https://biblioteca.afip.gob.ar/dcp/REAG01004291_2018_08_02)
 - [Factura de Crédito Electrónica MiPyME (argentina.gob.ar)](https://www.argentina.gob.ar/servicio/emitir-una-factura-de-credito-electronica-mipyme)
 - Tablas oficiales de WSFEv1 consultadas en homologación el 21/11/2026: `FEParamGetTiposCbte`, `FEParamGetCondicionIvaReceptor`, `FEParamGetTiposIva`, `FEParamGetTiposDoc`, `FEParamGetPtosVenta`
 - [Manual del desarrollador de WSCDC v4 (ARCA)](https://www.afip.gob.ar/ws/WSCDCV1/WSCDC-manual-desarrollador-v4.pdf)

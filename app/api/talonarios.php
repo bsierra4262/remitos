@@ -19,13 +19,19 @@
  * «wscdc» asociado en ARCA.
  *
  *   GET    talonarios.php?accion=listar               (admin) Talonarios y uso.
- *   GET    talonarios.php?accion=vigente&pv=1&tipo=91 (leer)  Talonario activo, sin consumir número.
+ *   GET    talonarios.php?accion=vigente&pv=1         (leer)  Talonario vigente, sin consumir número.
  *   POST   talonarios.php {punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, sin_verificar?}
  *                                                     (admin) Alta, constatada con ARCA.
  *   POST   talonarios.php {accion: 'verificar', id}   (admin) Vuelve a constatar un talonario con ARCA.
- *   POST   talonarios.php {accion: 'autorizar', remito_id, pv, tipo, fecha}  (crear) Asigna número.
+ *   POST   talonarios.php {accion: 'autorizar', remito_id, pv, fecha}  (crear) Asigna número.
  *   POST   talonarios.php {id, activa}                (admin) Activa o desactiva.
  *   DELETE talonarios.php?id=N                        (admin) Elimina.
+ *
+ * Solo se manejan talonarios de remitos R (tipo 91): las facturas y notas se autorizan
+ * con C.A.E. (comprobantes.php). El punto de venta, si no se indica, es el de los ajustes
+ * de remitos. La fecha del remito no puede ser posterior a hoy ni anterior a la del
+ * último remito autorizado en el mismo punto de venta: la numeración es correlativa y
+ * cronológica (RG 1415).
  *
  * Autorizar exige que el remito tenga los datos del Anexo V de la RG 1415 (ver
  * lib/normativa.php) y nunca usa un C.A.I. vencido: un comprobante emitido con C.A.I.
@@ -44,8 +50,8 @@ $pdo = api_db($config);
 /** Remito R (tabla de comprobantes de ARCA). */
 const TIPO_REMITO = 91;
 
-/** Tipos de comprobante admitidos en un talonario (tabla de comprobantes de ARCA). */
-const TIPOS_CAI = [1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 15, 91];
+/** Tipos de comprobante admitidos en un talonario: solo remitos R (las facturas van con C.A.E.). */
+const TIPOS_CAI = [TIPO_REMITO];
 
 /** Avisar cuando queden pocos números en el talonario. */
 const AVISO_RESTANTES = 20;
@@ -140,17 +146,42 @@ function talonario_iso_valid(string $date): bool
     return (bool) preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m) && checkdate((int) $m[2], (int) $m[3], (int) $m[1]);
 }
 
-/** Talonario activo con números disponibles para un punto de venta y tipo. */
-function talonario_vigente(PDO $pdo, int $pointOfSale, int $type, bool $lock = false): ?array
+/**
+ * Talonario activo, con números disponibles y C.A.I. vigente a la fecha $date (aaaa-mm-dd),
+ * para un punto de venta y tipo. Un talonario vencido se saltea: si hay uno nuevo cargado,
+ * se usa ese.
+ */
+function talonario_vigente(PDO $pdo, int $pointOfSale, int $type, string $date, bool $lock = false): ?array
 {
     $st = $pdo->prepare(
         'SELECT * FROM cai_talonarios
           WHERE punto_venta = ? AND tipo_comprobante = ? AND activa = 1 AND proximo_numero <= numero_hasta
+            AND cai_vencimiento >= ?
           ORDER BY numero_desde ASC LIMIT 1' . ($lock ? ' FOR UPDATE' : '')
     );
-    $st->execute([$pointOfSale, $type]);
+    $st->execute([$pointOfSale, $type, $date]);
 
     return $st->fetch() ?: null;
+}
+
+/** Talonario activo con números disponibles pero C.A.I. vencido a $date, o null (para avisar). */
+function talonario_vencido(PDO $pdo, int $pointOfSale, int $type, string $date): ?array
+{
+    $st = $pdo->prepare(
+        'SELECT * FROM cai_talonarios
+          WHERE punto_venta = ? AND tipo_comprobante = ? AND activa = 1 AND proximo_numero <= numero_hasta
+            AND cai_vencimiento < ?
+          ORDER BY cai_vencimiento DESC LIMIT 1'
+    );
+    $st->execute([$pointOfSale, $type, $date]);
+
+    return $st->fetch() ?: null;
+}
+
+/** Punto de venta de los remitos según los ajustes (1 si no está configurado). */
+function talonario_pv_ajustes(PDO $pdo): int
+{
+    return max(1, (int) ltrim((string) (settings_get($pdo, 'remito')['ptoVenta'] ?? '1'), '0'));
 }
 
 $method = api_method();
@@ -158,7 +189,8 @@ $method = api_method();
 if ($method === 'GET') {
     if (($_GET['accion'] ?? 'listar') === 'vigente') {
         auth_require($pdo, $config, 'leer', 'talonarios');
-        $t = talonario_vigente($pdo, (int) ($_GET['pv'] ?? 1), (int) ($_GET['tipo'] ?? TIPO_REMITO));
+        $pv = (int) ($_GET['pv'] ?? 0) ?: talonario_pv_ajustes($pdo);
+        $t = talonario_vigente($pdo, $pv, TIPO_REMITO, date('Y-m-d'));
         if ($t === null) {
             api_respond(200, [
                 'ok' => true,
@@ -179,6 +211,7 @@ if ($method === 'GET') {
     api_respond(200, [
         'ok' => true,
         'talonarios' => $list,
+        'punto_venta' => talonario_pv_ajustes($pdo),
         'resumen' => [
             'total' => count($list),
             'activos' => count(array_filter($list, static fn (array $x): bool => $x['activa'])),
@@ -194,11 +227,22 @@ if ($method === 'POST') {
 
     if (($body['accion'] ?? '') === 'autorizar') {
         $auth = auth_require($pdo, $config, 'crear', 'talonarios');
-        $pointOfSale = (int) ($body['pv'] ?? 1);
-        $type = (int) ($body['tipo'] ?? TIPO_REMITO);
+        $pointOfSale = (int) ($body['pv'] ?? 0) ?: talonario_pv_ajustes($pdo);
+        if ($pointOfSale < 1 || $pointOfSale > 99998) {
+            api_error(400, 'Punto de venta inválido (1 a 99998)');
+        }
+        if (isset($body['tipo']) && (int) $body['tipo'] !== TIPO_REMITO) {
+            api_error(400, 'Solo se autorizan remitos R (tipo 91) con C.A.I.; las facturas y notas llevan C.A.E.');
+        }
+        $type = TIPO_REMITO;
         $date = (string) ($body['fecha'] ?? '');
-        if (!talonario_iso_valid($date)) {
+        if ($date === '') {
             $date = date('Y-m-d');
+        } elseif (!talonario_iso_valid($date)) {
+            api_error(422, 'La fecha del remito no es válida');
+        }
+        if ($date > date('Y-m-d')) {
+            api_error(422, 'La fecha del remito no puede ser posterior a hoy.');
         }
         $remitoId = (string) ($body['remito_id'] ?? '');
         // Cada número se asigna a un remito concreto: nunca se consumen números sueltos.
@@ -226,17 +270,29 @@ if ($method === 'POST') {
                     'faltan' => $faltan,
                 ]);
             }
-            $t = talonario_vigente($pdo, $pointOfSale, $type, true);
-            if ($t === null) {
-                api_error(409, 'No hay un talonario activo con números disponibles. Cargá el próximo C.A.I.');
+            // Numeración correlativa y cronológica: un remito no puede llevar fecha anterior
+            // a la del último autorizado en el mismo punto de venta.
+            $st = $pdo->prepare(
+                "SELECT MAX(fecha_emision) FROM remitos WHERE estado = 'autorizado' AND punto_venta = ?"
+            );
+            $st->execute([$pointOfSale]);
+            $ultima = (string) ($st->fetchColumn() ?: '');
+            if ($ultima !== '' && $date < $ultima) {
+                api_error(422, 'La fecha del remito no puede ser anterior a la del último remito autorizado ('
+                    . date('d/m/Y', (int) strtotime($ultima)) . '): la numeración es correlativa.');
             }
-            if ($date > $t['cai_vencimiento']) {
-                api_error(
-                    409,
-                    'El C.A.I. venció el ' . date('d/m/Y', (int) strtotime($t['cai_vencimiento']))
-                        . '. Un comprobante emitido con C.A.I. vencido no es válido: cargá el talonario nuevo.',
-                    ['vencido' => true]
-                );
+            $t = talonario_vigente($pdo, $pointOfSale, $type, $date, true);
+            if ($t === null) {
+                $vencido = talonario_vencido($pdo, $pointOfSale, $type, $date);
+                if ($vencido !== null) {
+                    api_error(
+                        409,
+                        'El C.A.I. venció el ' . date('d/m/Y', (int) strtotime($vencido['cai_vencimiento']))
+                            . '. Un comprobante emitido con C.A.I. vencido no es válido: cargá el talonario nuevo.',
+                        ['vencido' => true]
+                    );
+                }
+                api_error(409, 'No hay un talonario activo con números disponibles. Cargá el próximo C.A.I.');
             }
             $number = (int) $t['proximo_numero'];
             $pdo->prepare('UPDATE cai_talonarios SET proximo_numero = proximo_numero + 1 WHERE id = ?')
@@ -250,7 +306,7 @@ if ($method === 'POST') {
             $doc['updated'] = (int) round(microtime(true) * 1000);
             $pdo->prepare(
                 "UPDATE remitos SET numero = ?, numero_int = ?, punto_venta = ?, estado = 'autorizado', data = ?,
-                        fecha = ?, fecha_emision = ?, updated = ?, actualizado_por = ? WHERE id = ?"
+                        fecha = ?, fecha_emision = ?, updated = ?, actualizado_por = ? WHERE id = ? AND estado = 'borrador'"
             )->execute([
                 $doc['numero'], $number, $pointOfSale, json_encode($doc, JSON_UNESCAPED_UNICODE),
                 $doc['fecha'], $date, $doc['updated'], $auth['nombre'], $remitoId,
@@ -323,7 +379,7 @@ if ($method === 'POST') {
 
     // Primero la coherencia de los datos; después la constatación con ARCA (WSCDC).
     if (!in_array($type, TIPOS_CAI, true)) {
-        api_error(400, 'Tipo de comprobante inválido (91 para remitos R)');
+        api_error(400, 'Solo se cargan talonarios de remitos R (tipo 91): las facturas y notas llevan C.A.E.');
     }
     if ($pointOfSale < 1 || $pointOfSale > 99998) {
         api_error(400, 'Punto de venta inválido (1 a 99998)');
@@ -361,8 +417,8 @@ if ($method === 'POST') {
             'verificacion' => $v,
         ]);
     }
-    if ($v['estado'] === 'error' && !api_bool($body['sin_verificar'] ?? false)) {
-        api_error(502, 'No se pudo constatar el C.A.I. con ARCA: ' . $v['detalle'], [
+    if (in_array($v['estado'], ['error', 'sin_credenciales'], true) && !api_bool($body['sin_verificar'] ?? false)) {
+        api_error($v['estado'] === 'error' ? 502 : 409, ($v['estado'] === 'error' ? 'No se pudo constatar el C.A.I. con ARCA: ' : '') . $v['detalle'], [
             'verificacion' => $v, 'puede_cargar_sin_verificar' => true,
         ]);
     }

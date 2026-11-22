@@ -6,7 +6,7 @@
  * Autenticación por clave (cabecera X-API-Key).
  *
  * Hay dos clases de credencial:
- *  - Clave maestra: definida en config.php (preferentemente como SHA-256).
+ *  - Clave maestra: en config.php se guarda solo su SHA-256 (master_key_hash).
  *    Puede todo, incluida la administración de claves, talonarios y
  *    credenciales de ARCA.
  *  - Claves de servicio: se crean desde el panel con permisos acotados
@@ -150,6 +150,10 @@ function auth_require_session(PDO $pdo, string $permission, string $resource): a
         api_require_same_origin();
     }
     audit_actor(['id' => $user['id'], 'nombre' => $user['nombre']]);
+    // La sesión ya se leyó y se marcó la actividad: se escribe y se libera. PHP bloquea el
+    // archivo de sesión mientras está abierto, y una llamada larga a ARCA frenaría las
+    // demás peticiones del mismo usuario (otras pestañas, el panel).
+    session_write_close();
     $permissions = USER_ROLES[$user['rol']];
     if (!in_array($permission, $permissions, true)) {
         audit_event($pdo, 'Acceso rechazado (' . $permission . ')', [
@@ -171,6 +175,18 @@ function auth_require_session(PDO $pdo, string $permission, string $resource): a
         'permisos' => $permissions,
         'usuario' => $user,
     ];
+}
+
+/**
+ * Operación sensible (certificados, claves de API, usuarios, exportación, datos fiscales del
+ * emisor): con sesión de usuario exige haber confirmado la identidad con Google hace poco
+ * (403 `reconfirmar_google`). La clave maestra ya es una credencial de alto privilegio.
+ */
+function auth_confirm_identity(array $auth): void
+{
+    if (isset($auth['usuario'])) {
+        user_confirm_identity($auth['usuario']);
+    }
 }
 
 /** ¿La IP actual superó el máximo de claves rechazadas en la ventana? */

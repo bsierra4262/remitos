@@ -30,9 +30,13 @@ header('X-Content-Type-Options: nosniff');
 const GOOGLE_MAX_FALLOS = 20;
 
 /** Vuelve a la aplicación (en el mismo host) con un resultado para mostrar. */
-function google_back(string $result = ''): never
+/** Páginas a las que se puede volver después de Google (lista cerrada: nada de redirecciones abiertas). */
+const GOOGLE_VOLVER = ['panel' => 'panel.html'];
+
+function google_back(string $result = '', string $page = ''): never
 {
-    header('Location: ' . google_base_url() . '/' . ($result !== '' ? '?ingreso=' . rawurlencode($result) : ''), true, 302);
+    header('Location: ' . google_base_url() . '/' . (GOOGLE_VOLVER[$page] ?? '')
+        . ($result !== '' ? '?ingreso=' . rawurlencode($result) : ''), true, 302);
     exit;
 }
 
@@ -57,7 +61,11 @@ if (($_GET['accion'] ?? '') === 'inicio') {
     $state = google_random();
     $nonce = google_random();
     $verifier = google_random(48);
-    google_save_state($config, ['state' => $state, 'nonce' => $nonce, 'verifier' => $verifier, 'confirmar' => $current !== null]);
+    google_save_state($config, [
+        'state' => $state, 'nonce' => $nonce, 'verifier' => $verifier,
+        'confirmar' => $current !== null, 'uid' => $current['id'] ?? 0,
+        'volver' => isset(GOOGLE_VOLVER[$_GET['volver'] ?? '']) ? (string) $_GET['volver'] : '',
+    ]);
     header('Location: ' . google_auth_url($g, $state, $nonce, $verifier, google_redirect_uri(), $current['email'] ?? ''), true, 302);
     exit;
 }
@@ -107,12 +115,22 @@ if ($user === null || !(int) $user['activo']) {
     google_back('google_sin_usuario');
 }
 
+$confirm = !empty($saved['confirmar']);
+// Confirmar la identidad es volver a probar que quien opera es el dueño de la sesión:
+// con otra cuenta no se confirma nada (y no se cambia de usuario por la puerta lateral).
+if ($confirm && (int) ($saved['uid'] ?? 0) !== (int) $user['id']) {
+    audit_event($pdo, 'Confirmación de identidad rechazada', [
+        'categoria' => 'acceso', 'nivel' => 'error', 'recurso' => 'sesion', 'clave' => mb_substr($email, 0, 80),
+        'detalle' => 'se eligió en Google una cuenta distinta a la de la sesión', 'estado' => 403,
+    ]);
+    google_back('google_otra_cuenta', (string) ($saved['volver'] ?? ''));
+}
+
 $pdo->prepare('UPDATE usuarios SET ultimo_ingreso = NOW() WHERE id = ?')->execute([$user['id']]);
 attempts_clear($pdo, 'google', $email);
 session_login($pdo, (int) $user['id']);
-$confirm = !empty($saved['confirmar']);
 audit_event($pdo, $confirm ? 'Identidad confirmada con Google' : 'Ingreso al sistema', [
     'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => (int) $user['id'], 'clave' => $user['nombre'],
     'detalle' => 'con Google',
 ]);
-google_back($confirm ? 'confirmado' : '');
+google_back($confirm ? 'confirmado' : '', (string) ($saved['volver'] ?? ''));

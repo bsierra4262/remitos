@@ -11,7 +11,7 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 | `app_key` y hash de la clave maestra | `api/config.php` (permisos `0600`, fuera del repositorio, bloqueado para la web) | Copia en el gestor de contraseñas de la empresa |
 | Claves de API | `api_keys.hash` | Solo SHA-256; la clave se muestra una vez |
 | Datos de clientes (PII, Ley 25.326) | Tablas `clientes`, `remitos`, `comprobantes` | Acceso con sesión o clave; exportación solo para administradores y auditada |
-| Numeración fiscal (C.A.I. y CAE) | Tablas `remitos`, `comprobantes`, `cai_talonarios` | Asignada solo por el servidor; claves únicas en la base; documentos autorizados inmutables |
+| Numeración fiscal (C.A.I. y CAE) | Tablas `remitos`, `comprobantes`, `cai_talonarios` | Asignada solo por el servidor; claves únicas en la base; documentos autorizados que no se modifican ni se eliminan (ni siquiera un administrador) |
 | Auditoría | Tabla `api_log` | Hash encadenado, retención por tiempo, sin escritura de texto libre desde la interfaz |
 
 ## 2. Modelo de amenazas del circuito fiscal
@@ -57,7 +57,7 @@ Complementa la sección «Seguridad» del [README](../README.md) con el modelo d
 ## 5. Respuesta a incidentes
 
 1. **Contener:** desactivar el usuario o la clave involucrados (sus sesiones se cierran en el acto). Si el servidor está comprometido, quitar el certificado de ARCA desde la aplicación y revocarlo en ARCA.
-2. **Evidencia:** verificar la integridad de la auditoría (Panel → Actividad → Verificar integridad) y exportar los eventos del período.
+2. **Evidencia:** verificar la integridad de la auditoría (Panel → Actividad → Verificar integridad) y consultar la Actividad filtrada por categoría y fecha (guardar capturas o el listado como evidencia).
 3. **Erradicar:** rotar `app_key`, la clave maestra y las contraseñas de base de datos y SSH; generar y cargar un certificado nuevo.
 4. **Recuperar:** restaurar desde el último respaldo íntegro si hace falta.
 5. **Informar:** si hubo acceso a datos personales, evaluar la notificación a los titulares y a la Agencia de Acceso a la Información Pública.

@@ -85,7 +85,11 @@ function audit_event(PDO $pdo, string $action, array $options = []): void
     ];
 
     try {
-        $pdo->query("SELECT GET_LOCK('remitos_auditoria', 5)");
+        // Sin el bloqueo, dos registros simultáneos podrían encadenarse al mismo hash
+        // anterior y romper la cadena: se aborta y lo informa el catch de abajo.
+        if (!api_try_lock($pdo, 'remitos_auditoria', 5)) {
+            throw new RuntimeException('No se obtuvo el bloqueo de la auditoría');
+        }
         try {
             $prev = $pdo->query('SELECT hash FROM api_log ORDER BY id DESC LIMIT 1')->fetchColumn() ?: null;
             $pdo->prepare(
@@ -93,7 +97,7 @@ function audit_event(PDO $pdo, string $action, array $options = []): void
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute([...array_values($row), $prev, audit_hash($prev, $row)]);
         } finally {
-            $pdo->query("SELECT RELEASE_LOCK('remitos_auditoria')");
+            api_unlock($pdo, 'remitos_auditoria');
         }
         if (random_int(1, 200) === 1) {
             $pdo->exec('DELETE FROM api_log WHERE fecha < NOW() - INTERVAL ' . AUDIT_RETENTION_DAYS . ' DAY');

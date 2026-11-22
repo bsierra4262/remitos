@@ -170,15 +170,16 @@ if (calib.adjustFullBaked !== 'v2') {
 })();
 
 /* --- Fechas -----------------------------------------------------------------
-   Los <input type="date"> manejan ISO (aaaa-mm-dd) y el comprobante se imprime
-   en dd/mm/aaaa, que es el formato de la RG 1415. Se convierte en el borde. */
+   Los campos de fecha (.fecha, js/controles.js) se escriben y guardan en dd/mm/aaaa,
+   el formato de la RG 1415. Si llega una fecha ISO (aaaa-mm-dd, por ejemplo pegada o
+   cargada por programa) se convierte en el borde. */
 const isoADmy = v =>
   /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : v || '';
 const dmyAIso = v =>
   /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(v || '')
     ? (([d, m, a]) => `${a}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`)(v.split('/'))
     : '';
-const esFecha = el => el.type === 'date';
+const esFecha = el => el.type === 'date' || el.classList.contains('fecha');
 
 /* ============================== BINDING FORM ============================== */
 function bindForm() {
@@ -211,7 +212,7 @@ function wireFormatos() {
     el.addEventListener('blur', () => {
       const p = problemaCuit(el.value);
       el.setCustomValidity(p);
-      el.title = p;
+      if (p) controles.marcarError(el, p);
     });
     el.addEventListener('input', () => {
       el.setCustomValidity('');
@@ -237,7 +238,7 @@ function wireFormatos() {
 function formFromDoc() {
   $$('[data-path]').forEach(el => {
     const v = getPath(doc, el.dataset.path) ?? '';
-    el.value = esFecha(el) ? dmyAIso(v) : v;
+    el.value = el.type === 'date' ? dmyAIso(v) : v;
   });
   const radio = $(`input[name=tipoDoc][value="${doc.recibi.tipoDoc || ''}"]`);
   if (radio) radio.checked = true;
@@ -570,8 +571,24 @@ function syncFiscalUI() {
   $('#remCai').value = aut ? doc.cai : '';
   $('#remCaiVto').value = aut ? doc.caiVto : '';
   $('#remFacturadoFila').hidden = !aut;
+  $('#btnFacturarRemito').hidden = !aut || !!doc.facturado;
   $('#remFacturado').checked = !!doc.facturado;
   bloquearRemito(aut && !enPrueba());
+  const dig = $('#btnDigital');
+  dig.disabled = !aut;
+  dig.title = aut
+    ? 'Remito digital sin imprimir (RG 5678/2025): PDF y enlace de conformidad para el destinatario'
+    : 'Disponible cuando el remito está autorizado (con número y C.A.I.)';
+  syncTransporte();
+}
+/* Los datos del transportista (razón social, CUIT y domicilio) solo corresponden cuando el
+   traslado lo hace un tercero (RG 1415, Anexo V, IV): con transporte propio no se piden. */
+function syncTransporte() {
+  const tercero = ($('[data-path="transporte.tipo"]') || {}).value === 'tercero';
+  ['transporte.nombre', 'transporte.cuit', 'transporte.domicilio'].forEach(p => {
+    const campo = $(`[data-path="${p}"]`);
+    if (campo) campo.closest('.field').hidden = !tercero;
+  });
 }
 /* Un remito autorizado no se modifica: el formulario queda de solo lectura. */
 function bloquearRemito(bloqueado) {
@@ -586,7 +603,41 @@ function bloquearRemito(bloqueado) {
   });
   $$('#itemsList [data-del]').forEach(b => (b.disabled = bloqueado));
 }
+/* Factura a partir de un remito autorizado: cliente e ítems (los precios se completan a
+   mano). Al obtener el CAE en producción, el servidor marca el remito como facturado. */
+async function facturarRemito() {
+  if (!remitoAutorizado(doc)) return;
+  const r = clone(doc);
+  if (!(await nuevoComprobante('factura'))) return;
+  const c = r.cliente || {};
+  const cond = CONDICIONES_IVA[c.condIVA] ? c.condIVA : 'Consumidor Final';
+  compDoc.cliente = {
+    razonSocial: c.razonSocial || c.senores || '',
+    cuit: c.cuit || '',
+    condIVA: cond,
+    domicilio: c.domicilio || '',
+    localidad: c.localidad || '',
+    cp: c.cp || '',
+  };
+  compDoc.letra = CONDICIONES_IVA[cond].clase;
+  if (esElectronico(compDoc)) compDoc.ptoVenta = pv5(emisor().ptoVenta);
+  const items = (r.items || []).filter(i => String(i.descripcion || '').trim());
+  compDoc.items = items.length
+    ? items.map(i => ({
+        descripcion: ((i.articulo ? i.articulo + ' · ' : '') + i.descripcion).slice(0, 600),
+        cantidad: /^\d+([.,]\d{1,3})?$/.test(String(i.cantidad).trim()) ? String(i.cantidad).trim() : '1',
+        precio: '',
+      }))
+    : compDoc.items;
+  compDoc.remitoId = r.id;
+  compDoc.observaciones = 'Remito Nº ' + r.numero;
+  touchComp();
+  renderComprobanteEditor();
+  renderComprobante();
+  toast('Factura armada con el remito Nº ' + r.numero + ': completá los precios y emitila.', 4200, true);
+}
 function wireRemitoFiscal() {
+  $('#btnFacturarRemito').addEventListener('click', facturarRemito);
   $('#remCopias').addEventListener('change', e => {
     calib.copias = parseInt(e.target.value, 10) === 1 ? 1 : 2;
     save(LS.calib, calib);
@@ -686,7 +737,7 @@ function buildRemitoTemplate(opts = {}) {
   const F = blanco ? { cai: '', caiVto: '' } : doc;
   const lbl = '#1a1a1a',
     val = '#000';
-  const C = COMPANY,
+  const C = emisorImpreso(),
     dt = DOC_TYPES;
   /* Solo un remito autorizado tiene número fiscal («00001-00000002»). */
   const nroStr = !blanco && remitoAutorizado(doc) ? String(doc.numero).replace('-', ' - ') : '';
@@ -913,7 +964,10 @@ function setDocMode(mode) {
   page.classList.toggle('mode-full', full);
   const pv = $('#previewPane');
   if (pv) pv.classList.toggle('m-full', full);
-  $$('#modeSwitch button').forEach(b => b.classList.toggle('active', b.dataset.mode === calib.docMode));
+  $$('#modeSwitch button').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === calib.docMode);
+    b.setAttribute('aria-pressed', String(b.dataset.mode === calib.docMode));
+  });
   save(LS.calib, calib);
   /* cada modo tiene su propia hoja, offsets y ajustes → re-aplicar y re-dibujar */
   applyCalib();
@@ -1197,8 +1251,6 @@ const ICN = {
   doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
   users:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>',
-  clock:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   print:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>',
@@ -1297,15 +1349,76 @@ function borradorRecuperable() {
   return hayTrabajoPendiente(b) ? b : null;
 }
 
+/* ---- Indicadores de Inicio ----
+   Lo que hay que mirar al empezar el día: lo facturado en el mes (con CAE, notas de crédito
+   restadas), los remitos autorizados que faltan facturar, los comprobantes A/B sin autorizar
+   y el talonario de C.A.I. vigente. Cada tarjeta con algo pendiente abre el listado. */
+let caiVigente = null; // { hay, talonario } de talonarios.php?accion=vigente
+function facturadoDelMes() {
+  const [, mes, anio] = (currentFecha() || '').split('/');
+  // Solo los del modo en que se trabaja: en producción no cuentan las facturas de prueba
+  // (sin validez fiscal); en homologación se muestran las de prueba.
+  const modo = enHomologacion() ? 'homologacion' : 'produccion';
+  let total = 0,
+    n = 0;
+  datos.comprobantes.forEach(c => {
+    if (!compAutorizado(c) || c.tipo === 'recibo') return;
+    if ((c.ambienteArca || 'produccion') !== modo) return;
+    const [, m, a] = String(c.fecha || '').split('/');
+    if (m !== mes || a !== anio) return;
+    const t = compTotals(c);
+    if (t.errores && t.errores.length) return;
+    total += c.tipo === 'nota' && c.subtipo !== 'debito' ? -t.total : t.total;
+    n++;
+  });
+  return { total, n };
+}
+function renderIndicadores() {
+  const mes = facturadoDelMes();
+  const pendientes = datos.remitos.filter(r => r.estado === 'autorizado' && !r.facturado).length;
+  const sinAut = datos.comprobantes.filter(
+    c => /^[AB]$/.test(c.letra) && !compAutorizado(c) && c.tipo !== 'recibo'
+  ).length;
+  const t = caiVigente && caiVigente.hay ? caiVigente.talonario : null;
+  const card = (icn, v, l, opts = {}) =>
+    `<${opts.ir ? `button type="button" data-kpi="${opts.ir}"` : 'div'} class="stat${opts.alerta ? ' alerta' : ''}"><div class="icn">${icn}</div><div><div class="v">${esc(String(v))}</div><div class="l">${l}</div></div></${opts.ir ? 'button' : 'div'}>`;
+  $('#inicioStats').innerHTML =
+    card(
+      ICN.receipt,
+      fmtMoney(mes.total),
+      'Facturado este mes' + (enHomologacion() ? ' · pruebas' : '') + ` <span class="note">${mes.n} con CAE</span>`
+    ) +
+    card(ICN.doc, pendientes, 'Remitos autorizados sin facturar', {
+      ir: pendientes ? 'remitos' : '',
+      alerta: pendientes > 0,
+    }) +
+    card(ICN.receipt, sinAut, 'Facturas y notas sin autorizar', { ir: sinAut ? 'sinaut' : '', alerta: sinAut > 0 }) +
+    card(
+      ICN.doc,
+      t ? t.restantes : caiVigente ? '—' : '…',
+      t
+        ? 'Números de C.A.I. disponibles · vence ' + esc(fmtFechaIso(t.cai_vencimiento))
+        : caiVigente
+          ? 'Sin talonario de C.A.I. vigente'
+          : 'Talonario de C.A.I.',
+      { alerta: !!caiVigente && (!t || t.por_vencer || t.restantes <= 20) }
+    );
+  if (caiVigente === null) {
+    caiVigente = false;
+    api('talonarios.php?accion=vigente')
+      .then(j => {
+        caiVigente = j;
+        renderIndicadores();
+      })
+      .catch(() => (caiVigente = null));
+  }
+}
+const fmtFechaIso = iso => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso.split('-').reverse().join('/') : iso || '');
+
 function renderInicio() {
   renderSaludo();
   const docs = datos.remitos;
-  const stat = (icn, v, l) =>
-    `<div class="stat"><div class="icn">${icn}</div><div><div class="v">${esc(String(v))}</div><div class="l">${l}</div></div></div>`;
-  $('#inicioStats').innerHTML =
-    stat(ICN.doc, datos.remitosTotal, 'Remitos') +
-    stat(ICN.receipt, datos.comprobantesTotal, 'Comprobantes') +
-    stat(ICN.users, datos.clientes.length, 'Clientes en la agenda');
+  renderIndicadores();
 
   const list = $('#inicioRecent');
   const borrador = borradorRecuperable();
@@ -1380,6 +1493,17 @@ function renderInicio() {
       renderInicio();
     })
   );
+  // Filas usables con teclado: Enter o espacio abren el documento.
+  list.querySelectorAll('.doc-row').forEach(r => {
+    r.tabIndex = 0;
+    r.setAttribute('role', 'button');
+    r.addEventListener('keydown', e => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target === r) {
+        e.preventDefault();
+        r.click();
+      }
+    });
+  });
   list.querySelectorAll('.doc-row').forEach(r =>
     r.addEventListener('click', async e => {
       if (r.dataset.comp) {
@@ -1470,6 +1594,12 @@ function openDoc(id) {
    y solo los modifica un administrador. El certificado y la clave privada se envían
    una única vez al servidor, que los guarda cifrados; nunca quedan en el navegador. */
 const emisor = () => datos.ajustes.emisor;
+/* Datos del emisor que se imprimen: los de la empresa (config.js), con el CUIT configurado en
+   «Conexión con ARCA», que es el que se informa a ARCA y va en el QR: no pueden diferir. */
+function emisorImpreso() {
+  const cuit = String((datos.ajustes && datos.ajustes.emisor && datos.ajustes.emisor.cuit) || '').replace(/\D/g, '');
+  return Object.assign({}, COMPANY, cuit.length === 11 ? { cuit: cuitConGuiones(cuit) } : {});
+}
 let certEstado = { homologacion: null, produccion: null }; // datos públicos informados por el servidor
 
 function renderConfig() {
@@ -1482,6 +1612,7 @@ function renderConfig() {
   $('#apiMipyme').checked = !!e.mipyme;
   $('#apiCbu').value = e.cbu || '';
   $('#apiTransf').value = e.transferencia || 'SCA';
+  $('#apiFceDatos').hidden = !e.mipyme;
   const admin = esAdmin();
   ['#apiAmbiente', '#apiCuit', '#apiPv', '#remPvCfg', '#apiEnabled', '#apiMipyme', '#apiCbu', '#apiTransf'].forEach(
     id => ($(id).disabled = !admin)
@@ -1543,10 +1674,18 @@ function renderEstadoChip() {
   const online = estaEnLinea();
   chip.classList.toggle('offline', !online);
   chip.classList.toggle('api', online && emisor().emision);
+  const prueba = online && emisor().emision && emisor().ambiente !== 'produccion';
+  chip.classList.toggle('prueba', prueba);
+  chip.title = prueba
+    ? 'Emisión en el ambiente de pruebas de ARCA (homologación): los comprobantes no tienen validez fiscal'
+    : 'Modo de trabajo y estado de la conexión';
   txt.textContent = !online
     ? 'Sin conexión'
-    : (emisor().emision ? 'Emisión electrónica' : 'Numeración propia') + (doc.pendiente ? ' · 1 por guardar' : '');
+    : (prueba ? 'ARCA · Pruebas' : emisor().emision ? 'Emisión electrónica' : 'Numeración propia') +
+      (doc.pendiente ? ' · 1 por guardar' : '');
 }
+/* ¿Se emite contra el ambiente de pruebas de ARCA (homologación)? */
+const enHomologacion = () => !!emisor().emision && emisor().ambiente !== 'produccion';
 
 /* ----------------------------- Certificado ----------------------------- */
 const ICN_CERT =
@@ -1585,8 +1724,9 @@ function renderCertificado() {
           <div class="cert-meta"><span>Huella SHA-256 <code>${esc(c.huella.slice(0, 16))}…</code></span>
             <span>Cargado el ${esc(fmtFechaHora(c.cargado))}${c.cargado_por ? ' · ' + esc(c.cargado_por) : ''}</span></div></div>
       </div>`;
-    pill.textContent = c.vencido ? 'Vencido' : 'Cargado';
-    pill.className = 'mode-pill ' + (c.vencido ? 'off' : 'on');
+    const porVencer = !c.vencido && c.dias_para_vencer <= 30;
+    pill.textContent = c.vencido ? 'Vencido' : porVencer ? 'Por vencer' : 'Cargado';
+    pill.className = 'mode-pill ' + (c.vencido ? 'off' : porVencer ? 'wait' : 'on');
   } else {
     box.innerHTML = `<div class="cert empty-cert"><span class="cert-ico">${ICN_CERT}</span>
         <div class="cert-main"><strong>Sin certificado para ${ambienteNombre(amb)}</strong>
@@ -1814,8 +1954,30 @@ function avisoApi(tipo, titulo, detalle) {
   avisoCert(tipo, titulo, detalle, '#apiAlert');
 }
 
+/* CBU (BCRA, Com. A 6044): dos bloques, cada uno con su dígito verificador. */
+function cbuValido(cbu) {
+  if (!/^\d{22}$/.test(cbu)) return false;
+  const dv = (digitos, pesos) =>
+    (10 - (digitos.split('').reduce((s, d, i) => s + d * pesos[i % pesos.length], 0) % 10)) % 10;
+  return dv(cbu.slice(0, 7), [7, 1, 3, 9]) === +cbu[7] && dv(cbu.slice(8, 21), [3, 9, 7, 1]) === +cbu[21];
+}
+
 /* Guarda los datos del emisor y el punto de venta de los remitos (solo administradores). */
 async function saveApiCfg(silencioso) {
+  const cbu = $('#apiCbu').value.replace(/\D/g, '');
+  controles.limpiarErrores($('#cfgApi'));
+  if ((cbu || $('#apiMipyme').checked) && !cbuValido(cbu)) {
+    $('#apiFceDatos').hidden = false;
+    controles.marcarError(
+      $('#apiCbu'),
+      cbu
+        ? 'El CBU no es válido: revisá los 22 dígitos (los dígitos verificadores no coinciden).'
+        : 'Para la Factura de Crédito MiPyME hace falta el CBU de la empresa.'
+    );
+    controles.enfocar($('#apiCbu'));
+    $('#apiMipyme').checked = !!emisor().mipyme;
+    return false;
+  }
   const valores = {
     ambiente: $('#apiAmbiente').value,
     cuit: $('#apiCuit').value,
@@ -1854,9 +2016,28 @@ async function saveApiCfg(silencioso) {
   }
 }
 function wireConfig() {
+  $('.cfg-tabs').addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const tabs = [...$$('.cfg-tab')].filter(x => x.offsetParent !== null);
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const j =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? tabs.length - 1
+          : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[j].focus();
+    tabs[j].click();
+  });
   $$('.cfg-tab').forEach(t =>
     t.addEventListener('click', () => {
-      $$('.cfg-tab').forEach(x => x.classList.toggle('active', x === t));
+      $$('.cfg-tab').forEach(x => {
+        x.classList.toggle('active', x === t);
+        x.setAttribute('aria-selected', String(x === t));
+        x.tabIndex = x === t ? 0 : -1;
+      });
       $$('.cfg-panel').forEach(x => x.classList.remove('active'));
       const panel = { local: '#cfgLocal', api: '#cfgApi', usuarios: '#cfgUsuarios' }[t.dataset.tab];
       $(panel).classList.add('active');
@@ -1868,6 +2049,7 @@ function wireConfig() {
     openPanel($('#calib'), $('#backdrop'));
   });
   $('#apiSave').addEventListener('click', () => saveApiCfg());
+  $('#apiMipyme').addEventListener('change', () => ($('#apiFceDatos').hidden = !$('#apiMipyme').checked));
   $('#apiAmbiente').addEventListener('change', () => {
     ocultar('#certAlert');
     renderCertificado();
@@ -2020,8 +2202,74 @@ function applyCurrentDate(force) {
   if (force) fechaManual = false;
   doc.fecha = currentFecha();
   const inp = $('[data-path="fecha"]');
-  if (inp) inp.value = esFecha(inp) ? dmyAIso(doc.fecha) : doc.fecha;
+  if (inp) inp.value = inp.type === 'date' ? dmyAIso(doc.fecha) : doc.fecha;
   renderPreview();
+}
+
+/* ---- Nota de crédito o débito: comprobante asociado ----
+   ARCA exige que la nota se asocie a un comprobante autorizado de la misma clase (CbtesAsoc,
+   validación 10197). Se elige de los comprobantes con CAE del mismo ambiente, primero los
+   del cliente de la nota; los datos se completan solos. */
+const TIPO_ASOC = c =>
+  c.tipo === 'factura' ? 'Factura' : c.subtipo === 'debito' ? 'Nota de débito' : 'Nota de crédito';
+function comprobantesAsociables(d) {
+  const ambiente = emisor().ambiente;
+  const cuit = String((d.cliente && d.cliente.cuit) || '').replace(/\D/g, '');
+  return datos.comprobantes
+    .filter(c => c.id !== d.id && c.tipo !== 'recibo' && compAutorizado(c) && c.letra === d.letra)
+    .filter(c => !c.ambienteArca || c.ambienteArca === ambiente)
+    .map(c => ({ c, propio: !!cuit && String(c.cliente && c.cliente.cuit).replace(/\D/g, '') === cuit }))
+    .sort((a, b) => b.propio - a.propio || (b.c.updated || 0) - (a.c.updated || 0))
+    .slice(0, 200);
+}
+function selectorAsociado(d) {
+  if (compAutorizado(d)) return '';
+  const lista = comprobantesAsociables(d);
+  if (!lista.length)
+    return `<p class="hint">No hay comprobantes ${esc(d.letra)} con CAE para elegir: completá los datos del comprobante asociado a mano.</p>`;
+  const elegido = lista.find(
+    ({ c }) => TIPO_ASOC(c) === d.compAsoc.tipo && +c.numero === +d.compAsoc.nro && +c.ptoVenta === +d.compAsoc.pv
+  );
+  return `<div class="field full"><label>Elegir un comprobante con CAE</label><select id="compAsocElegir">
+      <option value="">Elegí…</option>
+      ${lista
+        .map(
+          ({ c, propio }) =>
+            `<option value="${escA(c.id)}" ${elegido && elegido.c === c ? 'selected' : ''}>${esc(etiquetaComprobante(c))} · ${esc(c.fecha || '')} · ${esc(c.cliente.razonSocial || c.cliente.cuit || 'sin cliente')} · ${esc(totalComprobante(c))}${propio ? ' · este cliente' : ''}</option>`
+        )
+        .join('')}
+    </select></div>`;
+}
+/** Completa el comprobante asociado (y el cliente y los ítems, si la nota está vacía). */
+function asociarComprobante(c) {
+  const d = compDoc;
+  d.compAsoc = { tipo: TIPO_ASOC(c), letra: c.letra, pv: pv5(c.ptoVenta), nro: String(c.numero).padStart(8, '0') };
+  const vacia = !(d.items || []).some(i => String(i.descripcion || '').trim());
+  if (!String(d.cliente.razonSocial || d.cliente.cuit || '').trim()) d.cliente = clone(c.cliente);
+  if (vacia) d.items = clone(c.items || []);
+  if (c.fce) d.fce = true;
+  touchComp();
+  renderComprobanteEditor();
+  renderComprobante();
+}
+/** Nueva nota de crédito o débito asociada a un comprobante con CAE. */
+async function notaDesde(c, subtipo) {
+  if (!(await nuevoComprobante('nota'))) return;
+  compDoc.subtipo = subtipo;
+  compDoc.letra = c.letra;
+  compDoc.cliente = clone(c.cliente);
+  compDoc.items = clone(c.items || []);
+  compDoc.conceptoTipo = c.conceptoTipo || 1;
+  asociarComprobante(c);
+  toast(
+    'Nota de ' +
+      (subtipo === 'debito' ? 'débito' : 'crédito') +
+      ' asociada a ' +
+      etiquetaComprobante(c) +
+      '. Revisá ítems e importes.',
+    4200,
+    true
+  );
 }
 
 /* Comprobantes: etiqueta, estado e importe para los listados. */
@@ -2050,6 +2298,7 @@ function abrirComprobante(id) {
   showView(c.tipo);
 }
 
+const savedFiltro = { q: '', estado: '' };
 function renderSavedComprobantes(tipo) {
   const list = $('#savedList');
   const docs = datos.comprobantes.filter(c => c.tipo === tipo).sort((a, b) => (b.updated || 0) - (a.updated || 0));
@@ -2063,17 +2312,97 @@ function renderSavedComprobantes(tipo) {
     list.innerHTML = `<div class="empty">${ICN.receipt}<span>Todavía no hay ${tipo === 'recibo' ? 'recibos guardados' : nombre.toLowerCase()}.</span></div>`;
     return;
   }
-  list.innerHTML = docs
+  /* Búsqueda (cliente, CUIT o número), filtro por estado y total de lo que se ve. */
+  if (!list.querySelector('#savedBuscar') || list.dataset.tipo !== tipo) {
+    list.dataset.tipo = tipo;
+    list.innerHTML = `<div class="saved-filtros">
+        <input id="savedBuscar" type="search" placeholder="Buscar por cliente, CUIT o número" aria-label="Buscar comprobantes" value="${escA(savedFiltro.q)}">
+        <select id="savedEstado" aria-label="Estado">
+          ${[
+            ['', 'Todos'],
+            ['cae', 'Con CAE'],
+            ['sin', 'Sin autorizar'],
+            ['interno', 'Internos (X)'],
+          ]
+            .map(([v, n]) => `<option value="${v}" ${savedFiltro.estado === v ? 'selected' : ''}>${n}</option>`)
+            .join('')}
+        </select>
+      </div><div id="savedItems"></div><div class="saved-total" id="savedTotal"></div>`;
+    $('#savedBuscar').addEventListener('input', e => {
+      savedFiltro.q = e.target.value;
+      renderSavedComprobantes(tipo);
+    });
+    $('#savedEstado').addEventListener('change', e => {
+      savedFiltro.estado = e.target.value;
+      renderSavedComprobantes(tipo);
+    });
+  }
+  const q = savedFiltro.q.trim().toLowerCase();
+  const qDig = q.replace(/\D/g, '');
+  const visibles = docs.filter(c => {
+    const est = compAutorizado(c) ? 'cae' : /^[AB]$/.test(c.letra) ? 'sin' : 'interno';
+    if (savedFiltro.estado && est !== savedFiltro.estado) return false;
+    if (!q) return true;
+    const texto = (c.cliente.razonSocial + ' ' + etiquetaComprobante(c)).toLowerCase();
+    return (
+      texto.includes(q) ||
+      (qDig.length >= 3 && (String(c.cliente.cuit).replace(/\D/g, '') + String(c.numero)).includes(qDig))
+    );
+  });
+  const totalCae = visibles
+    .filter(c => compAutorizado(c))
+    .reduce((s, c) => {
+      const t = compTotals(c);
+      return s + (t.errores && t.errores.length ? 0 : t.total);
+    }, 0);
+  $('#savedTotal').innerHTML =
+    `${visibles.length} de ${docs.length}` +
+    (tipo !== 'recibo' ? ` · <b>Total con CAE: ${esc(fmtMoney(totalCae))}</b>` : '');
+  const cont = $('#savedItems');
+  if (!visibles.length) {
+    cont.innerHTML = '<div class="empty"><span>Ningún comprobante coincide con la búsqueda.</span></div>';
+    return;
+  }
+  cont.innerHTML = visibles
     .map(
       c => `<button class="saved-item" type="button" data-comp="${escA(c.id)}">
         <div><strong>${esc(c.cliente.razonSocial || 'Consumidor final')}</strong>
         <div class="meta">${esc(etiquetaComprobante(c))} · ${esc(c.fecha || '')}</div></div>
         <div class="saved-der"><span class="importe">${esc(totalComprobante(c))}</span>${estadoComprobante(c)}</div>
+        ${compAutorizado(c) ? '' : `<span class="icon-btn danger" role="button" tabindex="0" data-del-comp="${escA(c.id)}" title="Eliminar" aria-label="Eliminar">${ICN.trash}</span>`}
       </button>`
     )
     .join('');
-  list.querySelectorAll('[data-comp]').forEach(b =>
-    b.addEventListener('click', () => {
+  cont.querySelectorAll('[data-comp]').forEach(b =>
+    b.addEventListener('click', async e => {
+      const del = e.target.closest('[data-del-comp]');
+      if (del) {
+        e.stopPropagation();
+        const c = datos.comprobantes.find(x => x.id === del.dataset.delComp);
+        const ok = await confirmar({
+          titulo: '¿Eliminar el comprobante?',
+          mensaje:
+            '«' +
+            etiquetaComprobante(c) +
+            '» de ' +
+            (c.cliente.razonSocial || 'consumidor final') +
+            ' se elimina para todo el equipo.',
+          aceptar: 'Eliminar',
+          peligro: true,
+        });
+        if (!ok) return;
+        try {
+          await api('comprobantes.php?id=' + encodeURIComponent(c.id), { method: 'DELETE' });
+        } catch (err) {
+          return avisarError(err, 'No se pudo eliminar');
+        }
+        datos.comprobantes = datos.comprobantes.filter(x => x.id !== c.id);
+        datos.comprobantesTotal = Math.max(0, datos.comprobantesTotal - 1);
+        if (compDoc && compDoc.id === c.id) nuevoComprobante(c.tipo);
+        renderSavedComprobantes(tipo);
+        toast('Comprobante eliminado', 1600);
+        return;
+      }
       abrirComprobante(b.dataset.comp);
       closePanels();
     })
@@ -2175,7 +2504,21 @@ function wireClientes() {
       return;
     }
     const existente = c.cuit && datos.clientes.find(x => x.cuit === c.cuit);
-    if (existente) Object.assign(c, { id: existente.id, condIVA: existente.condIVA });
+    if (existente) {
+      // Lo cargado en el remito manda; un dato vacío no borra el de la agenda.
+      Object.keys(existente).forEach(k => {
+        if (!String(c[k] ?? '').trim()) c[k] = existente[k];
+      });
+      c.id = existente.id;
+      if (existente.condIVA && c.condIVA && existente.condIVA !== c.condIVA) {
+        const ok = await confirmar({
+          titulo: '¿Actualizar la condición frente al IVA?',
+          mensaje: `En la agenda figura «${existente.condIVA}» y en el remito «${c.condIVA}». Se guarda «${c.condIVA}».`,
+          aceptar: 'Actualizar',
+        });
+        if (!ok) return;
+      }
+    }
     if (await guardarClienteServidor(c)) {
       renderClientes();
       toast(existente ? 'Cliente actualizado en la agenda' : 'Cliente guardado en la agenda', 1600, true);
@@ -2217,12 +2560,17 @@ function renderClientesView() {
   const cnt = $('#cliCount');
   if (cnt) cnt.textContent = all.length ? all.length + (all.length === 1 ? ' cliente' : ' clientes') : '';
   const q = cliFilter.trim().toLowerCase();
+  const qDig = q.replace(/\D/g, '');
   const list = all.filter(
     c =>
       !q ||
       [c.razonSocial, c.cuit, c.localidad, c.senores, c.mail, c.nombre, c.domicilio].some(v =>
         (v || '').toLowerCase().includes(q)
-      )
+      ) ||
+      (qDig.length >= 3 &&
+        String(c.cuit || '')
+          .replace(/\D/g, '')
+          .includes(qDig))
   );
   if (!all.length) {
     grid.innerHTML = `<div class="cli-empty card empty">${ICN.users}<span>Todavía no hay clientes. Agregá el primero con «Nuevo cliente» o importá una planilla.</span></div>`;
@@ -2334,6 +2682,7 @@ const CLI_HEADER_TO_FIELD = (() => {
     mail: ['mail', 'email', 'correo', 'correoelectronico', 'emails'],
     nombre: ['contacto', 'nombrecontacto', 'nombredecontacto', 'referente', 'encargado', 'atencion'],
     otrosDatos: ['otrosdatos', 'otros', 'observaciones', 'observacion', 'notas', 'obs', 'comentarios', 'provincia'],
+    condIVA: ['condicioniva', 'condiva', 'iva', 'condicionfrentealiva', 'situacioniva', 'categoriaiva', 'condicion'],
   };
   const m = {};
   for (const f in syn) syn[f].forEach(h => (m[h] = f));
@@ -2353,7 +2702,7 @@ function normHeader(s) {
 function ensureXLSX(cb) {
   if (window.XLSX) return cb();
   const s = document.createElement('script');
-  s.src = 'js/lib/xlsx.full.min.js?v=130';
+  s.src = 'js/lib/xlsx.full.min.js?v=' + APP_VERSION;
   s.onload = () => cb();
   s.onerror = () => toast('No se pudo cargar el lector de Excel/CSV', 2800);
   document.head.appendChild(s);
@@ -2398,16 +2747,17 @@ async function applyClienteImport(rows) {
       const f = CLI_HEADER_TO_FIELD[normHeader(k)];
       if (f && c[f] == null) c[f] = String(row[k] ?? '').trim();
     }
+    if (c.condIVA != null) c.condIVA = normalizarCondIVA(c.condIVA);
     return c;
   });
   let added = 0,
     upd = 0,
     skip = 0;
   try {
-    for (let i = 0; i < clientes.length; i += 2000) {
+    for (let i = 0; i < clientes.length; i += 500) {
       const j = await api('clientes.php', {
         method: 'POST',
-        body: { accion: 'importar', clientes: clientes.slice(i, i + 2000) },
+        body: { accion: 'importar', clientes: clientes.slice(i, i + 500) },
       });
       added += j.agregados;
       upd += j.actualizados;
@@ -2425,6 +2775,7 @@ function descargarPlantillaClientes() {
   const headers = [
     'Razón Social',
     'CUIT',
+    'Condición frente al IVA',
     'Teléfono',
     'Domicilio',
     'Localidad',
@@ -2437,6 +2788,7 @@ function descargarPlantillaClientes() {
   const ej = [
     'Distribuidora Ejemplo S.A.',
     '30-12345678-9',
+    'Responsable Inscripto',
     '011 4000-0000',
     'Av. Corrientes 1234',
     'CABA',
@@ -2484,9 +2836,22 @@ function wireClientesView() {
   if (plt) plt.addEventListener('click', descargarPlantillaClientes);
 }
 
-/* ============ COMPROBANTES: Factura / Recibo / Nota C/D (modo local) ============
-   Documentos autogenerados con nuestro diseño (papel en blanco / PDF). El CAE y el
-   QR fiscal se agregan al conectar ARCA; hasta entonces salen como BORRADOR local. */
+/* ============ COMPROBANTES: Factura, recibo y notas de crédito y débito ============
+   Documentos con nuestro diseño (papel en blanco / PDF). Las facturas y notas A y B llevan
+   el CAE y el QR fiscal de ARCA; hasta autorizarse se imprimen «SIN AUTORIZAR». El recibo
+   de cobranza es letra X: documento interno, sin CAE. */
+/* Condición de venta: las formas de pago que ofrece ARCA en «Comprobantes en línea». */
+const CONDICIONES_VENTA = [
+  'Contado',
+  'Cuenta corriente',
+  'Transferencia bancaria',
+  'Tarjeta de débito',
+  'Tarjeta de crédito',
+  'Cheque',
+  'Otros medios de pago electrónico',
+  'Otra',
+];
+
 const COMP_INFO = {
   factura: { nav: 'Facturas', badge: 'Factura', title: 'FACTURA', nuevo: 'Nueva factura', guardada: 'guardada' },
   recibo: { nav: 'Recibos', badge: 'Recibo', title: 'RECIBO', nuevo: 'Nuevo recibo', guardada: 'guardado' },
@@ -2510,7 +2875,7 @@ function emptyComprobante(tipo) {
     tipo,
     id_local: 'c' + uid(), // clave de idempotencia ante reintentos
     estado: 'borrador',
-    letra: 'X',
+    letra: tipo === 'recibo' ? 'X' : 'B', // B: corresponde al consumidor final, la condición inicial
     subtipo: 'credito',
     ptoVenta: '00001',
     numero: '',
@@ -2528,6 +2893,7 @@ function emptyComprobante(tipo) {
     vtoPago: '',
     fce: false,
     fceAnulacion: false,
+    remitoId: '', // remito que factura («Facturar este remito»)
     compAsoc: { tipo: 'Factura', letra: 'B', pv: '00001', nro: '' },
     cae: '',
     caeVto: '',
@@ -2552,6 +2918,18 @@ function nextCompNumero(d) {
 }
 
 /* ---- estado / navegación ---- */
+/* ¿El comprobante en pantalla tiene cambios sin guardar? Uno vacío nunca guardado no cuenta. */
+function dirtyComp(d = compDoc) {
+  if (!d || compAutorizado(d)) return false;
+  const guardado = d.id && datos.comprobantes.find(x => x.id === d.id);
+  if (guardado)
+    return (
+      JSON.stringify(Object.assign({}, guardado, { updated: 0 })) !==
+      JSON.stringify(Object.assign({}, d, { updated: 0 }))
+    );
+  const c = d.cliente || {};
+  return !!(c.razonSocial || c.cuit || (d.items || []).some(i => i.descripcion || i.precio) || d.monto || d.concepto);
+}
 function loadCompDraft(tipo) {
   const drafts = load(LS.compDraft, {});
   return drafts[tipo] ? Object.assign(emptyComprobante(tipo), clone(drafts[tipo])) : emptyComprobante(tipo);
@@ -2596,13 +2974,29 @@ function showComprobante(tipo) {
   setTimeout(fitCompZoom, 80);
 }
 
-/* Empieza un comprobante vacío del tipo indicado. */
-function nuevoComprobante(tipo) {
+/* Empieza un comprobante vacío del tipo indicado (pide confirmación si hay cambios sin guardar). */
+async function nuevoComprobante(tipo) {
   cerrarPrueba(); // si no, showComprobante() revertiría el comprobante nuevo al anterior
+  if (
+    compDoc &&
+    compDoc.tipo === tipo &&
+    dirtyComp() &&
+    !(await confirmar({
+      titulo:
+        '¿Empezar ' +
+        (tipo === 'factura' ? 'una factura nueva' : tipo === 'recibo' ? 'un recibo nuevo' : 'una nota nueva') +
+        '?',
+      mensaje: 'Hay cambios sin guardar en el comprobante actual y se van a perder.',
+      aceptar: 'Empezar uno nuevo',
+      peligro: true,
+    }))
+  )
+    return false;
   compDoc = emptyComprobante(tipo);
   compDoc.fecha = currentFecha();
   saveCompDraft();
   showComprobante(tipo);
+  return true;
 }
 
 /* ---- editor ---- */
@@ -2616,12 +3010,14 @@ function renderComprobanteEditor() {
   const elec = esElectronico(d),
     aut = compAutorizado(d);
   let html = `
-    <div class="doc-aviso" ${aut ? '' : 'hidden'}>Comprobante autorizado por ARCA (CAE ${esc(d.cae)}): no se modifica. Para corregirlo, emití una nota de crédito.</div>
+    <div class="aviso-prueba" ${elec && enHomologacion() && !aut ? '' : 'hidden'}><b>Modo de prueba con ARCA (homologación).</b> «Emitir CAE» autoriza el comprobante en el ambiente de pruebas: sale con CAE y QR de prueba, <b>sin validez fiscal</b>.</div>
+    <div class="doc-aviso" ${aut ? '' : 'hidden'}>Comprobante autorizado por ARCA (CAE ${esc(d.cae)}): no se modifica. Para corregirlo, emití una nota de crédito.
+      ${aut && t !== 'recibo' ? `<div class="doc-aviso-acc"><button class="btn sm soft" type="button" data-nota-desde="credito">Nota de crédito de este comprobante</button><button class="btn sm ghost" type="button" data-nota-desde="debito">Nota de débito</button></div>` : ''}</div>
     <div class="section"><h3>${COMP_INFO[t].badge}</h3><div class="section-body">
       <div class="grid">
         ${
           rec
-            ? `<div class="field"><label>Comprobante (letra)</label><input value="X" readonly title="Recibo de cobranza: no vale como factura ni lleva CAE (RG 1415, art. 10)"></div>`
+            ? ''
             : `<div class="field"><label>Comprobante (letra)</label><select data-cpath="letra">
           ${['A', 'B', 'X'].map(l => `<option ${d.letra === l ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`
         }
@@ -2632,9 +3028,9 @@ function renderComprobanteEditor() {
           <option value="debito" ${d.subtipo === 'debito' ? 'selected' : ''}>Débito</option></select></div>`
             : ''
         }
-        <div class="field"><label>Punto de venta</label><input data-cpath="ptoVenta" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" value="${escA(d.ptoVenta)}" ${elec ? 'readonly title="Punto de venta habilitado para web services (Configuración → Conexión con ARCA)"' : ''}></div>
-        <div class="field"><label>Número <span class="note-auto">${elec ? 'lo asigna ARCA' : 'correlativo'}</span></label><input data-cpath="numero" inputmode="numeric" pattern="[0-9]{1,8}" maxlength="8" value="${escA(d.numero)}" ${elec ? 'readonly placeholder="Al emitir"' : `placeholder="${nextCompNumero(d)}"`}></div>
-        <div class="field full"><label>Fecha <span class="note-auto">automática</span></label><input type="date" data-cpath="fecha" value="${escA(dmyAIso(d.fecha))}"></div>
+        <div class="field"><label>Punto de venta</label><input data-cpath="ptoVenta" data-tipo="entero" pattern="[0-9]{1,5}" maxlength="5" value="${escA(d.ptoVenta)}" ${elec ? 'readonly title="Punto de venta habilitado para web services (Configuración → Conexión con ARCA)"' : ''}></div>
+        <div class="field"><label>Número <span class="note-auto">${elec ? 'lo asigna ARCA' : 'correlativo'}</span></label><input data-cpath="numero" data-tipo="entero" maxlength="8" value="${escA(d.numero)}" readonly ${elec ? 'placeholder="Al emitir"' : `placeholder="${nextCompNumero(d)}" title="Lo asigna el sistema al guardar, correlativo por tipo, letra y punto de venta"`}></div>
+        <div class="field full"><label>Fecha <span class="note-auto">automática</span></label><input type="text" class="fecha" data-cpath="fecha" value="${escA(d.fecha)}"></div>
       </div>
     </div></div>
 
@@ -2642,34 +3038,39 @@ function renderComprobanteEditor() {
       <select id="compSelCliente" class="select-sm mb-md" aria-label="Cargar un cliente de la agenda"><option value="">Cargar cliente de la agenda…</option></select>
       <div class="grid">
         <div class="field full"><label>Razón Social / Nombre</label><input data-cpath="cliente.razonSocial" value="${escA(d.cliente.razonSocial)}"></div>
-        <div class="field"><label>CUIT / DNI</label><input data-cpath="cliente.cuit" inputmode="numeric" maxlength="13" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]|[0-9]{7,8}" placeholder="30-71140975-7" value="${escA(d.cliente.cuit)}"></div>
+        <div class="field"><label>CUIT / DNI</label><input data-cpath="cliente.cuit" data-tipo="cuit" maxlength="13" pattern="[0-9]{2}-?[0-9]{8}-?[0-9]|[0-9]{7,8}" placeholder="30-71140975-7" value="${escA(d.cliente.cuit)}"></div>
         <div class="field"><label>Condición IVA</label><select data-cpath="cliente.condIVA">
           ${Object.keys(CONDICIONES_IVA)
             .map(o => `<option ${d.cliente.condIVA === o ? 'selected' : ''}>${o}</option>`)
             .join('')}</select></div>
         <div class="field full"><label>Domicilio</label><input data-cpath="cliente.domicilio" value="${escA(d.cliente.domicilio)}"></div>
         <div class="field"><label>Localidad</label><input data-cpath="cliente.localidad" value="${escA(d.cliente.localidad)}"></div>
-        <div class="field"><label>C.P.</label><input data-cpath="cliente.cp" maxlength="8" pattern="[A-Za-z]?[0-9]{4}[A-Za-z]{0,3}" placeholder="B1636 o 1636" value="${escA(d.cliente.cp)}"></div>
+        <div class="field"><label>C.P.</label><input data-cpath="cliente.cp" data-tipo="cp" maxlength="8" pattern="[A-Za-z]?[0-9]{4}[A-Za-z]{0,3}" placeholder="B1636 o 1636" value="${escA(d.cliente.cp)}"></div>
       </div>
     </div></div>`;
 
   if (fac || nota) {
     if (nota)
       html += `
-      <div class="section"><h3>Comprobante asociado</h3><div class="section-body"><div class="grid">
+      <div class="section"><h3>Comprobante asociado</h3><div class="section-body">
+        ${selectorAsociado(d)}
+        <div class="grid">
         <div class="field"><label>Tipo</label><select data-cpath="compAsoc.tipo">
           ${['Factura', 'Nota de débito', 'Nota de crédito'].map(o => `<option ${d.compAsoc.tipo === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
         <div class="field"><label>Letra</label><select data-cpath="compAsoc.letra">
           ${['A', 'B'].map(o => `<option ${d.compAsoc.letra === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-        <div class="field"><label>Pto. venta</label><input data-cpath="compAsoc.pv" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" value="${escA(d.compAsoc.pv)}"></div>
-        <div class="field"><label>Número</label><input data-cpath="compAsoc.nro" inputmode="numeric" pattern="[0-9]{1,8}" maxlength="8" value="${escA(d.compAsoc.nro)}"></div>
+        <div class="field"><label>Pto. venta</label><input data-cpath="compAsoc.pv" data-tipo="entero" pattern="[0-9]{1,5}" maxlength="5" value="${escA(d.compAsoc.pv)}"></div>
+        <div class="field"><label>Número</label><input data-cpath="compAsoc.nro" data-tipo="entero" pattern="[0-9]{1,8}" maxlength="8" value="${escA(d.compAsoc.nro)}"></div>
       </div></div></div>`;
     html += `
       <div class="section"><h3>Ítems</h3><div class="section-body">
         <div id="compItems"></div>
         <button class="btn sm soft" id="compAddItem">＋ Agregar ítem</button>
         <div class="grid mt-sm">
-          <div class="field"><label>Condición de venta</label><input data-cpath="condVenta" value="${escA(d.condVenta)}"></div>
+          <div class="field"><label>Condición de venta</label><select data-cpath="condVenta">
+            ${[...new Set([...CONDICIONES_VENTA, d.condVenta].filter(Boolean))]
+              .map(o => `<option ${d.condVenta === o ? 'selected' : ''}>${esc(o)}</option>`)
+              .join('')}</select></div>
           <div class="field"><label>Alícuota de IVA (%) <span class="note">A y B</span></label><select data-cpath="alicuota">
             ${['21', '10.5', '27', '5', '2.5', '0'].map(o => `<option value="${o}" ${String(d.alicuota) === o ? 'selected' : ''}>${o.replace('.', ',')} %</option>`).join('')}</select></div>
           <div class="field"><label>Concepto <span class="note">ARCA</span></label><select data-cpath="conceptoTipo">
@@ -2688,24 +3089,24 @@ function renderComprobanteEditor() {
           }
           ${
             +d.conceptoTipo === 1 && d.fce && !nota
-              ? `<div class="field"><label>Vencimiento del pago</label><input type="date" data-cpath="vtoPago" value="${escA(dmyAIso(d.vtoPago))}"></div>`
+              ? `<div class="field"><label>Vencimiento del pago</label><input type="text" class="fecha" data-cpath="vtoPago" value="${escA(d.vtoPago)}"></div>`
               : ''
           }
           ${
             +d.conceptoTipo !== 1
-              ? `<div class="field"><label>Servicio desde</label><input type="date" data-cpath="servDesde" value="${escA(dmyAIso(d.servDesde))}"></div>
-          <div class="field"><label>Servicio hasta</label><input type="date" data-cpath="servHasta" value="${escA(dmyAIso(d.servHasta))}"></div>
-          <div class="field"><label>Vencimiento del pago</label><input type="date" data-cpath="vtoPago" value="${escA(dmyAIso(d.vtoPago))}"></div>`
+              ? `<div class="field"><label>Servicio desde</label><input type="text" class="fecha" data-cpath="servDesde" value="${escA(d.servDesde)}"></div>
+          <div class="field"><label>Servicio hasta</label><input type="text" class="fecha" data-cpath="servHasta" value="${escA(d.servHasta)}"></div>
+          <div class="field"><label>Vencimiento del pago</label><input type="text" class="fecha" data-cpath="vtoPago" value="${escA(d.vtoPago)}"></div>`
               : ''
           }
         </div>
-        <p class="hint">${d.letra === 'B' ? 'Letra B: los precios incluyen IVA.' : d.letra === 'A' ? 'Letra A: precios netos; el IVA se suma.' : 'Sin IVA discriminado.'} Importes en formato argentino: 1.234,56.</p>
+        <p class="hint">${d.letra === 'B' ? 'Letra B: los precios incluyen IVA.' : d.letra === 'A' ? 'Letra A: precios netos; el IVA se suma.' : 'Letra X: documento interno, no se informa a ARCA.'} Importes en formato argentino: 1.234,56.</p>
       </div></div>`;
   }
   if (rec) {
     html += `
       <div class="section"><h3>Recibo</h3><div class="section-body"><div class="grid">
-        <div class="field"><label>Monto ($)</label><input data-cpath="monto" inputmode="decimal" pattern="[0-9.]{1,12}([,][0-9]{1,2})?" value="${escA(d.monto)}" placeholder="0,00"></div>
+        <div class="field"><label>Monto ($)</label><input data-cpath="monto" data-tipo="importe" pattern="[0-9.]{1,12}([,][0-9]{1,2})?" value="${escA(d.monto)}" placeholder="0,00"></div>
         <div class="field"><label>Forma de pago</label><select data-cpath="medioPago">
           ${['Efectivo', 'Transferencia', 'Cheque', 'Tarjeta', 'Otro'].map(o => `<option ${d.medioPago === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
         <div class="field full"><label>En concepto de</label><textarea data-cpath="concepto" rows="2">${esc(d.concepto)}</textarea></div>
@@ -2752,9 +3153,9 @@ function renderComprobanteEditor() {
   // Un comprobante autorizado queda de solo lectura.
   ed.classList.toggle('doc-bloqueado', aut);
   if (aut)
-    $$('#compEditor input, #compEditor select, #compEditor textarea, #compEditor button').forEach(
-      el => (el.disabled = true)
-    );
+    $$('#compEditor input, #compEditor select, #compEditor textarea, #compEditor button')
+      .filter(el => !el.matches('[data-nota-desde]')) // la nota de crédito o débito es la forma de corregirlo
+      .forEach(el => (el.disabled = true));
   const emitir = $('#tbCompEmitir');
   emitir.hidden = !elec || aut;
   $('#tbCompGuardar').disabled = aut;
@@ -2772,8 +3173,8 @@ function renderCompItems() {
         <button class="item-del" data-del="${i}" title="Quitar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       <div class="grid">
         <div class="field full"><label>Descripción</label><input data-ci="${i}" data-ck="descripcion" value="${escA(it.descripcion)}"></div>
-        <div class="field"><label>Cantidad</label><input data-ci="${i}" data-ck="cantidad" inputmode="decimal" pattern="[0-9]{1,7}([.,][0-9]{1,3})?" value="${escA(it.cantidad)}"></div>
-        <div class="field"><label>Precio unit.</label><input data-ci="${i}" data-ck="precio" inputmode="decimal" pattern="[0-9.]{1,12}([,][0-9]{1,2})?" value="${escA(it.precio)}" placeholder="0,00"></div>
+        <div class="field"><label>Cantidad</label><input data-ci="${i}" data-ck="cantidad" data-tipo="decimal" pattern="[0-9]{1,7}([.,][0-9]{1,3})?" value="${escA(it.cantidad)}"></div>
+        <div class="field"><label>Precio unit.</label><input data-ci="${i}" data-ck="precio" data-tipo="importe" pattern="[0-9.]{1,12}([,][0-9]{1,2})?" value="${escA(it.precio)}" placeholder="0,00"></div>
       </div>`;
     box.appendChild(card);
   });
@@ -2823,6 +3224,15 @@ function renderCompClientesSelect() {
   });
 }
 function bindCompForm() {
+  $('#compEditor').addEventListener('change', e => {
+    if (e.target.id !== 'compAsocElegir' || !e.target.value) return;
+    const c = datos.comprobantes.find(x => x.id === e.target.value);
+    if (c) asociarComprobante(c);
+  });
+  $('#compEditor').addEventListener('click', e => {
+    const b = e.target.closest('[data-nota-desde]');
+    if (b && compAutorizado(compDoc)) notaDesde(clone(compDoc), b.dataset.notaDesde);
+  });
   $('#compEditor').addEventListener('input', e => {
     const el = e.target.closest('[data-cpath]');
     if (!el) return;
@@ -2875,7 +3285,7 @@ function renderComprobante() {
   const d = compDoc,
     page = $('#compPage');
   if (!d || !page) return;
-  const C = COMPANY,
+  const C = emisorImpreso(),
     rec = d.tipo === 'recibo';
   let title = COMP_INFO[d.tipo].title;
   if (d.tipo === 'nota') title = 'NOTA DE ' + (d.subtipo === 'debito' ? 'DÉBITO' : 'CRÉDITO');
@@ -2912,16 +3322,17 @@ function renderComprobante() {
         <p><b>Fecha de Inicio de Actividades:</b> ${esc(C.inicioAct)}</p>
       </div>
     </div>`;
-  const periodo = rec
-    ? ''
-    : `
+  const periodo =
+    rec || (+d.conceptoTipo === 1 && !d.fce)
+      ? ''
+      : `
     <div class="cmp-periodo">
       <span><b>Período Facturado Desde:</b> ${esc(d.servDesde || d.fecha || '')} &nbsp; <b>Hasta:</b> ${esc(d.servHasta || d.fecha || '')}</span>
       <span><b>Fecha de Vto. para el pago:</b> ${esc(d.vtoPago || d.fecha || '')}</span>
     </div>`;
   const receptor = `
     <div class="cmp-receptor">
-      <div class="rc"><b>CUIT:</b> ${esc(cli.cuit || '—')}</div>
+      <div class="rc"><b>${String(cli.cuit || '').replace(/\D/g, '').length === 11 ? 'CUIT' : String(cli.cuit || '').replace(/\D/g, '').length >= 7 ? 'DNI' : 'Documento'}:</b> ${esc(cli.cuit || '—')}</div>
       <div class="rc"><b>Apellido y Nombre / Razón Social:</b> ${esc(cli.razonSocial || '—')}</div>
       <div class="rc"><b>Condición frente al IVA:</b> ${esc(cli.condIVA || '—')}</div>
       <div class="rc"><b>Domicilio:</b> ${esc([cli.domicilio, cli.localidad, cli.cp].filter(Boolean).join(' - ') || '—')}</div>
@@ -3011,7 +3422,17 @@ function renderComprobante() {
     </div>`;
   /* A y B sin CAE: «SIN AUTORIZAR». X (interno, «no válido como factura», como el recibo de
      cobranza): «BORRADOR» solo hasta guardarlo; guardado y numerado se imprime limpio. */
-  const marca = cae || enPrueba() ? '' : /^[AB]$/.test(d.letra) ? 'SIN AUTORIZAR' : d.id && d.numero ? '' : 'BORRADOR';
+  const marca = enPrueba()
+    ? ''
+    : cae
+      ? d.ambienteArca === 'homologacion'
+        ? 'HOMOLOGACIÓN · SIN VALOR FISCAL'
+        : ''
+      : /^[AB]$/.test(d.letra)
+        ? 'SIN AUTORIZAR'
+        : d.id && d.numero
+          ? ''
+          : 'BORRADOR';
   page.innerHTML = `<div class="cmp-doc">${marca ? `<div class="cmp-borrador">${marca}</div>` : ''}
     <div class="cmp-copia">${esc(copia)}</div>${head}${periodo}${receptor}${body}${foot}</div>`;
 }
@@ -3067,7 +3488,7 @@ function sampleComprobante(tipo) {
     base.concepto = 'Pago parcial de servicios de soporte técnico — mes de julio.';
   } else {
     base.letra = 'A';
-    base.condVenta = 'Cuenta corriente 30 días';
+    base.condVenta = 'Cuenta corriente';
     base.items = [
       { descripcion: 'Soporte técnico mensual — 40 horas', cantidad: '1', precio: '120.000' },
       { descripcion: 'Reparación de control de acceso biométrico', cantidad: '2', precio: '35.000' },
@@ -3121,8 +3542,10 @@ async function guardarComprobante(opts = {}) {
     if (!opts.silencioso) toast('Este comprobante ya está autorizado y no se modifica', 2200);
     return true;
   }
+  if (!validarFechasComp(d)) return false;
   const errores = compTotals(d).errores;
   if (errores.length) {
+    marcarErroresComp(errores);
     toast(errores[0], 3200, 'err');
     return false;
   }
@@ -3269,14 +3692,103 @@ function fitCompZoom() {
    (endpoint talonarios.php, que consume el número en una transacción) y lo marca
    como autorizado. La gestión del talonario es manual —el CAI lo saca el contador
    en ARCA y se carga en el Panel—; de ahí para adelante esto sale solo. */
+/* Campo del formulario del remito al que se refiere cada dato faltante (faltantesRemito). */
+const CAMPO_FALTANTE_REMITO = [
+  [/fecha de emisión/, '#remFecha'],
+  [/nombre o la razón social del destinatario/, '[data-path="cliente.razonSocial"]'],
+  [/condición del destinatario/, '[data-path="cliente.condIVA"]'],
+  [/CUIT del destinatario/, '[data-path="cliente.cuit"]'],
+  [/domicilio comercial del destinatario/, '[data-path="cliente.domicilio"]'],
+  [/descripción de los bienes/, '[data-i="0"][data-k="descripcion"]'],
+  [/cantidad del ítem (\d+)/, m => `[data-i="${m[1] - 1}"][data-k="cantidad"]`],
+  [/nombre o la razón social del transportista/, '[data-path="transporte.nombre"]'],
+  [/CUIT del transportista/, '[data-path="transporte.cuit"]'],
+  [/domicilio comercial del transportista/, '[data-path="transporte.domicilio"]'],
+  [/transporte propio o de un tercero/, '[data-path="transporte.tipo"]'],
+];
+/** Marca en el formulario cada dato que falta y lleva el foco al primero. */
+function marcarFaltantesRemito(faltan) {
+  controles.limpiarErrores($('#viewRemito'));
+  let primero = null;
+  faltan.forEach(f => {
+    for (const [re, sel] of CAMPO_FALTANTE_REMITO) {
+      const m = re.exec(f);
+      if (!m) continue;
+      const el = $(typeof sel === 'function' ? sel(m) : sel);
+      if (el) {
+        controles.marcarError(el, 'Falta ' + f + ' (RG 1415, Anexo V)');
+        primero = primero || el;
+      }
+      break;
+    }
+  });
+  controles.enfocar(primero);
+}
+
+/* Fechas del comprobante (servicios): el período tiene que ser coherente y el vencimiento del
+   pago no puede ser anterior a la fecha del comprobante (ARCA lo rechaza). */
+function validarFechasComp(d) {
+  controles.limpiarErrores($('#viewComprobante'));
+  const f = v => controles.leerFecha(v);
+  const errores = [];
+  if (d.fecha && !f(d.fecha)) errores.push(['fecha', 'La fecha no es válida (dd/mm/aaaa)']);
+  if (String(d.conceptoTipo) !== '1' || d.fce) {
+    if (d.servDesde && !f(d.servDesde)) errores.push(['servDesde', 'La fecha no es válida (dd/mm/aaaa)']);
+    if (d.servHasta && !f(d.servHasta)) errores.push(['servHasta', 'La fecha no es válida (dd/mm/aaaa)']);
+    if (f(d.servDesde) && f(d.servHasta) && f(d.servDesde) > f(d.servHasta))
+      errores.push(['servHasta', 'El fin del período no puede ser anterior al inicio']);
+    if (f(d.vtoPago) && f(d.fecha) && f(d.vtoPago) < f(d.fecha))
+      errores.push(['vtoPago', 'El vencimiento del pago no puede ser anterior a la fecha del comprobante']);
+  }
+  errores.forEach(([campo, msg]) => controles.marcarError($(`[data-cpath="${campo}"]`), msg));
+  if (errores.length) {
+    controles.enfocar($(`[data-cpath="${errores[0][0]}"]`));
+    toast(errores[0][1], 3600, 'err');
+  }
+  return !errores.length;
+}
+
+/** Marca en el editor del comprobante los campos de los errores de compTotals. */
+function marcarErroresComp(errores) {
+  let primero = null;
+  errores.forEach(e => {
+    const m = /ítem (\d+)/.exec(e);
+    const el = m
+      ? $(`[data-ci="${m[1] - 1}"][data-ck="cantidad"]`)
+      : /alícuota/i.test(e)
+        ? $('[data-cpath="alicuota"]')
+        : /monto/i.test(e)
+          ? $('[data-cpath="monto"]')
+          : null;
+    if (el) {
+      controles.marcarError(el, e);
+      primero = primero || el;
+    }
+  });
+  controles.enfocar(primero);
+}
+
 async function autorizarRemito() {
   if (doc.estado === 'autorizado') {
     return toast('Este remito ya está autorizado · Nº ' + (doc.numero || ''), 2200);
   }
   const faltan = faltantesRemito(doc);
   if (faltan.length) {
+    marcarFaltantesRemito(faltan);
     return toast('Para autorizar el remito falta: ' + faltan.join(', ') + ' (RG 1415, Anexo V).', 6000, 'err');
   }
+  const pvRem = pv5(fiscal.ptoVenta);
+  const okAut = await confirmar({
+    titulo: '¿Autorizar el remito?',
+    mensaje:
+      'Se le asigna el próximo número del talonario de C.A.I. del punto de venta ' +
+      pvRem +
+      ' a «' +
+      (doc.cliente.razonSocial || doc.cliente.senores || 'sin razón social') +
+      '». El número queda usado: un remito autorizado no se modifica ni se borra.',
+    aceptar: 'Autorizar',
+  });
+  if (!okAut) return;
   const btn = $('#btnAutorizar');
   btn.disabled = true;
   try {
@@ -3285,7 +3797,8 @@ async function autorizarRemito() {
     if (!(await guardar({ silencioso: true }))) return;
     const pv = parseInt(String(fiscal.ptoVenta).replace(/\D/g, ''), 10) || 1;
     const fecha = doc.fecha || currentFecha(); // dd/mm/aaaa → aaaa-mm-dd
-    const iso = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha) ? fecha.split('/').reverse().join('-') : '';
+    const [dd = '', mm = '', aaaa = ''] = fecha.split('/');
+    const iso = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha) ? `${aaaa}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}` : '';
     const pedido = { accion: 'autorizar', pv, tipo: 91, fecha: iso, remito_id: doc.id };
     // Un C.A.I. vencido no autoriza: el comprobante no sería válido (el servidor responde 409).
     const j = await api('talonarios.php', { method: 'POST', body: pedido });
@@ -3698,7 +4211,11 @@ function importAll(file) {
     let fallas = 0;
     try {
       if (lista(d.clientes) && d.clientes.length) {
-        await api('clientes.php', { method: 'POST', body: { accion: 'importar', clientes: d.clientes } });
+        for (let i = 0; i < d.clientes.length; i += 500)
+          await api('clientes.php', {
+            method: 'POST',
+            body: { accion: 'importar', clientes: d.clientes.slice(i, i + 500) },
+          });
       }
       for (const x of docsOk ? d.docs : []) {
         try {
@@ -3739,29 +4256,93 @@ function importAll(file) {
 }
 
 /* =============================== PANELES ================================ */
+/* Los cajones laterales son diálogos modales: llevan el foco adentro al abrir, lo
+   mantienen ahí con Tab y lo devuelven al control que los abrió al cerrar. */
+const FOCO =
+  'button:not([disabled]), [href], input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let focoAntesDelPanel = null;
+function enfocables(el) {
+  return [...el.querySelectorAll(FOCO)].filter(x => x.offsetParent !== null && !x.closest('[hidden]'));
+}
 function openPanel(el, bd) {
+  if (!el.classList.contains('open')) focoAntesDelPanel = document.activeElement;
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
   el.classList.add('open');
   bd.classList.add('show');
+  setTimeout(() => {
+    if (el.contains(document.activeElement)) return;
+    const f = enfocables(el.querySelector('.calib-body') || el)[0] || enfocables(el)[0];
+    if (f) f.focus({ preventScroll: true });
+  }, 60);
 }
 function closePanels() {
+  const habia = $$('.calib.open').length > 0;
   $$('.calib').forEach(e => e.classList.remove('open'));
   $$('.backdrop').forEach(e => e.classList.remove('show'));
+  if (habia && focoAntesDelPanel && document.contains(focoAntesDelPanel))
+    focoAntesDelPanel.focus({ preventScroll: true });
+  focoAntesDelPanel = null;
 }
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || document.querySelector('dialog[open]')) return;
+  const abierto = [...$$('.calib.open')].pop();
+  if (!abierto) return;
+  const lista = enfocables(abierto);
+  if (!lista.length) return;
+  const [primero, ultimo] = [lista[0], lista[lista.length - 1]];
+  if (!abierto.contains(document.activeElement)) {
+    e.preventDefault();
+    primero.focus();
+  } else if (e.shiftKey && document.activeElement === primero) {
+    e.preventDefault();
+    ultimo.focus();
+  } else if (!e.shiftKey && document.activeElement === ultimo) {
+    e.preventDefault();
+    primero.focus();
+  }
+});
 
-/* ================================ TOAST ================================ */
-/* Aviso breve. tipo: true (éxito), 'err' (error) o nada (informativo). */
+/* ============================ NOTIFICACIONES ============================ */
+/* Pila de avisos (abajo al centro). tipo: true (éxito), 'err' (error) o nada (informativo).
+   Cada aviso se puede cerrar; los errores usan role="alert", duran más (al menos 9 s) y no
+   se van mientras el puntero está encima. Como máximo se ven cuatro: el más viejo se va. */
 function toast(msg, ms = 2000, tipo = false) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.className = 'toast show' + (tipo === 'err' ? ' err' : tipo ? ' ok' : '');
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => {
-    t.className = 'toast';
-  }, ms);
+  const pila = $('#toast');
+  const err = tipo === 'err';
+  const item = document.createElement('div');
+  item.className = 'aviso-item' + (err ? ' err' : tipo ? ' ok' : '');
+  item.setAttribute('role', err ? 'alert' : 'status');
+  const texto = document.createElement('span');
+  texto.textContent = msg;
+  const cerrar = document.createElement('button');
+  cerrar.type = 'button';
+  cerrar.className = 'aviso-cerrar';
+  cerrar.setAttribute('aria-label', 'Cerrar aviso');
+  cerrar.textContent = '×';
+  item.append(texto, cerrar);
+  pila.appendChild(item);
+  pila.classList.add('show');
+  while (pila.children.length > 4) pila.firstElementChild.remove();
+  const quitar = () => {
+    item.classList.add('saliendo');
+    setTimeout(() => {
+      item.remove();
+      if (!pila.children.length) pila.classList.remove('show');
+    }, 220);
+  };
+  cerrar.addEventListener('click', quitar);
+  let t = setTimeout(quitar, err ? Math.max(ms, 9000) : ms);
+  item.addEventListener('mouseenter', () => clearTimeout(t));
+  item.addEventListener('mouseleave', () => (t = setTimeout(quitar, 2500)));
 }
 
 /* ================================ INIT ================================= */
 function wire() {
+  $$('[data-path="cliente.condIVA"], #cliCond').forEach(sel =>
+    Object.keys(CONDICIONES_IVA).forEach(k => sel.add(new Option(k, k)))
+  );
+  $('[data-path="transporte.tipo"]').addEventListener('change', syncTransporte);
   $('#btnNuevo').addEventListener('click', nuevo);
   $('#btnGuardar').addEventListener('click', guardar);
   $('#btnImprimir').addEventListener('click', imprimir);
@@ -3803,6 +4384,15 @@ function wire() {
     renderSavedList();
     openPanel($('#saved'), $('#backdrop2'));
   };
+  $('#inicioStats').addEventListener('click', e => {
+    const b = e.target.closest('[data-kpi]');
+    if (!b || !b.dataset.kpi) return;
+    if (b.dataset.kpi === 'remitos') abrirGuardados();
+    else {
+      renderSavedComprobantes('factura');
+      openPanel($('#saved'), $('#backdrop2'));
+    }
+  });
   $('#tbCompGuardados').addEventListener('click', () => {
     renderSavedComprobantes(compDoc ? compDoc.tipo : 'factura');
     openPanel($('#saved'), $('#backdrop2'));
@@ -3829,11 +4419,11 @@ function wire() {
     const comp = v === 'factura' || v === 'recibo' || v === 'nota';
     if (mod && (k === 'p' || k === 's')) {
       e.preventDefault();
-      if (v !== 'remito' && !comp) return;
+      if (v !== 'remito' && !comp) return toast('Abrí un remito o un comprobante para imprimirlo o guardarlo', 2400);
       if (k === 'p') (comp ? imprimirComprobante : imprimir)();
       else (comp ? guardarComprobante : guardar)();
     }
-    if (e.key === 'Escape') closePanels();
+    if (e.key === 'Escape' && !document.querySelector('dialog[open]')) closePanels();
   });
   window.addEventListener('resize', () => {
     resize();

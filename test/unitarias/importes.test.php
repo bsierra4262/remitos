@@ -17,6 +17,14 @@
 
 declare(strict_types=1);
 
+// Sin estas extensiones el servidor no funciona: mejor un aviso claro que un error fatal.
+$faltan = array_filter(['mbstring', 'openssl', 'json', 'curl', 'dom'], static fn (string $e): bool => !extension_loaded($e));
+if ($faltan) {
+    fwrite(STDERR, 'Faltan extensiones de PHP: ' . implode(', ', $faltan) . ' (ver test/LEEME.md)
+');
+    exit(2);
+}
+
 $api = dirname(__DIR__, 2) . '/app/api/lib';
 require $api . '/http.php';
 require $api . '/importes.php';
@@ -123,8 +131,10 @@ verificar($q['code_challenge_method'] === 'S256' && $q['hd'] === 'intellihelp.te
 
 $hint = [];
 parse_str((string) parse_url(google_auth_url($g, 'S', 'N', 'v', 'https://x/api/google.php', 'ana@intellihelp.tech'), PHP_URL_QUERY), $hint);
-verificar(($q['prompt'] ?? '') === 'select_account' && ($hint['login_hint'] ?? '') === 'ana@intellihelp.tech' && !isset($hint['prompt']),
-    'reconfirmación con la cuenta de la sesión');
+verificar(
+    ($q['prompt'] ?? '') === 'select_account' && ($hint['login_hint'] ?? '') === 'ana@intellihelp.tech' && !isset($hint['prompt']),
+    'reconfirmación con la cuenta de la sesión'
+);
 
 // Sesión: plazo en que el ingreso con Google vale como confirmación de identidad.
 verificar(session_confirmation_valid(['confirmado' => 1000], 1000 + SESSION_CONFIRM_SECONDS), 'ingreso reciente confirma');
@@ -157,17 +167,21 @@ foreach ($arca as $clase => $codigos) {
 
 // Factura de Crédito Electrónica MiPyME: CBU, tipos y opcionales (validaciones 10162, 10163 y 10168 de WSFEv1).
 verificar(cbu_valid('0170099222000000678900') && !cbu_valid('0170099222000000678901') && !cbu_valid('123'), 'CBU con dígitos verificadores');
-verificar(arca_cbte_tipo('factura', '', 'A', true) === 201 && arca_cbte_tipo('nota', 'credito', 'B', true) === 208
+verificar(
+    arca_cbte_tipo('factura', '', 'A', true) === 201 && arca_cbte_tipo('nota', 'credito', 'B', true) === 208
     && arca_cbte_tipo('nota', 'debito', 'A', true) === 202 && arca_cbte_tipo('recibo', '', 'A') === null && arca_cbte_tipo('factura', '', 'C') === null,
-    'tipos de comprobante del emisor inscripto y de la Factura de Crédito');
+    'tipos de comprobante del emisor inscripto y de la Factura de Crédito'
+);
 $fceDet = arca_cae_detail(['concepto' => 1, 'doc_tipo' => 80, 'doc_nro' => '30500010912', 'numero' => 1, 'fecha' => '20261121',
     'total' => 121000, 'neto' => 100000, 'iva' => 21000, 'exento' => 0, 'no_gravado' => 0, 'cond_iva_receptor' => 1,
     'vto_pago' => '20261221', 'alicuotas' => [['id' => 5, 'base' => 100000, 'importe' => 21000]],
     'opcionales' => [['id' => '2101', 'valor' => '0170099222000000678900'], ['id' => '27', 'valor' => 'SCA']]]);
-verificar(str_contains($fceDet, '<ar:FchVtoPago>20261221</ar:FchVtoPago>') && !str_contains($fceDet, 'FchServDesde')
+verificar(
+    str_contains($fceDet, '<ar:FchVtoPago>20261221</ar:FchVtoPago>') && !str_contains($fceDet, 'FchServDesde')
     && strpos($fceDet, '</ar:Iva>') < strpos($fceDet, '<ar:Opcionales>')
     && str_contains($fceDet, '<ar:Opcional><ar:Id>2101</ar:Id><ar:Valor>0170099222000000678900</ar:Valor></ar:Opcional>'),
-    'Factura de Crédito con vencimiento del pago, CBU y transferencia');
+    'Factura de Crédito con vencimiento del pago, CBU y transferencia'
+);
 
 echo $fallas === 0 ? "Pruebas unitarias del servidor: los $total casos pasaron\n" : "$fallas de $total casos fallaron\n";
 exit($fallas === 0 ? 0 : 1);

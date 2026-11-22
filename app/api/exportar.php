@@ -25,7 +25,7 @@ if (api_method() !== 'GET') {
     api_error(405, 'Método no permitido');
 }
 $pdo = api_db($config);
-auth_require($pdo, $config, 'admin', 'exportar');
+auth_confirm_identity(auth_require($pdo, $config, 'admin', 'exportar'));
 
 $decode = static function (array $row): array {
     $doc = json_decode((string) $row['data'], true) ?: [];

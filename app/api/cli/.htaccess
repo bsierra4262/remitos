@@ -1,5 +1,5 @@
 # Remitos y Comprobantes — Intellihelp
-# Librerías internas: sin acceso desde la web.
+# Scripts de consola: sin acceso desde la web.
 <IfModule mod_authz_core.c>
   Require all denied
 </IfModule>

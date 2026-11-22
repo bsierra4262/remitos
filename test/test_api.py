@@ -116,7 +116,8 @@ def registro_anota_rechazos():
 
 @caso("Los timestamps de la auditoría están en hora de Buenos Aires")
 def hora_buenos_aires():
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     m = clave_maestra()
     if not m:
         return False, "sin clave maestra"
@@ -131,7 +132,7 @@ def hora_buenos_aires():
         fh = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
     except Exception:
         return False, f"formato de fecha inesperado: {fecha!r}"
-    ba = (datetime.now(timezone.utc) + timedelta(hours=-3)).replace(tzinfo=None)
+    ba = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).replace(tzinfo=None)
     diff = abs((fh - ba).total_seconds())
     return diff < 180, f"fecha log={fecha} vs BA={ba:%Y-%m-%d %H:%M} (dif {diff:.0f}s)"
 

@@ -27,8 +27,8 @@ return [
     // La primera línea es la clave (guardarla en un gestor de contraseñas); la segunda va acá.
     'master_key_hash' => '',
 
-    // Clave de cifrado de los secretos almacenados (certificado, clave privada y tickets de ARCA,
-    // segundo factor de los usuarios) y de los respaldos: 64 caracteres hexadecimales.
+    // Clave de cifrado de los secretos almacenados (certificado, clave privada y tickets de ARCA)
+    // y de los respaldos: 64 caracteres hexadecimales.
     // Generar con: php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
     // Guardarla también en un gestor de contraseñas: sin ella no se leen los respaldos y hay que
     // volver a cargar el certificado de ARCA. Para cambiarla: php api/cli/rotar-clave.php --confirmar
@@ -38,7 +38,7 @@ return [
     // con CORS. La aplicación usa su propio origen y no necesita ninguno.
     'allowed_origins' => [],
 
-    // Ingreso con Google (opcional). Cliente OAuth «Aplicación web» de Google Cloud con la URI de
+    // Ingreso con Google: es la única forma de ingresar a la aplicación. Cliente OAuth «Aplicación web» de Google Cloud con la URI de
     // redirección https://<dominio>/remitos/api/google.php (una por cada dominio de la aplicación).
     // Solo ingresan cuentas del dominio de Google Workspace indicado que ya sean usuarios activos.
     // El secreto del cliente solo vive acá: no se versiona ni llega al navegador.

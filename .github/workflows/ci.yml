@@ -11,10 +11,16 @@ on:
 permissions:
   contents: read
 
+# Un push nuevo a la misma rama cancela la corrida anterior.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   calidad:
     name: Estilo, sintaxis y dependencias
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -40,23 +46,50 @@ jobs:
       - name: Sintaxis JavaScript
         run: for f in app/js/*.js test/unitarias/*.js; do node --check "$f"; done
 
+      - name: Sintaxis Python (pruebas y herramientas)
+        run: python3 -m py_compile test/*.py tools/*.py
+
       - name: Integridad de las dependencias incluidas
         run: sha256sum -c test/dependencias.sha256
 
+      # Con «if» explícito: bash no aplica «set -e» a un comando negado con «!», así que
+      # «! grep …» en una línea que no es la última no haría fallar el paso.
       - name: Sin secretos en el repositorio
         run: |
-          ! git ls-files | grep -E '(^|/)config\.php$|\.(key|pem|p12|crt)$'
-          ! git grep -nE '^-----BEGIN (RSA |EC |ENCRYPTED )?PRIVATE KEY-----$' -- ':!test/*'
+          if git ls-files | grep -E '(^|/)config\.php($|\.)|client_secret.*\.json$|\.(key|pem|p12|crt|csr)$'; then
+            echo "::error::Hay un archivo de secretos versionado"; exit 1
+          fi
+          if git grep -nE '^-----BEGIN (RSA |EC |ENCRYPTED )?PRIVATE KEY-----$' -- ':!test/*'; then
+            echo "::error::Hay una clave privada versionada"; exit 1
+          fi
 
       - name: Pruebas unitarias (cálculos de la interfaz y del servidor)
         run: |
           node --test test/unitarias/calculos.test.js
           php test/unitarias/importes.test.php
 
+  # El hosting puede tener PHP 8.2: la sintaxis y las unitarias del servidor se prueban también ahí.
+  php82:
+    name: Compatibilidad con PHP 8.2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, openssl, curl, dom, pdo_mysql
+          coverage: none
+      - name: Sintaxis y pruebas unitarias del servidor
+        run: |
+          find app/api test -name '*.php' -print0 | xargs -0 -n1 php -l
+          php test/unitarias/importes.test.php
+
   pruebas:
     name: Batería completa (API e interfaz)
     runs-on: ubuntu-24.04
     needs: calidad
+    timeout-minutes: 30
     services:
       mariadb:
         image: mariadb:11.4
@@ -92,7 +125,7 @@ jobs:
       - name: Dependencias de las pruebas
         run: |
           sudo apt-get update -q && sudo apt-get install -yq mariadb-client
-          pip install playwright==1.47.0 pymupdf==1.24.10 cryptography==43.0.1
+          pip install -r test/requirements.txt
           python -m playwright install --with-deps chromium
 
       - name: Configuración y esquema de pruebas
@@ -113,6 +146,7 @@ jobs:
         run: |
           php -S 127.0.0.1:8765 -t app > /tmp/php-server.log 2>&1 &
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null && break; sleep 1; done
+          curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null || { cat /tmp/php-server.log; exit 1; }
 
       - name: Pruebas
         run: python test/correr.py
@@ -120,4 +154,12 @@ jobs:
       - name: Errores del servidor
         if: always()
         run: |
-          ! grep -E 'PHP (Fatal|Warning|Notice|Deprecated)' /tmp/php-server.log
+          ! grep -E 'PHP (Fatal|Parse|Warning|Notice|Deprecated)' /tmp/php-server.log
+
+      - name: Registro del servidor (si algo falló)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-server-log
+          path: /tmp/php-server.log
+          retention-days: 7

@@ -2,7 +2,8 @@
 
 Arma un escenario de demostración en el entorno LOCAL de pruebas (el mismo de
 test/LEEME.md: php -S en 127.0.0.1:8765, base de pruebas y Google simulado), saca cada
-pantalla y deja la base como estaba.
+pantalla y al terminar borra los datos de demostración. Vacía también los talonarios y la
+auditoría de la base LOCAL de pruebas (nunca se usa contra producción).
 
     python tools/capturas.py                  # todas, en docs/imagenes/capturas
     python tools/capturas.py factura recibo   # solo las que contengan esos nombres
@@ -89,13 +90,13 @@ def preparar():
 
     cli = {k: CLIENTES[0][k] for k in ('razonSocial', 'cuit', 'condIVA', 'domicilio', 'localidad', 'cp')}
     ids['factura'] = comprobante({'tipo': 'factura', 'letra': 'A', 'ptoVenta': '3', 'conceptoTipo': 2, 'cliente': cli,
-                                  'items': ITEMS, 'condVenta': 'Cuenta corriente 30 días', 'servDesde': '01/11/2026',
+                                  'items': ITEMS, 'condVenta': 'Cuenta corriente', 'servDesde': '01/11/2026',
                                   'servHasta': '30/11/2026', 'vtoPago': '21/12/2026'}, '158', '86471092872193')
     ids['factura_credito'] = comprobante({
         'tipo': 'factura', 'letra': 'A', 'ptoVenta': '3', 'conceptoTipo': 1, 'fce': True,
         'cliente': {k: CLIENTES[1][k] for k in ('razonSocial', 'cuit', 'condIVA', 'domicilio', 'localidad', 'cp')},
         'items': [{'descripcion': 'Servidores y licencias — proyecto anual', 'cantidad': '1', 'precio': '8.500.000'}],
-        'condVenta': 'Factura de Crédito — 30 días', 'vtoPago': '21/12/2026'}, '12', '86471092874771')
+        'condVenta': 'Transferencia bancaria', 'vtoPago': '21/12/2026'}, '12', '86471092874771')
     ids['nota'] = comprobante({'tipo': 'nota', 'subtipo': 'credito', 'letra': 'A', 'ptoVenta': '3', 'conceptoTipo': 2,
                                'cliente': cli, 'items': [{'descripcion': 'Bonificación por demora en el servicio', 'cantidad': '1', 'precio': '120.000'}],
                                'compAsoc': {'tipo': 'Factura', 'letra': 'A', 'pv': '3', 'nro': '158'},

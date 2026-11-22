@@ -67,8 +67,28 @@ async function api(ruta, opciones = {}) {
     j = { ok: false, error: 'Respuesta inesperada del servidor (HTTP ' + res.status + ')' };
   }
   if (res.status === 401 && j.sesion === false && !opciones.sinSesion) sesionVencida();
+  if (res.status === 403 && j.reconfirmar_google) ofrecerConfirmarGoogle();
   if (!res.ok || !j.ok) throw new ErrorApi(j.error || 'Error del servidor (HTTP ' + res.status + ')', res.status, j);
   return j;
+}
+
+/* Operación sensible fuera de los 15 minutos del ingreso: se ofrece confirmar con Google
+   (vuelve a la aplicación y se repite la operación). Una sola ventana a la vez. */
+let confirmandoGoogle = false;
+async function ofrecerConfirmarGoogle() {
+  if (confirmandoGoogle) return;
+  confirmandoGoogle = true;
+  try {
+    const ok = await confirmar({
+      titulo: 'Confirmá tu identidad',
+      mensaje:
+        'Por seguridad, esta operación pide confirmar con Google que sos vos. Después de confirmar, volvé a hacer la operación.',
+      aceptar: 'Confirmar con Google',
+    });
+    if (ok) location.href = URL_CONFIRMAR_GOOGLE;
+  } finally {
+    confirmandoGoogle = false;
+  }
 }
 
 /** Muestra el error de una operación sin interrumpir la aplicación. */
@@ -114,16 +134,6 @@ async function cargarDatos() {
 }
 async function refrescarClientes() {
   aplicarClientes(await api('clientes.php'));
-}
-async function refrescarRemitos() {
-  const r = await todasLasPaginas('remitos.php', 'remitos');
-  datos.remitos = r.lista;
-  datos.remitosTotal = r.total;
-}
-async function refrescarComprobantes() {
-  const k = await todasLasPaginas('comprobantes.php', 'comprobantes');
-  datos.comprobantes = k.lista;
-  datos.comprobantesTotal = k.total;
 }
 
 /** Reemplaza (o agrega al principio) un documento en una lista en memoria. */
@@ -188,6 +198,8 @@ const AVISOS_GOOGLE = {
   google_sin_usuario:
     'Esa cuenta no tiene usuario en el sistema o está desactivada. Pedile el alta a un administrador.',
   google_limitado: 'Demasiados intentos de ingreso con Google. Esperá unos minutos.',
+  google_otra_cuenta:
+    'Para confirmar tu identidad elegí en Google la misma cuenta con la que ingresaste. No se confirmó nada.',
   confirmado: 'Identidad confirmada con Google. Ya podés repetir la operación.',
 };
 function avisoIngresoGoogle() {
@@ -239,12 +251,14 @@ function sesionVencida() {
 /* Al salir se borran del equipo los borradores del usuario (tienen datos de clientes).
    Si hay trabajo sin guardar, se pide confirmación antes de perderlo. */
 async function cerrarSesion() {
-  const pendiente = sesion.usuario && typeof dirty === 'function' && (doc.pendiente || dirty());
+  const comps = load(LS.compDraft, {});
+  const compPend = Object.values(comps).some(c => typeof dirtyComp === 'function' && dirtyComp(c));
+  const pendiente = sesion.usuario && typeof dirty === 'function' && (doc.pendiente || dirty() || compPend);
   if (
     pendiente &&
     !(await confirmar({
       titulo: '¿Salir sin guardar?',
-      mensaje: 'Hay un remito con cambios sin guardar. Si salís, se descarta de este equipo.',
+      mensaje: 'Hay documentos con cambios sin guardar. Si salís, se descartan de este equipo.',
       aceptar: 'Salir igual',
       peligro: true,
     }))
@@ -334,6 +348,8 @@ function abrirUsuario(id) {
   $('#usrActivo').checked = u ? u.activo : true;
   $('#usrActivoFila').hidden = !u;
   $('#usrAcciones').hidden = !u;
+  // Nadie se elimina a sí mismo (el servidor también lo impide).
+  $('#usrEliminar').hidden = !!u && !!sesion.usuario && u.id === sesion.usuario.id;
   ocultar('#usuarioAlert');
   openPanel($('#usuarioModal'), $('#backdrop7'));
 }
@@ -341,6 +357,13 @@ function abrirUsuario(id) {
 async function guardarUsuario(e) {
   e.preventDefault();
   const u = usuarioEditando;
+  // Solo cuentas de Google del dominio de la empresa (el mismo del administrador).
+  const dominio = ((sesion.usuario && sesion.usuario.email) || '').split('@')[1] || '';
+  const correo = $('#usrEmail').value.trim().toLowerCase();
+  if (!u && dominio && !correo.endsWith('@' + dominio)) {
+    controles.marcarError($('#usrEmail'), 'Tiene que ser una cuenta de Google de @' + dominio + '.');
+    return controles.enfocar($('#usrEmail'));
+  }
   const body = u
     ? {
         accion: 'editar',

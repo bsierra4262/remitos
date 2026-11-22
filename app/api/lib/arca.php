@@ -5,8 +5,11 @@
  *
  * Integración con los web services de ARCA:
  *  - Validación y resguardo cifrado del certificado y la clave privada.
- *  - WSAA: firma del pedido de acceso (CMS/PKCS#7) y obtención del ticket.
- *  - WSFEv1: estado del servicio y último comprobante autorizado.
+ *  - WSAA: firma del pedido de acceso (CMS/PKCS#7) y ticket por servicio.
+ *  - WSFEv1: estado, puntos de venta, último autorizado, FECAESolicitar (CAE) y
+ *    FECompConsultar (recuperar una emisión cuya respuesta se perdió).
+ *  - WSFECRED: obligación de recibir Factura de Crédito Electrónica MiPyME.
+ *  - WSCDC: constatación del C.A.I. de los talonarios de remitos.
  *
  * La clave privada nunca sale del servidor: se recibe una sola vez por HTTPS,
  * se valida contra el certificado y se guarda cifrada. Las firmas se generan acá.
@@ -137,6 +140,9 @@ function arca_inspect(string $certPem, string $keyPem, string $passphrase = ''):
     $to = (int) ($info['validTo_time_t'] ?? 0);
     if ($to <= time()) {
         throw new InvalidArgumentException('El certificado venció el ' . date('d/m/Y', $to));
+    }
+    if ($from > time() + 300) {
+        throw new InvalidArgumentException('El certificado todavía no está vigente: rige desde el ' . date('d/m/Y H:i', $from));
     }
 
     $cuit = preg_replace('/\D/', '', arca_dn_value($info['subject'] ?? [], 'serialNumber'));
@@ -701,8 +707,9 @@ function arca_cae_detail(array $c): string
         $xml .= '<ar:FchServDesde>' . $x($c['serv_desde'] ?? '') . '</ar:FchServDesde>'
             . '<ar:FchServHasta>' . $x($c['serv_hasta'] ?? '') . '</ar:FchServHasta>';
     }
-    // FchVtoPago: obligatoria con servicios y en la Factura de Crédito (validación 10163).
-    if ($c['concepto'] !== 1 || ($c['vto_pago'] ?? '') !== '') {
+    // FchVtoPago: obligatoria con servicios y en la Factura de Crédito (validación 10163); en
+    // las notas de la Factura de Crédito no se informa.
+    if (($c['vto_pago'] ?? '') !== '') {
         $xml .= '<ar:FchVtoPago>' . $x($c['vto_pago'] ?? '') . '</ar:FchVtoPago>';
     }
     $xml .= '<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz>'
@@ -858,8 +865,8 @@ function arca_fce_obligado(PDO $pdo, array $config, string $environment, string 
 /* --------------------- WSCDC · Constatación de comprobantes --------------------- */
 
 const ARCA_WSCDC_URL = [
-    'homologacion' => 'https://wswhomo.afip.gob.ar/WSCDC/service.asmx',
-    'produccion' => 'https://servicios1.arca.gob.ar/WSCDC/service.asmx',
+    'homologacion' => 'https://wswhomo.afip.gov.ar/WSCDC/service.asmx',
+    'produccion' => 'https://servicios1.afip.gov.ar/WSCDC/service.asmx',
 ];
 
 const ARCA_WSCDC_NS = 'http://servicios1.afip.gob.ar/wscdc/';

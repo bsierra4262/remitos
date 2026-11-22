@@ -73,7 +73,25 @@
       d = { ok: false, error: 'Respuesta inesperada del servidor (HTTP ' + res.status + ')' };
     }
     if (escritura) cache.clear();
+    if (res.status === 403 && d.reconfirmar_google && !clave) ofrecerConfirmarGoogle();
     return { status: res.status, d };
+  }
+  /* Operación sensible fuera de los 15 minutos del ingreso: se ofrece confirmar con Google. */
+  let confirmandoGoogle = false;
+  async function ofrecerConfirmarGoogle() {
+    if (confirmandoGoogle) return;
+    confirmandoGoogle = true;
+    try {
+      const ok = await confirmar({
+        titulo: 'Confirmá tu identidad',
+        mensaje:
+          'Por seguridad, esta operación pide confirmar con Google que sos vos. Después de confirmar, volvé a hacer la operación.',
+        aceptar: 'Confirmar con Google',
+      });
+      if (ok) location.href = 'api/google.php?accion=inicio&confirmar=1&volver=panel';
+    } finally {
+      confirmandoGoogle = false;
+    }
   }
   function avisar(msg, tipo = 'err') {
     $('#aviso').innerHTML = msg ? `<div class="${tipo}">${esc(msg)}</div>` : '';
@@ -206,6 +224,16 @@
       .querySelectorAll('[data-toggle]')
       .forEach(b =>
         b.addEventListener('click', async () => {
+          const activar = +b.dataset.activa === 1;
+          const ok = await confirmar({
+            titulo: activar ? '¿Activar la clave?' : '¿Desactivar la clave?',
+            mensaje: activar
+              ? 'La clave vuelve a tener acceso a la API con sus permisos.'
+              : 'Los sistemas que la usan dejan de tener acceso a la API en el acto.',
+            aceptar: activar ? 'Activar' : 'Desactivar',
+            peligro: !activar,
+          });
+          if (!ok) return;
           b.disabled = true;
           const { d: r2 } = await api('api/claves.php', {
             method: 'POST',
@@ -425,11 +453,11 @@
       <h2>Cargar un C.A.I. <span class="hint">Se tramita en ARCA con Clave Fiscal («Autorización de Impresión de Comprobantes») y al cargarlo se constata con ARCA (WSCDC)</span></h2>
       <div class="talta">
         <div class="grid">
-          <div><label for="tPv">Punto de venta</label><input id="tPv" inputmode="numeric" value="1"></div>
-          <div><label for="tDesde">Número desde</label><input id="tDesde" inputmode="numeric" placeholder="1"></div>
-          <div><label for="tHasta">Número hasta</label><input id="tHasta" inputmode="numeric" placeholder="500"></div>
-          <div><label for="tCai">C.A.I. (14 dígitos)</label><input id="tCai" inputmode="numeric" maxlength="14"></div>
-          <div><label for="tVto">Vencimiento</label><input id="tVto" type="date"></div>
+          <div><label for="tPv">Punto de venta</label><input id="tPv" data-tipo="entero" maxlength="5" value="${esc(d.punto_venta || 1)}"></div>
+          <div><label for="tDesde">Número desde</label><input id="tDesde" data-tipo="entero" maxlength="8" placeholder="1"></div>
+          <div><label for="tHasta">Número hasta</label><input id="tHasta" data-tipo="entero" maxlength="8" placeholder="500"></div>
+          <div><label for="tCai">C.A.I. (14 dígitos)</label><input id="tCai" data-tipo="entero" maxlength="14"></div>
+          <div><label for="tVto">Vencimiento</label><input id="tVto" type="text" class="fecha"></div>
         </div>
         <div class="acc"><button class="btn" id="btnTalonario">Cargar talonario</button></div>
       </div>
@@ -444,10 +472,20 @@
       .querySelectorAll('[data-tactiva]')
       .forEach(b =>
         b.addEventListener('click', async () => {
+          const activar = +b.dataset.a === 1;
+          const ok = await confirmar({
+            titulo: activar ? '¿Activar el talonario?' : '¿Desactivar el talonario?',
+            mensaje: activar
+              ? 'Los remitos se vuelven a autorizar con este C.A.I. mientras esté vigente y tenga números.'
+              : 'No se autorizan más remitos con este C.A.I. hasta volver a activarlo.',
+            aceptar: activar ? 'Activar' : 'Desactivar',
+            peligro: !activar,
+          });
+          if (!ok) return;
           b.disabled = true;
           const { d: r2 } = await api('api/talonarios.php', {
             method: 'POST',
-            body: JSON.stringify({ id: +b.dataset.tactiva, activa: +b.dataset.a === 1 }),
+            body: JSON.stringify({ id: +b.dataset.tactiva, activa: activar }),
           });
           if (!r2.ok) avisar(r2.error);
           verCai();
@@ -492,12 +530,31 @@
       );
   }
   async function cargarTalonario() {
+    // Los mismos controles que el servidor, marcados en el campo antes de enviar.
+    controles.limpiarErrores($('.talta'));
+    const desde = +$('#tDesde').value || 0,
+      hasta = +$('#tHasta').value || 0,
+      pvT = +$('#tPv').value || 0;
+    const vto = controles.leerFecha($('#tVto').value);
+    const hoy = controles.hoyAR();
+    const errores = [
+      [pvT < 1 || pvT > 99998, '#tPv', 'Punto de venta de 1 a 99998'],
+      [desde < 1, '#tDesde', 'Indicá el primer número del rango'],
+      [hasta <= desde, '#tHasta', 'El número final tiene que ser mayor que el inicial'],
+      [$('#tCai').value.replace(/\D/g, '').length !== 14, '#tCai', 'El C.A.I. tiene 14 dígitos'],
+      [!vto, '#tVto', 'Indicá el vencimiento del C.A.I. (dd/mm/aaaa)'],
+      [vto && hoy && vto < hoy, '#tVto', 'El C.A.I. ya está vencido'],
+    ].filter(e => e[0]);
+    if (errores.length) {
+      errores.forEach(([, sel, msg]) => controles.marcarError($(sel), msg));
+      return controles.enfocar($(errores[0][1]));
+    }
     const cuerpo = {
       punto_venta: +$('#tPv').value || 0,
       numero_desde: +$('#tDesde').value || 0,
       numero_hasta: +$('#tHasta').value || 0,
       cai: $('#tCai').value.replace(/\D/g, ''),
-      cai_vencimiento: $('#tVto').value,
+      cai_vencimiento: (([d, m, a]) => (a ? `${a}-${m}-${d}` : ''))($('#tVto').value.split('/')),
     };
     let { d } = await api('api/talonarios.php', { method: 'POST', body: JSON.stringify(cuerpo) });
     if (d && d.puede_cargar_sin_verificar) {
@@ -586,6 +643,9 @@
     }
     esMaestra = !!(adm.d && adm.d.ok);
     $('#modoBadge').textContent = esMaestra ? 'Administración' : 'Consulta';
+    // En modo consulta (clave de servicio sin «admin») solo se ve el Estado: el resto responde 403.
+    document.querySelectorAll('#tabs .tab').forEach(t => (t.hidden = !esMaestra && t.dataset.tab !== 'estado'));
+    if (!esMaestra) tab = 'estado';
     $('#apiKey').value = '';
     if (clave) sessionStorage.setItem(SK, clave);
     $('#btnSalir').hidden = !clave; // con la sesión de la aplicación se sale desde la aplicación
@@ -629,6 +689,19 @@
         if (j && j.usuario && j.usuario.rol === 'admin') {
           csrf = j.csrf;
           abrirPanel();
+          // Vuelta de la confirmación con Google (?ingreso=…)
+          const ingreso = new URLSearchParams(location.search).get('ingreso');
+          if (ingreso) {
+            history.replaceState(null, '', location.pathname);
+            avisar(
+              ingreso === 'confirmado'
+                ? 'Identidad confirmada con Google. Ya podés repetir la operación.'
+                : ingreso === 'google_otra_cuenta'
+                  ? 'Para confirmar tu identidad elegí en Google la misma cuenta con la que ingresaste.'
+                  : 'No se pudo confirmar la identidad con Google. Probá de nuevo.',
+              ingreso === 'confirmado' ? 'okmsg' : 'err'
+            );
+          }
         }
       })
       .catch(() => {});

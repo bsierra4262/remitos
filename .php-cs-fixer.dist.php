@@ -1,7 +1,7 @@
 <?php
 
 $finder = PhpCsFixer\Finder::create()
-    ->in([__DIR__ . '/app/api'])
+    ->in([__DIR__ . '/app/api', __DIR__ . '/test/unitarias'])
     ->notName(['config.php'])
     ->name('*.php');
 

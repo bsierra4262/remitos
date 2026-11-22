@@ -3,7 +3,7 @@
  *
  * Pruebas unitarias de app/js/calculos.js (importes, CUIT y montos en letras).
  *
- *   node --test test/unitarias/
+ *   node --test test/unitarias/calculos.test.js
  *
  * Los casos de importes y CUIT están en casos-importes.json y se usan también en
  * importes.test.php: la interfaz y el servidor tienen que calcular lo mismo.

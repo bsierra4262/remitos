@@ -287,22 +287,50 @@ function api_require_same_origin(): void
 }
 
 /**
+ * Nombre de bloqueo propio de esta base. Los bloqueos de GET_LOCK valen para todo el
+ * servidor MySQL (en un hosting compartido, también para las bases de otros sitios),
+ * así que se anteponen el nombre de la base y se acota a los 64 caracteres permitidos.
+ */
+function api_lock_name(PDO $pdo, string $name): string
+{
+    static $db = [];
+    $db[spl_object_id($pdo)] ??= (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+    $full = $db[spl_object_id($pdo)] . '.' . $name;
+
+    return strlen($full) <= 64 ? $full : substr(hash('sha256', $full), 0, 64);
+}
+
+/** Intenta tomar un bloqueo con nombre durante $seconds. Devuelve si se obtuvo. */
+function api_try_lock(PDO $pdo, string $name, int $seconds = 10): bool
+{
+    $st = $pdo->prepare('SELECT GET_LOCK(?, ?)');
+    $st->execute([api_lock_name($pdo, $name), $seconds]);
+
+    return (int) $st->fetchColumn() === 1;
+}
+
+/**
  * Toma un bloqueo con nombre (GET_LOCK). Si no se obtiene en el plazo, responde 503:
  * nunca se continúa sin el bloqueo.
  */
 function api_lock(PDO $pdo, string $name, int $seconds = 10): void
 {
-    $st = $pdo->prepare('SELECT GET_LOCK(?, ?)');
-    $st->execute([$name, $seconds]);
-    if ((int) $st->fetchColumn() !== 1) {
+    if (!api_try_lock($pdo, $name, $seconds)) {
         api_error(503, 'El servidor está ocupado con otra operación igual. Volvé a intentar en unos segundos.');
     }
 }
 
-/** Libera un bloqueo tomado con api_lock(). */
+/**
+ * Libera un bloqueo tomado con api_lock(). Nunca lanza: se llama desde bloques finally
+ * y un error al liberar (conexión caída) no debe tapar el resultado o el error original;
+ * MySQL libera igual el bloqueo al cerrarse la conexión.
+ */
 function api_unlock(PDO $pdo, string $name): void
 {
-    $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+    try {
+        $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([api_lock_name($pdo, $name)]);
+    } catch (Throwable) {
+    }
 }
 
 /** ¿La excepción es una violación de clave única (SQLSTATE 23000)? */

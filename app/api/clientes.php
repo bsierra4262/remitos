@@ -31,13 +31,23 @@ const CLIENT_FIELDS = [
     'domicilio' => 160, 'localidad' => 80, 'cp' => 10, 'mail' => 120, 'nombre' => 120, 'otrosDatos' => 160,
 ];
 
-/** Máximo de clientes aceptados por importación. */
-const CLIENT_IMPORT_MAX = 2000;
+/** Máximo de clientes por importación (la aplicación envía de a 500; entra en API_MAX_BODY). */
+const CLIENT_IMPORT_MAX = 1000;
 
 /** Máximo de clientes por respuesta. */
 const CLIENT_LIST_MAX = 5000;
 
-/** Condiciones frente al IVA admitidas. */
+/** Id del cliente sin CUIT con esa razón social (sin distinguir mayúsculas), o 0. */
+function client_by_name_without_cuit(PDO $pdo, string $name): int
+{
+    if ($name === '') {
+        return 0;
+    }
+    $st = $pdo->prepare("SELECT id FROM clientes WHERE (cuit IS NULL OR cuit = '') AND LOWER(razon_social) = LOWER(?) LIMIT 1");
+    $st->execute([$name]);
+
+    return (int) ($st->fetchColumn() ?: 0);
+}
 
 /** CUIT normalizado (99-99999999-9), DNI (solo dígitos) o vacío; null si no es válido. */
 function client_cuit(string $value): ?string
@@ -177,7 +187,11 @@ if ($method === 'POST') {
                     $skipped++;
                     continue;
                 }
-                $existing = client_by_cuit($pdo, $client['cuit']);
+                // Con CUIT se identifica por CUIT; sin CUIT, por razón social, así reimportar
+                // la misma planilla no duplica a los clientes que no tienen CUIT.
+                $existing = $client['cuit'] !== ''
+                    ? client_by_cuit($pdo, $client['cuit'])
+                    : client_by_name_without_cuit($pdo, $client['razonSocial']);
                 if ($existing > 0) {
                     $st = $pdo->prepare('SELECT data FROM clientes WHERE id = ?');
                     $st->execute([$existing]);
@@ -231,7 +245,14 @@ if ($method === 'POST') {
         api_error(409, 'Ya hay un cliente con el CUIT ' . $client['cuit'], ['id_existente' => $duplicate]);
     }
 
-    $savedId = client_save($pdo, $client, $id, $auth['nombre']);
+    try {
+        $savedId = client_save($pdo, $client, $id, $auth['nombre']);
+    } catch (PDOException $e) {
+        if (api_is_duplicate($e)) { // otra alta simultánea con el mismo CUIT
+            api_error(409, 'Ya hay un cliente con el CUIT ' . $client['cuit']);
+        }
+        throw $e;
+    }
     audit_event($pdo, ($id > 0 ? 'Cliente actualizado: ' : 'Cliente creado: ') . ($client['razonSocial'] ?: $client['cuit']), [
         'categoria' => 'cliente',
     ]);

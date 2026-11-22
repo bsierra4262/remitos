@@ -367,3 +367,67 @@ def una_hoja_por_ejemplar():
         ok = len(altos) == 2 and all(a <= hoja for a in altos)
         return ok, f"ejemplares={len(altos)} altos={[round(a) for a in altos]} hoja={round(hoja)}"
     return _con_pagina(prueba)
+
+
+@caso("Formularios profesionales: errores en el campo, CBU verificado, transportista según el traslado y una sola lista de IVA")
+def formularios_profesionales():
+    def prueba(pg, errores):
+        ir_a(pg, "remito")
+        r = pg.evaluate("""() => {
+            nuevo();
+            const opciones = document.querySelector('[data-path="cliente.condIVA"]').options.length;
+            const sel = document.querySelector('[data-path="transporte.tipo"]');
+            sel.value = 'propio'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+            const ocultoPropio = document.querySelector('[data-path="transporte.cuit"]').closest('.field').hidden;
+            sel.value = 'tercero'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+            const visibleTercero = !document.querySelector('[data-path="transporte.cuit"]').closest('.field').hidden;
+            marcarFaltantesRemito(faltantesRemito(doc));
+            const marcados = document.querySelectorAll('#viewRemito [aria-invalid="true"]').length;
+            const mensaje = (document.querySelector('#viewRemito .error-campo') || {}).textContent || '';
+            const digital = document.querySelector('#btnDigital').disabled;
+            return { opciones, ocultoPropio, visibleTercero, marcados, mensaje, digital };
+        }""")
+        cbu = pg.evaluate("() => ({ bueno: cbuValido('0170099222000000678900'), malo: cbuValido('0170099222000000678901') })")
+        ok = (r["opciones"] == 12 and r["ocultoPropio"] and r["visibleTercero"] and r["marcados"] >= 4
+              and "RG 1415" in r["mensaje"] and r["digital"] and cbu == {"bueno": True, "malo": False} and not errores)
+        return ok, f"{r} cbu={cbu} errores={errores}"
+    return _con_pagina(prueba)
+
+
+@caso("Facturar un remito autorizado arma la factura con su cliente e ítems; la nota elige su factura con CAE")
+def facturar_remito_y_nota_asociada():
+    def prueba(pg, errores):
+        ir_a(pg, "remito")
+        r = pg.evaluate("""async () => {
+            nuevo();
+            Object.assign(doc, { id: 'aaaaaaaaaaaaaaaa', estado: 'autorizado', numero: '00001-00000007', cai: '75041234567890',
+              caiVto: '31/12/2030', facturado: false });
+            doc.cliente = { razonSocial: 'CLIENTE REMITO SA', cuit: '30-71140975-7', condIVA: 'Responsable Inscripto',
+              domicilio: 'Calle 1', localidad: 'CABA', cp: '1414' };
+            doc.items = [{ articulo: 'A1', descripcion: 'Router', cantidad: '2' }];
+            syncFiscalUI();
+            const boton = !document.querySelector('#btnFacturarRemito').hidden;
+            await facturarRemito();
+            const f = clone(compDoc);
+            // Nota: elige de los comprobantes con CAE de la misma letra
+            const fac = Object.assign(emptyComprobante('factura'), { id: 'bbbbbbbbbbbbbbbb', letra: 'A', estado: 'autorizado',
+              cae: '12345678901234', caeVto: '31/12/2030', numero: '00000042', ptoVenta: '00003', fecha: '01/11/2026',
+              cliente: f.cliente, items: [{ descripcion: 'Router', cantidad: '2', precio: '1000' }], updated: Date.now() });
+            datos.comprobantes.push(fac);
+            await nuevoComprobante('nota');
+            compDoc.letra = 'A';
+            compDoc.items = [{ descripcion: '', cantidad: '1', precio: '' }];
+            renderComprobanteEditor();
+            const opcion = !!document.querySelector('#compAsocElegir option[value="bbbbbbbbbbbbbbbb"]');
+            asociarComprobante(fac);
+            const n = clone(compDoc);
+            datos.comprobantes = datos.comprobantes.filter(x => x.id !== fac.id);
+            return { boton, letra: f.letra, remitoId: f.remitoId, item: f.items[0], obs: f.observaciones, opcion,
+                     asoc: n.compAsoc, itemsNota: n.items.length };
+        }""")
+        ok = (r["boton"] and r["letra"] == "A" and r["remitoId"] == "aaaaaaaaaaaaaaaa" and r["item"]["descripcion"] == "A1 · Router"
+              and r["item"]["cantidad"] == "2" and "00001-00000007" in r["obs"] and r["opcion"]
+              and r["asoc"] == {"tipo": "Factura", "letra": "A", "pv": "00003", "nro": "00000042"} and r["itemsNota"] == 1
+              and not errores)
+        return ok, f"{r} errores={errores}"
+    return _con_pagina(prueba)

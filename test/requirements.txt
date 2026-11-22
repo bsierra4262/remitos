@@ -1,0 +1,4 @@
+# Dependencias de la batería de pruebas (las mismas en CI y en el equipo local)
+playwright==1.47.0
+pymupdf==1.24.10
+cryptography==43.0.1

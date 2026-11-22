@@ -26,7 +26,7 @@ PHP 8.2 o superior con las extensiones `pdo_mysql`, `openssl`, `curl`, `dom` y `
 | Herramienta | Versión | Uso |
 |---|---|---|
 | PHP-CS-Fixer | 3.64 | Estilo PSR-12 del código PHP |
-| Prettier | 3.3.3 | Estilo de JavaScript, CSS y HTML |
+| Prettier | 3.3.3 | Estilo de JavaScript y CSS |
 | Node.js | 22 | Pruebas unitarias de `calculos.js` |
 | Playwright (Python) | 1.47 | Pruebas de la interfaz en Chromium |
 | PyMuPDF, cryptography | 1.24, 43 | Lectura de PDF y certificados de prueba |
@@ -36,4 +36,4 @@ PHP 8.2 o superior con las extensiones `pdo_mysql`, `openssl`, `curl`, `dom` y `
 1. Descargar la versión nueva desde el origen indicado y revisar sus notas de versión y avisos de seguridad.
 2. Reemplazar el archivo en `app/` y actualizar esta tabla.
 3. Regenerar el hash: `sha256sum app/js/lib/*.js app/assets/fonts/*.woff2 > test/dependencias.sha256`.
-4. Subir la versión de caché (`?v=NNN`) en `index.html` y `panel.html`, y correr la batería completa.
+4. Subir la versión de caché (`?v=NNN`) en `index.html`, `panel.html` y `conformidad.html`, y correr la batería completa.

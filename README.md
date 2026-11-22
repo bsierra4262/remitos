@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/PHP-8.2+-777BB4?logo=php&logoColor=white" alt="PHP 8.2+">
   <img src="https://img.shields.io/badge/MariaDB-11-003545?logo=mariadb&logoColor=white" alt="MariaDB">
   <img src="https://img.shields.io/badge/JavaScript-sin%20frameworks-F7DF1E?logo=javascript&logoColor=black" alt="JavaScript sin frameworks">
-  <img src="https://img.shields.io/badge/ARCA-WSAA%20%C2%B7%20WSFEv1-0B4C8C" alt="ARCA WSAA y WSFEv1">
+  <img src="https://img.shields.io/badge/ARCA-WSAA%20%C2%B7%20WSFEv1%20%C2%B7%20WSFECRED%20%C2%B7%20WSCDC-0B4C8C" alt="ARCA WSAA, WSFEv1, WSFECRED y WSCDC">
   <img src="https://img.shields.io/badge/Hosting-Hostinger-673DE6?logo=hostinger&logoColor=white" alt="Hostinger">
   <img src="https://img.shields.io/badge/uso-interno-663399" alt="Uso interno">
 </p>
@@ -24,7 +24,7 @@
 - El **remito** se imprime **sobre el talonario pre-impreso**, con cada dato calibrado al milímetro, o como **documento completo** en papel en blanco o PDF, con original y duplicado.
 - Se **autoriza** con el **C.A.I.** del talonario vigente: número correlativo, código y vencimiento se asignan solos. Hasta entonces es un borrador que se imprime «SIN AUTORIZAR». Cada talonario se **constata con ARCA** (WSCDC) al cargarlo.
 - **Remito digital** (RG 5678/2025): el remito autorizado puede viajar como PDF en el celular, con un QR para que el destinatario **confirme la recepción** desde su teléfono.
-- Las **facturas, recibos y notas** se **emiten con CAE** a través de los web services de **ARCA** (WSFEv1), con número asignado por ARCA y **QR fiscal**.
+- Las **facturas y notas** A y B (y la **Factura de Crédito MiPyME**) se **emiten con CAE** a través de los web services de **ARCA** (WSFEv1), con número asignado por ARCA y **QR fiscal**. El **recibo de cobranza** es letra X, sin CAE (no es válido como factura, RG 1415 art. 10).
 - **Datos compartidos**: clientes, remitos, comprobantes y ajustes viven en el servidor; todo el equipo trabaja sobre la misma información, con **usuarios y roles**.
 - Si se corta la conexión, el documento en curso se sigue guardando en el equipo y se sube solo al volver la red.
 - Otros sistemas pueden **crear remitos por API** y recibir un enlace que los abre listos para imprimir.
@@ -51,7 +51,7 @@
 
 ### Inicio
 
-Accesos rápidos, totales y documentos recientes con su estado (autorizado, facturado, sin autorizar o borrador sin guardar) y quién los modificó por última vez.
+Indicadores del día —**facturado en el mes** con CAE (notas de crédito restadas), **remitos autorizados sin facturar**, facturas y notas **sin autorizar** y números de **C.A.I. disponibles** con su vencimiento; las tarjetas con pendientes abren el listado—, accesos rápidos y documentos recientes con su estado (autorizado, facturado, sin autorizar o borrador sin guardar) y quién los modificó por última vez.
 
 <p align="center"><img src="docs/imagenes/capturas/inicio.png" alt="Inicio" width="100%"></p>
 
@@ -145,7 +145,9 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 - Dos modos de impresión con **calibraciones independientes**: sobre el talonario pre-impreso (24 ajustes de fábrica medidos sobre impresiones reales) y documento completo.
 - Ejemplares **original y duplicado** (RG 1415, art. 14); el duplicado se imprime en beige, como el talonario.
 - **Autorización** con el C.A.I.: número correlativo dentro del rango, código y vencimiento; bloqueo si el C.A.I. está vencido y avisos por pocos números o vencimiento próximo.
-- El número fiscal solo existe en los remitos autorizados (único por punto de venta en la base); los borradores llevan una referencia interna. Un remito autorizado no se modifica y se marca como **facturado** cuando tiene su factura.
+- El número fiscal solo existe en los remitos autorizados (único por punto de venta en la base); los borradores llevan una referencia interna. Un remito autorizado no se modifica.
+- **Facturar este remito**: arma la factura con el cliente y los ítems del remito; cuando la factura obtiene el CAE en producción, el remito queda **facturado** solo (una factura de homologación no lo marca, porque no tiene validez fiscal).
+- La fecha de un remito no puede ser posterior a hoy ni anterior a la del último autorizado del punto de venta (numeración correlativa), y un talonario vencido se saltea si hay otro vigente.
 - **Contenido obligatorio de la RG 1415 (Anexo V)**: condición frente al IVA del emisor y del destinatario, CUIT y domicilio del destinatario, bienes con su cantidad, y razón social, CUIT y domicilio del transportista cuando el traslado lo hace un tercero. El sistema no autoriza un remito incompleto ni con un C.A.I. vencido.
 - **Constatación del C.A.I.** con el web service de ARCA (WSCDC) al cargar cada talonario: CUIT, punto de venta, tipo, rango y vigencia. ARCA no ofrece un servicio para *pedir* el C.A.I.: se tramita con Clave Fiscal y el sistema avisa con tiempo cuando hace falta el próximo.
 - **Remito digital** (RG 5678/2025): PDF de un solo ejemplar sin leyendas ORIGINAL/DUPLICADO, con el QR del enlace de conformidad; el destinatario confirma con nombre y documento y queda registrado con fecha y hora. Detalle de cada requisito en [`docs/normativa.md`](docs/normativa.md).
@@ -155,7 +157,7 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 ### Facturas, recibos y notas de crédito y débito
 - Letras **A y B**, las que emite Intellihelp como Responsable Inscripto (la C, de monotributistas y exentos, se rechaza), y X para documentos internos «no válidos como factura», con el código oficial de cada comprobante.
 - **Condición frente al IVA del receptor** con la tabla oficial de ARCA (RG 5616): la letra se ajusta sola (A para inscriptos y monotributistas, B para el resto) y se valida antes de pedir el CAE.
-- Ítems, alícuotas de IVA de la tabla de ARCA, concepto (productos o servicios con su período) y comprobante asociado obligatorio en las notas.
+- Ítems, alícuotas de IVA de la tabla de ARCA, concepto (productos o servicios con su período) y comprobante asociado obligatorio en las notas, **elegido de los comprobantes con CAE** (primero los del mismo cliente). Desde una factura autorizada, «Nota de crédito de este comprobante» arma la nota asociada.
 - **Recibo de cobranza** (RG 1415, art. 10): respalda el pago de una factura ya emitida, con importe en letras; no vale como factura ni lleva CAE.
 - **Factura de Crédito Electrónica MiPyME** (Ley 27.440): si la empresa es MiPyME, al facturar a un CUIT se consulta a ARCA si el cliente está obligado a recibirla y sale como tal, con CBU y opción de transferencia; sus notas siguen al comprobante asociado.
 - Una factura B desde $ 10.000.000 exige identificar al comprador, como valida ARCA.
@@ -168,6 +170,8 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 - **Numeración asignada por el servidor**: dos personas autorizando a la vez nunca reciben el mismo número, y un reintento tras un corte no duplica el documento (`id_local`).
 - **Respaldo cifrado** del servidor por consola (diario con `cron`), con verificación y restauración probada; copia descargable para administradores.
 - **Borrador protegido**: el documento en curso se guarda en el equipo mientras se escribe; ante un corte, queda pendiente y se sube solo al volver la red. Se borra al cerrar sesión y a los 7 días sin uso.
+- Listados de comprobantes guardados con **búsqueda** (cliente, CUIT o número), filtro por estado (con CAE, sin autorizar, internos) y **total** de lo que se ve.
+- Formularios con controles propios (desplegables, calendario, máscaras de fecha, hora, CUIT, importes): los **errores se marcan en el campo** con su explicación y el foco va al primero; nada de globos ni selectores nativos del navegador. Los paneles laterales son diálogos accesibles (foco atrapado y devuelto al cerrar).
 - Atajos **Ctrl+S** y **Ctrl+P** según el documento en pantalla.
 
 ### Usuarios y acceso
@@ -213,8 +217,8 @@ flowchart LR
 | **WSFEv1 · FECompUltimoAutorizado** | Último número autorizado por punto de venta y tipo: el comprobante toma el siguiente |
 | **WSFEv1 · FECAESolicitar** | Emisión: CAE y vencimiento de facturas y notas A y B, y de la Factura de Crédito MiPyME y sus notas (con sus opcionales) |
 | **WSFEv1 · FEParamGetPtosVenta** | Puntos de venta habilitados para web services, que muestra «Probar conexión» |
-| **WSFECRED · consultarMontoObligadoRecepcion** | Si el cliente está obligado a recibir Factura de Crédito MiPyME y desde qué importe |
 | **WSFEv1 · FECompConsultar** | Recupera el CAE de un comprobante cuya respuesta se perdió, antes de pedir otro número |
+| **WSFECRED · consultarMontoObligadoRecepcion** | Si el cliente está obligado a recibir Factura de Crédito MiPyME y desde qué importe |
 | **WSCDC · ComprobanteConstatar** | Constata cada talonario de C.A.I. (CUIT, punto de venta, tipo, rango y vigencia) al cargarlo |
 | **C.A.I.** | ARCA no ofrece web service para solicitarlo: se tramita con Clave Fiscal y se carga en el panel una vez por rango |
 
@@ -243,12 +247,13 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   ├── api/
 │   │   ├── bootstrap.php    # Arranque común y manejo de errores
 │   │   ├── lib/             # http · db (migraciones) · session · users · google · auth · audit · crypto
-│   │   │                    # · importes · ajustes · normativa · arca (WSAA, WSFEv1, WSCDC)
-│   │   ├── sesion.php       # Estado de la sesión y salida (el ingreso es google.php)
+│   │   │                    # · importes · ajustes · normativa · arca (WSAA, WSFEv1, WSFECRED, WSCDC)
+│   │   ├── google.php       # Ingreso con Google (única forma de ingresar)
+│   │   ├── sesion.php       # Estado de la sesión y salida
 │   │   ├── usuarios.php     # Administración de usuarios
 │   │   ├── clientes.php     # Agenda de clientes
 │   │   ├── remitos.php      # Remitos (numeración asignada por el servidor)
-│   │   ├── comprobantes.php # Facturas, recibos y notas; emisión con CAE
+│   │   ├── comprobantes.php # Facturas, notas (emisión con CAE) y recibos X
 │   │   ├── ajustes.php      # Datos del emisor y punto de venta
 │   │   ├── talonarios.php   # C.A.I. y autorización de remitos
 │   │   ├── arca.php         # Credenciales y conexión con ARCA
@@ -286,16 +291,16 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 ## Seguridad
 
 **Usuarios y sesión**
-- **Sin contraseñas propias:** se ingresa solo con Google (OpenID Connect con PKCE, resuelto en el servidor), limitado al dominio `intellihelp.tech` y a usuarios dados de alta. No hay contraseñas ni secretos de segundo factor que puedan filtrarse de la base.
-- **Ingreso con Google** para las cuentas de Intellihelp: OpenID Connect con PKCE resuelto en el servidor, limitado al dominio `intellihelp.tech` y a usuarios ya dados de alta; el secreto del cliente vive solo en `config.php`.
+- **Solo ingreso con Google**, sin contraseñas propias: OpenID Connect con PKCE resuelto en el servidor, limitado al dominio `intellihelp.tech` y a usuarios dados de alta. No hay contraseñas ni secretos de segundo factor que puedan filtrarse de la base, y el secreto del cliente vive solo en `config.php`.
+- **Operaciones sensibles** (certificados de ARCA, claves de API, alta de usuarios y rol de administrador, exportación, CUIT/CBU/ambiente del emisor): exigen haber confirmado la identidad con Google en los últimos 15 minutos, con la misma cuenta de la sesión.
 - Cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, limitada a la ruta de la aplicación; identificador regenerado al ingresar.
 - **Token CSRF** obligatorio en toda escritura, que además debe ser JSON y venir del propio origen (también el ingreso); vencimiento por inactividad (8 h) y absoluto (12 h).
-- **Freno de ingresos fallidos** con Google por conexión.
+- **Freno de ingresos fallidos**: 20 vueltas fallidas desde Google por conexión en 15 minutos.
 - Cambiar el rol o desactivar a un usuario cierra sus sesiones en el acto. Siempre queda al menos un administrador.
 
 **Credenciales de ARCA**
 - El certificado y la clave privada **nunca se guardan en el navegador**: los carga un administrador que confirmó su identidad con Google en los últimos 15 minutos, y se envían una sola vez al servidor por **HTTPS obligatorio**.
-- El servidor valida que sean PEM correctos, que la clave sea RSA de 2048 bits o más y corresponda al certificado, que esté vigente y que el CUIT coincida con el del emisor.
+- El servidor valida que sean PEM correctos, que la clave sea RSA de 2048 bits o más y corresponda al certificado, y que esté vigente. El certificado puede ser del emisor o de un representante con los servicios delegados: la relación la confirma «Probar conexión» (los pedidos van siempre a nombre del CUIT del emisor, `Auth.Cuit`).
 - Se almacenan **cifrados con AES-256-GCM**. La clave de cifrado vive solo en `config.php` (fuera del repositorio y de la base) y se deriva una subclave por propósito con **HKDF-SHA256**. Cada valor queda ligado a su ambiente y su campo como dato autenticado: un valor copiado a otra fila no se descifra.
 - Los tickets de WSAA también se guardan cifrados y se piden de a uno (bloqueo). La firma se hace en el servidor: los archivos temporales solo contienen el pedido y la firma, con permisos `0600`, y se eliminan siempre.
 - El XML de ARCA se interpreta sin acceso a red ni entidades externas; los errores de ARCA o de la conexión se informan de forma genérica.
@@ -307,10 +312,11 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 - Permisos mínimos por clave, revocación inmediata y **bloqueo temporal** por IP tras 20 intentos rechazados en 10 minutos. CORS solo para orígenes configurados.
 - Consultas **parametrizadas** (PDO sin emulación), validación y recorte de todos los datos de entrada y límite de tamaño de 256 KB por petición.
 - Errores internos registrados solo en el log del servidor; el cliente recibe un mensaje genérico.
-- `config.php`, `bootstrap.php` y `lib/` bloqueados para la web; la clave nunca viaja en la URL.
+- `config.php` (y cualquier copia `config.php.*`), `bootstrap.php`, `lib/` y `cli/` bloqueados para la web; la clave nunca viaja en la URL.
 - **Auditoría** de los eventos relevantes (accesos rechazados, emisiones, ediciones, exportaciones) con usuario, IP y **hash encadenado**; se conserva 400 días y se depura solo por antigüedad. Los intentos fallidos se cuentan en otra tabla.
-- Los CAE y C.A.I. solo los asigna el servidor; la numeración fiscal es única en la base y los documentos autorizados son inmutables.
+- Los CAE y C.A.I. solo los asigna el servidor; la numeración fiscal es única en la base y los documentos autorizados no se modifican ni se eliminan (ni siquiera un administrador): se conservan por el plazo legal.
 - Migraciones del esquema por consola en el despliegue: la web nunca ejecuta DDL.
+- Los bloqueos con nombre (GET_LOCK) llevan el nombre de la base, porque en el hosting compartido valen para todo el servidor MySQL. La conexión fija `wait_timeout = 300`: el hosting corta a los 20 s y una emisión con ARCA puede tardar más.
 
 **Aplicación**
 - **Content-Security-Policy** sin recursos de terceros (fuente incluida) y sin scripts ni hojas de estilo inline, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS y redirección a HTTPS.
@@ -318,7 +324,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 - Escape de todo dato mostrado en pantalla.
 - El panel de la API se abre con la sesión de un administrador; una clave de API solo se conserva mientras la pestaña está abierta (`sessionStorage`).
 
-Modelo de amenazas, respaldos, rotación de claves, respuesta a incidentes y retención de datos personales: [`docs/seguridad.md`](docs/seguridad.md). Estado de la revisión de noviembre de 2026: [`docs/historial/remediacion-2026-11.md`](docs/historial/remediacion-2026-11.md).
+Modelo de amenazas, respaldos, rotación de claves, respuesta a incidentes y retención de datos personales: [`docs/seguridad.md`](docs/seguridad.md). Historial de la revisión de noviembre de 2026 (anterior al ingreso solo con Google): [`docs/historial/remediacion-2026-11.md`](docs/historial/remediacion-2026-11.md).
 
 ## Instalación y despliegue
 
@@ -354,18 +360,18 @@ Después:
 2. En **Configuración → Conexión con ARCA**: CUIT, puntos de venta y el certificado.
 3. Cargar el talonario de C.A.I. desde el **Panel de la API** según el instructivo.
 
-Los recursos se referencian con `?v=NNN`: al publicar cambios en CSS o JS se incrementa la versión en `index.html` y `panel.html`. En cada despliegue: publicar `app/`, correr `php api/cli/migrar.php` y verificar las cabeceras (ver [`docs/seguridad.md`](docs/seguridad.md)).
+Los recursos se referencian con `?v=NNN`: al publicar cambios en CSS o JS se incrementa la versión en `index.html`, `panel.html` y `conformidad.html`. En cada despliegue: publicar `app/`, correr `php api/cli/migrar.php` y verificar las cabeceras (ver [`docs/seguridad.md`](docs/seguridad.md)).
 
 ## Pruebas
 
 ```bash
-pip install playwright pymupdf cryptography && playwright install chromium
+pip install -r test/requirements.txt && playwright install chromium
 python test/correr.py                         # batería de API e interfaz
 node --test test/unitarias/calculos.test.js   # unitarias de la interfaz
 php test/unitarias/importes.test.php          # unitarias del servidor
 ```
 
-**99 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
+**110 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 

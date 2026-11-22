@@ -3,17 +3,26 @@
 Crean un talonario y una clave de prueba, y limpian al terminar.
 """
 import concurrent.futures
-from datetime import date, timedelta
+from datetime import timedelta
 
 from playwright.sync_api import sync_playwright
 
-from base import (DOC_COMPLETO_JS, REMITO_COMPLETO, VTO, _borrar_talonario, _remito, _talonario, abrir, caso,
-                  clave_maestra, ir_a, modo_documento, pedir)
+from base import (DOC_COMPLETO_JS, hoy_ba, REMITO_COMPLETO, VTO, _borrar_talonario, _remito, _talonario, abrir, caso,
+                  _sql, clave_maestra, ir_a, modo_documento, pedir)
 
 def _autorizar(pv, **extra):
     cuerpo = {"accion": "autorizar", "pv": pv, "tipo": 91, "remito_id": _remito()}
     cuerpo.update(extra)
     return pedir("/talonarios.php", "POST", clave_maestra(), cuerpo)
+
+
+def _confirmar_autorizacion(pg):
+    """«Autorizar» consume un número del talonario: pide confirmación en el diálogo propio."""
+    try:
+        pg.wait_for_selector("#dlgConfirmar[open]", timeout=3000)
+        pg.click("#dlgConfirmarSi")
+    except Exception:
+        pass  # sin confirmación (por ejemplo, faltan datos y solo se avisa)
 
 
 @caso("El alta de talonario valida CAI, rango y vencimiento")
@@ -25,7 +34,7 @@ def alta_valida():
         ("CAI corto",   {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "123", "cai_vencimiento": VTO}),
         ("vto pasado",  {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890",
                          # dos días: el servidor usa la hora de Argentina y el CI la UTC
-                         "cai_vencimiento": (date.today() - timedelta(days=2)).isoformat()}),
+                         "cai_vencimiento": (hoy_ba() - timedelta(days=2)).isoformat()}),
         ("rango malo",  {"punto_venta": 90, "numero_desde": 9, "numero_hasta": 9, "cai": "75041234567890", "cai_vencimiento": VTO}),
         ("pv inválido", {"punto_venta": 0, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890", "cai_vencimiento": VTO}),
         ("tipo inválido", {"punto_venta": 90, "numero_desde": 1, "numero_hasta": 9, "cai": "75041234567890",
@@ -68,19 +77,43 @@ def cai_vencido_bloquea():
     m = clave_maestra()
     if not m:
         return False, "sin clave maestra"
-    vto_manana = (date.today() + timedelta(days=1)).isoformat()
+    vto_manana = (hoy_ba() + timedelta(days=1)).isoformat()
     s, d = _talonario(desde=1, hasta=5, vto=vto_manana, cai="75049999999999", pv=92)
     tid = d.get("id")
     try:
-        futuro = (date.today() + timedelta(days=10)).isoformat()
         rid = _remito()
-        cuerpo = {"accion": "autorizar", "pv": 92, "tipo": 91, "fecha": futuro, "remito_id": rid}
+        hoy = hoy_ba().isoformat()
+        # Una fecha futura no se acepta (la numeración es cronológica)
+        futuro = (hoy_ba() + timedelta(days=10)).isoformat()
+        sf, _ = pedir("/talonarios.php", "POST", m, {"accion": "autorizar", "pv": 92, "fecha": futuro, "remito_id": rid})
+        # El C.A.I. vence: ayer (la carga no admite uno ya vencido, se simula en la base)
+        _sql(f"UPDATE cai_talonarios SET cai_vencimiento = '{(hoy_ba() - timedelta(days=1)).isoformat()}' WHERE id = {int(tid)}")
+        cuerpo = {"accion": "autorizar", "pv": 92, "tipo": 91, "fecha": hoy, "remito_id": rid}
         s, d = pedir("/talonarios.php", "POST", m, cuerpo)
         bloqueo = s == 409 and d.get("vencido")
         s2, d2 = pedir("/talonarios.php", "POST", m, dict(cuerpo, confirmar=True))
         sigue = s2 == 409
-        return bloqueo and sigue, f"bloqueó={bloqueo} con_confirmar={s2}"
+        return sf == 422 and bloqueo and sigue, f"futuro={sf} bloqueó={bloqueo} con_confirmar={s2}"
     finally:
+        _borrar_talonario(tid)
+
+
+@caso("La numeración es cronológica: no se autoriza con fecha anterior al último remito autorizado ni de otro tipo")
+def cai_cronologico():
+    m = clave_maestra()
+    s, d = _talonario(desde=1, hasta=5, pv=93)
+    tid = d.get("id")
+    try:
+        hoy = hoy_ba().isoformat()
+        ayer = (hoy_ba() - timedelta(days=1)).isoformat()
+        s1, d1 = _autorizar(93, fecha=hoy)
+        s2, d2 = _autorizar(93, fecha=ayer)
+        s3, d3 = _autorizar(93, fecha=hoy, tipo=1)
+        s4, d4 = _autorizar(93, fecha="2026-02-31")
+        ok = s1 == 200 and s2 == 422 and "anterior" in d2.get("error", "") and s3 == 400 and s4 == 422
+        return ok, f"hoy={s1} ayer={s2} {d2.get('error')} tipo1={s3} imposible={s4}"
+    finally:
+        _sql("DELETE FROM remitos WHERE punto_venta = 93")
         _borrar_talonario(tid)
 
 
@@ -126,6 +159,7 @@ def remito_autoriza_solo():
                 ir_a(pg, "remito")
                 pg.evaluate("() => { nuevo(); " + DOC_COMPLETO_JS + " doc.fecha = '21/07/2026'; formFromDoc(); renderPreview(); }")
                 pg.click("#btnAutorizar")
+                _confirmar_autorizacion(pg)
                 pg.wait_for_timeout(2500)
                 est = pg.evaluate("() => ({estado: doc.estado, numero: doc.numero, cai: doc.cai, id: doc.id})")
                 modo_documento(pg, "full")
@@ -200,6 +234,7 @@ def autorizar_sin_talonario():
                 ir_a(pg, "remito")
                 pg.evaluate("() => { nuevo(); " + DOC_COMPLETO_JS + " doc.cliente.razonSocial = 'SIN TALONARIO'; formFromDoc(); }")
                 pg.click("#btnAutorizar")
+                _confirmar_autorizacion(pg)
                 pg.wait_for_timeout(1500)
                 aviso = pg.evaluate("""() => { const t = document.querySelector('.toast');
                     return t ? t.textContent : ''; }""")

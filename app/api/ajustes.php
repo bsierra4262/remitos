@@ -84,6 +84,14 @@ if ($method === 'POST') {
             'ambiente' => $environment, 'cuit' => $cuit, 'ptoVenta' => $pointOfSale, 'emision' => $emission,
             'mipyme' => $mipyme, 'cbu' => $cbu, 'transferencia' => $transfer,
         ];
+        // Cambiar a nombre de quién se factura, dónde se cobra o el ambiente es sensible.
+        $current = settings_get($pdo, 'emisor');
+        foreach (['cuit', 'cbu', 'ambiente', 'emision'] as $key) {
+            if (($current[$key] ?? null) != $stored[$key]) {
+                auth_confirm_identity($auth);
+                break;
+            }
+        }
     } else {
         $pointOfSale = preg_replace('/\D/', '', (string) ($values['ptoVenta'] ?? '1')) ?: '1';
         if ((int) $pointOfSale < 1 || (int) $pointOfSale > 99998) {

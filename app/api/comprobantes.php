@@ -27,12 +27,15 @@
  *   DELETE comprobantes.php?id=…                      (borrar) Baja de un borrador (con CAE, solo un administrador).
  *
  * Numeración y CAE:
- *  - Con la emisión electrónica activa (ajustes del emisor), los comprobantes A, B y C
- *    no tienen número hasta que ARCA los autoriza: el número es el último autorizado
- *    + 1 y se toma bajo un bloqueo por punto de venta y tipo. Hasta entonces se
- *    imprimen como «SIN AUTORIZAR».
- *  - Sin emisión electrónica (o letra X) el servidor asigna el correlativo interno de
- *    la serie (tipo, letra y punto de venta), o respeta el que se indique si está libre.
+ *  - Los comprobantes A y B no tienen número hasta que ARCA los autoriza: el número es el
+ *    último autorizado + 1 y se toma bajo un bloqueo por ambiente, punto de venta y tipo.
+ *    Hasta entonces se imprimen «SIN AUTORIZAR». Sin emisión electrónica, un A o B solo
+ *    recibe número si un administrador registra el CAE obtenido fuera del sistema.
+ *  - La letra X (documento interno, como el recibo de cobranza) lleva el correlativo de
+ *    su serie (tipo, letra y punto de venta), o el que se indique si está libre.
+ *  - Al reservar el número se guardan el tipo de ARCA y el ambiente: un reintento tras
+ *    un corte consulta a ARCA con esos mismos datos (FECompConsultar) antes de pedir otro.
+ *  - Un comprobante autorizado o con una emisión en curso no se modifica ni se elimina.
  *  - El CAE nunca se toma del cliente: lo asigna la emisión o lo registra un administrador.
  *  - Un comprobante autorizado no se modifica.
  *
@@ -53,13 +56,6 @@ const COMP_TYPES = ['factura', 'recibo', 'nota'];
 const COMP_LETTERS = ['A', 'B', 'X'];
 const COMP_MAX_ITEMS = 60;
 const COMP_LOCK = 'remitos_comprobantes';
-
-/**
- * Letras que emite Intellihelp: es Responsable Inscripto en IVA (su punto de venta en ARCA
- * es «CAE - RI IVA»), así que factura A o B; la C es de monotributistas y exentos.
- * X es un comprobante interno sin valor fiscal.
- */
-const COMP_LETRAS_EMISOR = ['A', 'B', 'X'];
 
 /**
  * Desde este importe (en centavos) una factura B a consumidor final tiene que identificar
@@ -121,6 +117,9 @@ function comp_from_input(array $body): array
     if (strlen(ltrim($number, '0')) > 8) {
         api_error(422, 'El número del comprobante tiene más de 8 dígitos');
     }
+    if ($number !== '' && (int) $number < 1) {
+        api_error(422, 'El número del comprobante tiene que ser mayor que cero');
+    }
     $condIva = $str($client['condIVA'] ?? '', 40);
     $concept = (int) ($body['conceptoTipo'] ?? 1);
 
@@ -158,6 +157,10 @@ function comp_from_input(array $body): array
         'observaciones' => $str($body['observaciones'] ?? '', 600),
         'fce' => in_array($type, ['factura', 'nota'], true) && in_array($letter, ['A', 'B'], true) && api_bool($body['fce'] ?? false),
         'fceAnulacion' => api_bool($body['fceAnulacion'] ?? false),
+        // Remito que factura esta factura («Facturar este remito»): al autorizarse en
+        // producción, el remito queda marcado como facturado.
+        'remitoId' => $type === 'factura' && preg_match('/^[0-9a-f]{16}$/', (string) ($body['remitoId'] ?? ''))
+            ? (string) $body['remitoId'] : '',
     ];
 }
 
@@ -181,6 +184,7 @@ function comp_public(array $row): array
     $doc['numero'] = (string) ($row['numero'] ?? '');
     $doc['cae'] = (string) ($row['cae'] ?? '');
     $doc['caeVto'] = (string) ($row['cae_vto'] ?? '');
+    $doc['ambienteArca'] = (string) ($row['ambiente'] ?? '') ?: ($doc['ambienteArca'] ?? '');
     $doc['updated'] = (int) $row['updated'];
     $doc['creado_por'] = $row['creado_por'] ?? null;
     $doc['actualizado_por'] = $row['actualizado_por'] ?? null;
@@ -267,9 +271,6 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
     if ($doc['letra'] === 'A' && $docTipo !== 80) {
         api_error(422, 'Un comprobante A requiere el CUIT del cliente');
     }
-    if (!in_array($doc['letra'], COMP_LETRAS_EMISOR, true)) {
-        api_error(422, 'Intellihelp es Responsable Inscripto: emite comprobantes A o B (la C es de monotributistas y exentos)');
-    }
     $cond = IVA_CONDICIONES[$doc['cliente']['condIVA']];
     if ($cond['clase'] !== $doc['letra']) {
         api_error(422, 'A un cliente «' . $doc['cliente']['condIVA'] . '» corresponde un comprobante ' . $cond['clase']
@@ -296,19 +297,25 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
         'alicuotas' => [],
         'asociados' => [],
     ];
-    if ($doc['letra'] !== 'C') {
-        $detail['alicuotas'][] = ['id' => IVA_ALICUOTAS[$totals['alicuota']], 'base' => $totals['neto'], 'importe' => $totals['iva']];
-    }
+    $detail['alicuotas'][] = ['id' => IVA_ALICUOTAS[$totals['alicuota']], 'base' => $totals['neto'], 'importe' => $totals['iva']];
     if ($concept !== 1) {
-        $detail['serv_desde'] = comp_date_to_arca($doc['servDesde'] ?: $doc['fecha']);
-        $detail['serv_hasta'] = comp_date_to_arca($doc['servHasta'] ?: $doc['fecha']);
-        $detail['vto_pago'] = comp_date_to_arca($doc['vtoPago'] ?: $doc['fecha']);
+        // Sin fechas cargadas, el período y el vencimiento son el día de la emisión ($date),
+        // no el del borrador: ARCA exige que el vencimiento no sea anterior al comprobante.
+        $detail['serv_desde'] = $doc['servDesde'] !== '' ? comp_date_to_arca($doc['servDesde']) : $date;
+        $detail['serv_hasta'] = $doc['servHasta'] !== '' ? comp_date_to_arca($doc['servHasta']) : $date;
+        $detail['vto_pago'] = $doc['vtoPago'] !== '' ? comp_date_to_arca($doc['vtoPago']) : $date;
         if ($detail['serv_hasta'] < $detail['serv_desde']) {
             api_error(422, 'El período del servicio termina antes de empezar');
+        }
+        if ($detail['vto_pago'] < $date) {
+            api_error(422, 'El vencimiento del pago no puede ser anterior a la fecha del comprobante');
         }
     }
 
     $fce = !empty($doc['fce']);
+    if ($fce && $docTipo !== 80) {
+        api_error(422, 'La Factura de Crédito MiPyME requiere el CUIT del receptor');
+    }
     if ($fce) {
         $cbu = preg_replace('/\D/', '', (string) ($emisor['cbu'] ?? ''));
         if (empty($emisor['mipyme']) || !cbu_valid($cbu)) {
@@ -342,10 +349,15 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
         if ($assocTipo === null || (int) $a['pv'] < 1 || (int) $a['nro'] < 1) {
             api_error(422, 'Indicá el comprobante asociado a la nota (tipo, letra A o B, punto de venta y número)');
         }
+        if ($a['letra'] !== $doc['letra']) {
+            api_error(422, 'La nota ' . $doc['letra'] . ' tiene que asociarse a un comprobante ' . $doc['letra'] . ' (la clase tiene que coincidir)');
+        }
         $st = $pdo->prepare(
-            'SELECT fecha, data FROM comprobantes WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ? AND numero_int = ? AND estado = \'autorizado\''
+            'SELECT fecha, data FROM comprobantes WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ? AND numero_int = ?
+                AND cbte_tipo = ? AND ambiente = ? AND estado = \'autorizado\''
         );
-        $st->execute([$assocType, $assocSub, $a['letra'], str_pad((string) (int) $a['pv'], 5, '0', STR_PAD_LEFT), (int) $a['nro']]);
+        $st->execute([$assocType, $assocSub, $a['letra'], str_pad((string) (int) $a['pv'], 5, '0', STR_PAD_LEFT), (int) $a['nro'],
+            $assocTipo, (string) ($emisor['ambiente'] ?? '')]);
         $assocRow = $st->fetch() ?: null;
         $assocDate = (string) ($assocRow['fecha'] ?? '');
         $assocFce = !empty((json_decode((string) ($assocRow['data'] ?? ''), true) ?: [])['fce']);
@@ -379,7 +391,7 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
  *
  * @return array{0: array, 1: ?string} comprobante y aviso
  */
-function comp_resolve_fce(PDO $pdo, array $config, array $doc, array $emisor, string $environment): array
+function comp_resolve_fce(PDO $pdo, array $config, array $doc, array $emisor, string $environment, string $todayDmy): array
 {
     if (!empty($doc['fce']) && empty($emisor['mipyme'])) {
         api_error(422, 'Solo una empresa MiPyME emite Factura de Crédito Electrónica (Configuración → Conexión con ARCA)');
@@ -390,7 +402,7 @@ function comp_resolve_fce(PDO $pdo, array $config, array $doc, array $emisor, st
     }
     $total = importe_totales($doc)['total'];
     try {
-        $r = arca_fce_obligado($pdo, $config, $environment, $cuit, (string) api_date_iso($doc['fecha'] ?: date('d/m/Y')));
+        $r = arca_fce_obligado($pdo, $config, $environment, $cuit, (string) api_date_iso($todayDmy));
     } catch (ArcaException $e) {
         return [$doc, 'No se pudo consultar en ARCA si el cliente está obligado a recibir Factura de Crédito MiPyME: '
             . $e->getMessage()];
@@ -417,6 +429,11 @@ function comp_mark_authorized(PDO $pdo, array $row, int $number, string $cae, st
     )->execute([
         $doc['numero'], $number, $date, api_date_iso($date), $cae, $caeVto, json_encode($doc, JSON_UNESCAPED_UNICODE), $now, $by, $row['id'],
     ]);
+    // Una factura de prueba (homologación) no tiene validez fiscal: no factura el remito.
+    if (($doc['remitoId'] ?? '') !== '' && ($extra['ambienteArca'] ?? '') === 'produccion') {
+        $pdo->prepare("UPDATE remitos SET facturado = 1, updated = ?, actualizado_por = ? WHERE id = ? AND estado = 'autorizado'")
+            ->execute([$now, $by, $doc['remitoId']]);
+    }
 }
 
 $method = api_method();
@@ -482,7 +499,7 @@ if ($method === 'POST') {
         $doc = array_merge(comp_from_input($doc), ['ptoVenta' => comp_pv($emisor['ptoVenta'])]);
         $pointOfSale = (int) $doc['ptoVenta'];
         $today = date('d/m/Y');
-        [$doc, $fceNotice] = comp_resolve_fce($pdo, $config, $doc, $emisor, $environment);
+        [$doc, $fceNotice] = comp_resolve_fce($pdo, $config, $doc, $emisor, $environment, $today);
         $cbteTipo = arca_cbte_tipo($doc['tipo'], $doc['subtipo'], $doc['letra'], !empty($doc['fce']));
         // Se valida contra las reglas de ARCA antes de llamarla: un comprobante que ARCA
         // rechazaría (letra, condición frente al IVA, identificación, asociado) no consume
@@ -493,14 +510,23 @@ if ($method === 'POST') {
         api_lock($pdo, $lock, 60);
         try {
             $row = comp_find($pdo, $row['id']);       // releído bajo el bloqueo
+            if ($row === null) {
+                api_error(404, 'El comprobante se eliminó mientras se emitía');
+            }
             if ($row['estado'] === 'autorizado') {
                 api_respond(200, ['ok' => true, 'ya_autorizado' => true, 'comprobante' => comp_public($row)]);
+            }
+            if ($row['estado'] === 'emitiendo' && $row['ambiente'] !== '' && $row['ambiente'] !== $environment) {
+                api_error(409, 'Este comprobante quedó con una emisión sin confirmar en ' . (ARCA_ENVIRONMENT_NAMES[$row['ambiente']] ?? $row['ambiente'])
+                    . '. Volvé a ese ambiente para completarla antes de cambiar de ambiente.');
             }
             try {
                 // Un intento anterior pudo quedar sin respuesta: antes de pedir otro número se
                 // consulta si ARCA llegó a autorizar el que se había reservado.
                 if ($row['estado'] === 'emitiendo' && (int) $row['numero_int'] > 0) {
-                    $found = arca_cae_lookup($pdo, $config, $environment, $pointOfSale, $cbteTipo, (int) $row['numero_int']);
+                    // Se consulta con lo que se reservó (tipo y punto de venta), no con los ajustes de hoy.
+                    $reservedTipo = (int) $row['cbte_tipo'] ?: $cbteTipo;
+                    $found = arca_cae_lookup($pdo, $config, $environment, (int) $row['pto_vta'], $reservedTipo, (int) $row['numero_int']);
                     $detail = comp_cae_detail($pdo, $doc, $emisor, (int) $row['numero_int'], comp_date_to_arca($today));
                     if ($found !== null && (string) $found['doc_nro'] === (string) $detail['doc_nro']
                         && abs((float) $found['total'] - $detail['total'] / 100) < 0.005) {
@@ -511,20 +537,37 @@ if ($method === 'POST') {
                             $found['cae'],
                             comp_date_from_arca($found['vencimiento']),
                             comp_date_from_arca($found['fecha']) ?: $today,
-                            ['ptoVenta' => $doc['ptoVenta']],
+                            ['ptoVenta' => $row['pto_vta'], 'ambienteArca' => $environment,
+                                'fce' => in_array($reservedTipo, [201, 202, 203, 206, 207, 208], true)],
                             $auth['nombre']
                         );
                         audit_event($pdo, comp_label(comp_find($pdo, $row['id'])) . ' autorizada (recuperada de ARCA)', [
                             'categoria' => 'comprobante', 'detalle' => 'CAE ' . $found['cae'],
                         ]);
-                        api_respond(200, ['ok' => true, 'comprobante' => comp_public(comp_find($pdo, $row['id']))]);
+                        api_respond(200, ['ok' => true, 'comprobante' => comp_public(comp_find($pdo, $row['id'])), 'aviso' => $fceNotice]);
                     }
                 }
 
                 $number = arca_last_authorized($pdo, $config, $environment, $pointOfSale, $cbteTipo) + 1;
                 $detail = comp_cae_detail($pdo, $doc, $emisor, $number, comp_date_to_arca($today));
-                $pdo->prepare("UPDATE comprobantes SET estado = 'emitiendo', pto_vta = ?, numero = ?, numero_int = ? WHERE id = ?")
-                    ->execute([$doc['ptoVenta'], str_pad((string) $number, 8, '0', STR_PAD_LEFT), $number, $row['id']]);
+                // Reserva del número: solo si sigue en borrador (o en una emisión anterior sin
+                // confirmar). Si mientras tanto se eliminó o se autorizó, no se pide el CAE.
+                try {
+                    $st = $pdo->prepare(
+                        "UPDATE comprobantes SET estado = 'emitiendo', pto_vta = ?, numero = ?, numero_int = ?, cbte_tipo = ?, ambiente = ?
+                          WHERE id = ? AND estado IN ('borrador', 'emitiendo')"
+                    );
+                    $st->execute([$doc['ptoVenta'], str_pad((string) $number, 8, '0', STR_PAD_LEFT), $number, $cbteTipo, $environment, $row['id']]);
+                } catch (PDOException $e) {
+                    if (api_is_duplicate($e)) {
+                        api_error(409, 'El número ' . $number . ' ya figura en otro comprobante del sistema para este tipo y punto de venta.'
+                            . ' Revisá los comprobantes registrados a mano antes de emitir.');
+                    }
+                    throw $e;
+                }
+                if ($st->rowCount() !== 1) {
+                    api_error(409, 'El comprobante cambió mientras se emitía (se eliminó o ya se autorizó). Actualizá la pantalla.');
+                }
                 $result = arca_cae_request($pdo, $config, $environment, $pointOfSale, $cbteTipo, $detail);
             } catch (ArcaException $e) {
                 audit_event($pdo, 'Emisión sin confirmar: ' . comp_label($row), [
@@ -541,7 +584,8 @@ if ($method === 'POST') {
                     $result['cae'],
                     comp_date_from_arca($result['vencimiento']),
                     $today,
-                    ['ptoVenta' => $doc['ptoVenta'], 'observacionesArca' => $result['observaciones'], 'fce' => !empty($doc['fce'])],
+                    ['ptoVenta' => $doc['ptoVenta'], 'observacionesArca' => $result['observaciones'], 'fce' => !empty($doc['fce']),
+                        'ambienteArca' => $environment],
                     $auth['nombre']
                 );
                 $saved = comp_find($pdo, $row['id']);
@@ -554,7 +598,15 @@ if ($method === 'POST') {
                 ]);
             }
 
-            $pdo->prepare("UPDATE comprobantes SET estado = 'borrador', numero = NULL, numero_int = NULL WHERE id = ?")
+            if ($result['resultado'] !== 'R') {
+                // Sin un rechazo explícito no se sabe si ARCA lo autorizó: se conserva el número
+                // reservado y el reintento lo consulta antes de pedir otro.
+                audit_event($pdo, 'Emisión sin confirmar: ' . comp_label($row), [
+                    'categoria' => 'arca', 'nivel' => 'error', 'detalle' => 'resultado «' . $result['resultado'] . '»', 'estado' => 502,
+                ]);
+                api_error(502, 'ARCA no confirmó la emisión. Volvé a intentar: antes de pedir un número nuevo se consulta a ARCA.');
+            }
+            $pdo->prepare("UPDATE comprobantes SET estado = 'borrador', numero = NULL, numero_int = NULL, cbte_tipo = 0, ambiente = '' WHERE id = ?")
                 ->execute([$row['id']]);
             $messages = array_merge($result['errores'], $result['observaciones']);
             audit_event($pdo, 'ARCA rechazó ' . comp_label($row), [
@@ -578,14 +630,28 @@ if ($method === 'POST') {
         if ($row['estado'] === 'autorizado') {
             api_error(409, 'El comprobante ya tiene CAE');
         }
+        if ($row['estado'] === 'emitiendo') {
+            api_error(409, 'El comprobante tiene una emisión en curso: volvé a intentar la emisión');
+        }
+        if ($row['tipo'] === 'recibo' || !in_array($row['letra'], ['A', 'B'], true)) {
+            api_error(422, 'Solo los comprobantes A y B llevan CAE');
+        }
         $cae = preg_replace('/\D/', '', api_str($body['cae'] ?? '', 20));
         $caeVto = api_date_dmy($body['caeVto'] ?? '');
         $number = (int) preg_replace('/\D/', '', api_str($body['numero'] ?? '', 8));
         if (strlen($cae) !== 14 || $caeVto === '' || $number < 1) {
             api_error(422, 'Indicá el número, el CAE (14 dígitos) y su vencimiento (dd/mm/aaaa)');
         }
+        if ((string) api_date_iso($caeVto) < (string) api_date_iso((string) $row['fecha'])) {
+            api_error(422, 'El vencimiento del CAE no puede ser anterior a la fecha del comprobante');
+        }
+        $regDoc = json_decode((string) $row['data'], true) ?: [];
+        $regTipo = (int) arca_cbte_tipo((string) $row['tipo'], (string) $row['subtipo'], (string) $row['letra'], !empty($regDoc['fce']));
+        $regEnv = (string) (settings_get($pdo, 'emisor')['ambiente'] ?? '');
         try {
-            comp_mark_authorized($pdo, $row, $number, $cae, $caeVto, (string) $row['fecha'], [], $auth['nombre']);
+            $pdo->prepare('UPDATE comprobantes SET cbte_tipo = ?, ambiente = ? WHERE id = ?')->execute([$regTipo, $regEnv, $row['id']]);
+            $row['cbte_tipo'] = $regTipo;
+            comp_mark_authorized($pdo, $row, $number, $cae, $caeVto, (string) $row['fecha'], ['ambienteArca' => $regEnv], $auth['nombre']);
         } catch (PDOException $e) {
             if (api_is_duplicate($e)) {
                 api_error(409, 'Ya existe otro comprobante de la misma serie con el Nº ' . $number);
@@ -639,17 +705,22 @@ if ($method === 'POST') {
         }
 
         $series = [$doc['tipo'], $doc['subtipo'], $doc['letra'], $doc['ptoVenta']];
-        if (!$electronic) {
+        if (!$electronic && $doc['letra'] !== 'X') {
+            // Un A o B no lleva un número propio: lo asigna ARCA al emitir, o lo registra un
+            // administrador junto con el CAE obtenido fuera del sistema.
+            $doc['numero'] = '';
+        } elseif (!$electronic) {
             if ($doc['numero'] === '') {
                 $st = $pdo->prepare(
-                    'SELECT COALESCE(MAX(numero_int), 0) FROM comprobantes WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ?'
+                    "SELECT COALESCE(MAX(numero_int), 0) FROM comprobantes WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ?
+                        AND cbte_tipo = 0 AND ambiente = ''"
                 );
                 $st->execute($series);
                 $doc['numero'] = str_pad((string) ((int) $st->fetchColumn() + 1), 8, '0', STR_PAD_LEFT);
             }
             $st = $pdo->prepare(
-                'SELECT COUNT(*) FROM comprobantes
-                  WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ? AND numero_int = ? AND id <> ?'
+                "SELECT COUNT(*) FROM comprobantes
+                  WHERE tipo = ? AND subtipo = ? AND letra = ? AND pto_vta = ? AND numero_int = ? AND cbte_tipo = 0 AND ambiente = '' AND id <> ?"
             );
             $st->execute([...$series, (int) $doc['numero'], $existing['id'] ?? '']);
             if ((int) $st->fetchColumn() > 0) {
@@ -665,10 +736,15 @@ if ($method === 'POST') {
             $doc['cliente']['razonSocial'], $json, $now, $auth['nombre'],
         ];
         if ($existing) {
-            $pdo->prepare(
-                'UPDATE comprobantes SET tipo = ?, subtipo = ?, letra = ?, pto_vta = ?, numero = ?, numero_int = ?, fecha = ?,
-                        fecha_emision = ?, cliente = ?, data = ?, updated = ?, actualizado_por = ? WHERE id = ?'
-            )->execute([...$values, $id]);
+            // Solo un borrador: si mientras tanto se empezó a emitir o se autorizó, no se pisa.
+            $st = $pdo->prepare(
+                "UPDATE comprobantes SET tipo = ?, subtipo = ?, letra = ?, pto_vta = ?, numero = ?, numero_int = ?, fecha = ?,
+                        fecha_emision = ?, cliente = ?, data = ?, updated = ?, actualizado_por = ? WHERE id = ? AND estado = 'borrador'"
+            );
+            $st->execute([...$values, $id]);
+            if ($st->rowCount() === 0 && (comp_find($pdo, $id)['estado'] ?? 'borrador') !== 'borrador') {
+                api_error(409, comp_label($existing) . ' se está emitiendo o ya se autorizó: no se puede modificar.');
+            }
         } else {
             $pdo->prepare(
                 "INSERT INTO comprobantes (tipo, subtipo, letra, pto_vta, numero, numero_int, fecha, fecha_emision, cliente,
@@ -693,16 +769,21 @@ if ($method === 'DELETE') {
     if ($row === null) {
         api_error(404, 'Comprobante no encontrado');
     }
-    if ($row['estado'] === 'emitiendo' && !in_array('admin', $auth['permisos'], true)) {
+    // Un comprobante con CAE no se elimina nunca (es un documento fiscal que ARCA ya tiene y
+    // que hay que conservar); uno con una emisión en curso, tampoco: puede tener CAE.
+    if ($row['estado'] === 'emitiendo') {
         api_error(409, 'El comprobante tiene una emisión en curso. Volvé a intentar la emisión antes de eliminarlo.');
     }
-    if ($row['estado'] === 'autorizado' && !in_array('admin', $auth['permisos'], true)) {
-        api_error(409, 'Un comprobante con CAE solo lo puede eliminar un administrador. Para anularlo, emití una nota de crédito.');
+    if ($row['estado'] === 'autorizado') {
+        api_error(409, 'Un comprobante con CAE no se elimina. Para anularlo, emití una nota de crédito.');
     }
-    $pdo->prepare('DELETE FROM comprobantes WHERE id = ?')->execute([$row['id']]);
+    $st = $pdo->prepare("DELETE FROM comprobantes WHERE id = ? AND estado = 'borrador'");
+    $st->execute([$row['id']]);
+    if ($st->rowCount() === 0) {
+        api_error(409, 'El comprobante cambió mientras se eliminaba (se está emitiendo). Actualizá la pantalla.');
+    }
     audit_event($pdo, 'Comprobante eliminado: ' . comp_label($row), [
         'categoria' => 'comprobante',
-        'nivel' => $row['estado'] === 'autorizado' ? 'error' : 'info',
         'detalle' => mb_substr((string) $row['cliente'], 0, 120) . ($row['cae'] ? ' · CAE ' . $row['cae'] : ''),
     ]);
     api_respond(200, ['ok' => true, 'id' => $row['id']]);

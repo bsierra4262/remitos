@@ -29,7 +29,6 @@ if (api_method() !== 'POST') {
 api_require_same_origin();
 $pdo = api_db($config);
 
-const CONFORMIDAD_DIAS = 60;
 const CONFORMIDAD_MAX_FALLOS = 20;
 
 if (attempts_count($pdo, 'conformidad', null, true, 15) >= CONFORMIDAD_MAX_FALLOS) {

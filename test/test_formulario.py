@@ -17,7 +17,7 @@ AJUSTES = {
 }
 
 
-@caso("Los campos tienen el tipo de dato correcto, no todos texto libre")
+@caso("Los campos tienen el tipo de dato correcto (fecha y hora con máscara, correo, teléfono, numéricos), no todos texto libre")
 def tipos_de_dato():
     with sync_playwright() as pw:
         b, pg, errs = abrir(pw)
@@ -34,7 +34,9 @@ def tipos_de_dato():
                         .find(e => getComputedStyle(e).display !== 'none');
                     const ins = [...v.querySelectorAll('input')];
                     const cuenta = t => ins.filter(i => i.type === t).length;
-                    return { date: cuenta('date'), time: cuenta('time'),
+                    // Fecha y hora: campos con máscara y calendario propio (js/controles.js)
+                    const clase = c => ins.filter(i => i.classList.contains(c)).length;
+                    return { date: clase('fecha'), time: clase('hora'),
                              email: cuenta('email'), tel: cuenta('tel'),
                              numericos: ins.filter(i => i.inputMode === 'numeric').length };
                 }""")

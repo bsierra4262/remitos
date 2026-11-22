@@ -77,12 +77,49 @@
     }
   }
 
+  /* La confirmación es irreversible: primero se validan los datos y se pide confirmarla
+     (el botón pasa a «Sí, confirmar»); recién el segundo clic la envía. */
+  let listoParaEnviar = false;
+  function avisar(texto) {
+    const aviso = $('#cAviso');
+    aviso.textContent = texto;
+    aviso.hidden = !texto;
+  }
+  ['#cNombre', '#cDoc', '#cObs', '#cConforme'].forEach(id =>
+    $(id).addEventListener('input', () => {
+      listoParaEnviar = false;
+      $('#cEnviar').textContent = 'Confirmar la recepción';
+    })
+  );
   async function conformar(e) {
     e.preventDefault();
-    const aviso = $('#cAviso');
-    aviso.hidden = true;
+    avisar('');
+    const nombre = $('#cNombre').value.trim();
+    const documento = $('#cDoc').value.trim();
+    if (nombre.length < 3) {
+      $('#cNombre').focus();
+      return avisar('Escribí tu nombre y apellido.');
+    }
+    if (!/^[0-9A-Za-z.\- ]{6,20}$/.test(documento)) {
+      $('#cDoc').focus();
+      return avisar('Escribí tu documento: DNI, CUIL o pasaporte (de 6 a 20 caracteres).');
+    }
     const btn = $('#cEnviar');
+    if (!listoParaEnviar) {
+      listoParaEnviar = true;
+      btn.textContent = 'Sí, confirmar la recepción';
+      return avisar(
+        'Vas a confirmar ' +
+          ($('#cConforme').checked ? 'que recibiste los bienes conforme' : 'la recepción con observaciones') +
+          ', a nombre de ' +
+          nombre +
+          ' (documento ' +
+          documento +
+          '). No se puede deshacer. Tocá de nuevo el botón para confirmar.'
+      );
+    }
     btn.disabled = true;
+    btn.textContent = 'Enviando…';
     const d = await api({
       accion: 'conformar',
       nombre: $('#cNombre').value.trim(),
@@ -91,9 +128,10 @@
       conforme: $('#cConforme').checked,
     });
     btn.disabled = false;
+    btn.textContent = 'Confirmar la recepción';
+    listoParaEnviar = false;
     if (d.ok || d.remito) return pintar(d.remito);
-    aviso.textContent = d.error || 'No se pudo registrar la confirmación';
-    aviso.hidden = false;
+    avisar(d.error || 'No se pudo registrar la confirmación');
   }
 
   async function iniciar() {

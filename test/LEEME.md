@@ -12,7 +12,7 @@ mysql -u root -p -e "CREATE DATABASE remitos_test CHARACTER SET utf8mb4"
 
 # 2. Configuración de pruebas (fuera del repositorio), por ejemplo /tmp/config.test.php:
 #    return ['app_url' => 'http://127.0.0.1:8765',
-#            'db' => ['host' => '127.0.0.1', 'port' => 3306, 'name' => 'remitos_test', 'user' => 'root', 'pass' => '…'],
+#            'db' => ['host' => '127.0.0.1', 'port' => 3307, 'name' => 'remitos_test', 'user' => 'root', 'pass' => '…'],
 #            'master_key_hash' => hash('sha256', 'ith_test_master_key_0123456789abcdef'),
 #            'app_key' => str_repeat('ab', 32),
 #            'google' => [… ver «Ingreso con Google» más abajo …]];
@@ -33,7 +33,7 @@ node --test test/unitarias/calculos.test.js
 php test/unitarias/importes.test.php
 ```
 
-Requisitos: `playwright` (con `playwright install chromium`), `pymupdf` y `cryptography`; Node 20+ para las unitarias.
+Requisitos: `pip install -r test/requirements.txt` (Playwright, PyMuPDF y cryptography, con las mismas versiones que CI) y `playwright install chromium`; Node 22 para las unitarias.
 
 ### Variables de entorno
 
@@ -79,10 +79,11 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, Factura de Crédito MiPyME y recibo de cobranza impresos, copias de seguridad, certificado (archivo o texto pegado), respaldo, celular |
 | `test_api.py` | Autenticación, permisos y ciclo de vida de las claves, auditoría |
 | `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA y el certificado de un representante), reglas oficiales de emisión antes de pedir el CAE (letra según la condición frente al IVA, identificación del consumidor final, nota sin asociado, letra C, recibo con CAE, Factura de Crédito MiPyME), validación de datos, cabeceras, archivos internos |
+| `test_controles.py` | Integridad de la auditoría ante un evento alterado, freno de claves de API (429), permisos de exportación y de registro de CAE externo, CORS con origen ajeno, importación de clientes (CUIT inválido y reimportación sin duplicados), vínculo factura → remito |
 | `test_sesion.py` | Ingreso con Google de punta a punta y sus rechazos (sin usuario, otro dominio, correo sin verificar, otra aplicación, token vencido, PKCE ajeno, estado manipulado), ausencia de contraseñas y segundo factor, alta solo con correos del dominio, cookie y CSRF, otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, traspaso de datos de versiones anteriores |
 | `test_cai.py` | Talonarios, numeración correlativa, autorizaciones simultáneas, inmutabilidad del autorizado, C.A.I. vencido, talonarios usados y autorización desde la aplicación |
 | `test_normativa.py` | Contenido obligatorio del remito (Anexo V), talonario sin constatar, conformidad del remito digital por API y desde la página pública en celular, PDF digital con QR |
-| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, XML para ARCA, token de Google y plazo de confirmación de la sesión (mismos casos en JS y PHP) |
+| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, XML para ARCA, token de Google y plazo de confirmación de la sesión. Los casos de importes, IVA y CUIT (`casos-importes.json`) son los mismos en JS y PHP; Google, sesión, CBU y XML de ARCA se prueban solo en PHP |
 
 ## Agregar un caso
 

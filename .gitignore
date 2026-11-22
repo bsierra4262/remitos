@@ -1,11 +1,17 @@
 # Secretos y datos del servidor
 app/api/config.php
+app/api/config.php.*
 client_secret*.json
 *.key
 *.pem
 *.crt
 *.csr
 *.p12
+.env
+*.sql
+*.rmb
+*.log
+config.test.php
 
 # Material de referencia local (diseño de origen, escaneos): no se publica
 referencias/
@@ -14,6 +20,8 @@ referencias/
 __pycache__/
 *.pyc
 node_modules/
+test-results/
+playwright-report/
 
 # Sistema / editor
 .DS_Store

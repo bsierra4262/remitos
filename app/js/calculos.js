@@ -27,7 +27,7 @@ function numeroAR(v) {
     .trim();
   if (t === '') return 0;
   if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
-  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
+  else if (/^[1-9]\d{0,2}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, ''); // 1.500 = mil quinientos; 0.500 = medio
   return /^\d+(\.\d+)?$/.test(t) ? parseFloat(t) : NaN;
 }
 
@@ -248,6 +248,38 @@ const CONDICIONES_IVA = {
 };
 /** Leyenda que se imprime en el remito (RG 1415, Anexo V, apartado II). */
 const LEYENDAS_IVA = Object.fromEntries(Object.entries(CONDICIONES_IVA).map(([k, v]) => [k, v.leyenda]));
+/** Condición frente al IVA escrita de cualquier forma (planillas, sistemas viejos) →
+   nombre de la tabla oficial, o '' si no se reconoce. */
+function normalizarCondIVA(texto) {
+  const t = String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return '';
+  const exacta = Object.keys(CONDICIONES_IVA).find(
+    k =>
+      k
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') === t
+  );
+  if (exacta) return exacta;
+  if (/^(ri|r i|resp(onsable)? inscripto|iva responsable inscripto|inscripto)$/.test(t)) return 'Responsable Inscripto';
+  if (/trabajador independiente/.test(t)) return 'Monotributo Trabajador Independiente Promovido';
+  if (/monotribut(ista|o) social/.test(t)) return 'Monotributista Social';
+  if (/^(mt|monotributo|monotributista|responsable monotributo|rm)$/.test(t)) return 'Monotributo';
+  if (/^(ex|exento|iva exento|iva sujeto exento|sujeto exento)$/.test(t)) return 'Exento';
+  if (/^(cf|consumidor final|a consumidor final|final)$/.test(t)) return 'Consumidor Final';
+  if (/no categorizado/.test(t)) return 'Sujeto no categorizado';
+  if (/proveedor del exterior/.test(t)) return 'Proveedor del Exterior';
+  if (/cliente del exterior|exterior/.test(t)) return 'Cliente del Exterior';
+  if (/liberado|19 ?640/.test(t)) return 'IVA Liberado - Ley 19.640';
+  if (/no alcanzado/.test(t)) return 'IVA No Alcanzado';
+  return '';
+}
 /** Condiciones de receptores sin CUIT argentino. */
 const IVA_SIN_CUIT = ['Consumidor Final', 'Cliente del Exterior', 'Proveedor del Exterior'];
 
@@ -291,6 +323,7 @@ if (typeof module !== 'undefined' && module.exports) {
     problemaCuit,
     LEYENDAS_IVA,
     CONDICIONES_IVA,
+    normalizarCondIVA,
     faltantesRemito,
   };
 }

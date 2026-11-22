@@ -7,6 +7,7 @@ lo que crean.
 import datetime
 import os
 import tempfile
+import time
 import urllib.parse
 
 from base import SITIO, caso, clave_maestra, es_local, pedir
@@ -15,7 +16,7 @@ AMBIENTE = "homologacion"
 CUIT = "20123456786"
 
 
-def _certificado(cuit=CUIT, dias=30, bits=2048):
+def _certificado(cuit=CUIT, dias=30, bits=2048, desde_dias=-2):
     """Par certificado / clave autofirmado con el CUIT en el campo serialNumber."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
@@ -30,7 +31,7 @@ def _certificado(cuit=CUIT, dias=30, bits=2048):
         x509.NameAttribute(NameOID.SERIAL_NUMBER, f"CUIT {cuit}"),
     ])
     ahora = datetime.datetime.now(datetime.timezone.utc)
-    desde = ahora - datetime.timedelta(days=2)
+    desde = ahora + datetime.timedelta(days=desde_dias)
     hasta = ahora + datetime.timedelta(days=dias)
     cert = (x509.CertificateBuilder().subject_name(nombre).issuer_name(nombre)
             .public_key(clave.public_key()).serial_number(x509.random_serial_number())
@@ -55,7 +56,7 @@ def _clave_servicio(permisos):
 def arca_carga_valida():
     cert, clave = _certificado()
     try:
-        s, d = _cargar(cert, clave, cuit="20-12345678-6")
+        s, d = _cargar(cert, clave)
         if s != 201:
             return False, f"no se cargó: {s} {d}"
         s, estado = pedir("/arca.php", clave=clave_maestra())
@@ -68,7 +69,7 @@ def arca_carga_valida():
         pedir(f"/arca.php?ambiente={AMBIENTE}", "DELETE", clave_maestra())
 
 
-@caso("ARCA: se rechazan clave ajena, PEM inválido y RSA débil")
+@caso("ARCA: se rechazan clave ajena, PEM inválido, RSA débil y certificado todavía no vigente")
 def arca_validaciones():
     cert, clave = _certificado()
     _, otra_clave = _certificado()
@@ -77,6 +78,7 @@ def arca_validaciones():
         "certificado inválido": _cargar("hola", clave)[0],
         "clave inválida": _cargar(cert, "-----BEGIN PRIVATE KEY-----\nxx\n-----END PRIVATE KEY-----")[0],
         "RSA 1024": _cargar(*_certificado(bits=1024))[0],
+        "todavía no vigente": _cargar(*_certificado(desde_dias=3))[0],
         "ambiente inválido": pedir("/arca.php", "POST", clave_maestra(),
                                    {"accion": "cargar", "ambiente": "x", "certificado": cert, "clave": clave})[0],
     }
@@ -85,7 +87,7 @@ def arca_validaciones():
     return not malos, f"no rechazó: {malos}" if malos else f"{len(casos)} rechazos correctos"
 
 
-@caso("ARCA: solo la clave maestra carga o borra credenciales")
+@caso("ARCA: una clave de servicio no carga ni borra credenciales")
 def arca_solo_maestra():
     llave, kid = _clave_servicio(["leer", "crear", "borrar"])
     try:
@@ -108,10 +110,15 @@ def arca_probar_conexion():
     cert, clave = _certificado()
     try:
         _cargar(cert, clave)
-        s, d = pedir("/arca.php", "POST", clave_maestra(), {"accion": "probar", "ambiente": AMBIENTE}, timeout=60)
-        error = d.get("error", "")
-        if "No se pudo conectar" in error:
-            return False, "sin conexión con ARCA: el caso no se pudo verificar (REMITOS_SIN_RED=1 para omitirlo)"
+        # ARCA de homologación a veces no responde: se reintenta antes de dar el caso por fallido.
+        for intento in range(3):
+            s, d = pedir("/arca.php", "POST", clave_maestra(), {"accion": "probar", "ambiente": AMBIENTE}, timeout=60)
+            error = d.get("error", "")
+            if "No se pudo conectar" not in error:
+                break
+            time.sleep(10)
+        else:
+            return False, "sin conexión con ARCA tras 3 intentos (REMITOS_SIN_RED=1 para omitirlo)"
         return s == 502 and "no reconoce el certificado" in error, f"status={s} error={error!r}"
     finally:
         pedir(f"/arca.php?ambiente={AMBIENTE}", "DELETE", clave_maestra())

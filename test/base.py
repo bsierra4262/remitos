@@ -266,8 +266,9 @@ def limpiar_datos():
             for x in items:
                 base = ruta.split("?")[0]
                 s, _ = pedir(f"{base}?id={x['id']}", "DELETE", m)
-                if s == 409:  # remito autorizado: se elimina directo en la base de pruebas
-                    _sql(f"DELETE FROM remitos WHERE id = '{x['id']}'")
+                if s == 409:  # autorizado (no se elimina por la API): directo en la base de pruebas
+                    tabla = "remitos" if base == "/remitos.php" else "comprobantes"
+                    _sql(f"DELETE FROM {tabla} WHERE id = '{x['id']}'")
     _, d = pedir("/clientes.php", clave=m)
     for c in d.get("clientes", []):
         pedir(f"/clientes.php?id={c['id']}", "DELETE", m)
@@ -287,16 +288,25 @@ def _sql(sentencia):
 # --------------------------------------------------------------------------- #
 from datetime import date, timedelta  # noqa: E402
 
-VTO = (date.today() + timedelta(days=200)).isoformat()
+def hoy_ba():
+    """Fecha de hoy en Buenos Aires: la que usa el servidor (CI corre en UTC)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date()
 
 
-def _talonario(desde=1, hasta=50, cai="75041234567890", vto=VTO, pv=1):
+VTO = (hoy_ba() + timedelta(days=200)).isoformat()
+
+
+def _talonario(desde=1, hasta=50, cai="75041234567890", vto=VTO, pv=1, sin_verificar=True):
+    """Alta de talonario. Sin certificado de producción no se puede constatar con ARCA:
+    por omisión se acepta expresamente cargarlo «sin constatar»."""
     if es_local() and desde == 1:  # restos de una corrida interrumpida en ese punto de venta
         _sql(f"DELETE FROM remitos WHERE punto_venta = {int(pv)}")
         _sql(f"DELETE FROM cai_talonarios WHERE punto_venta = {int(pv)}")
     return pedir("/talonarios.php", "POST", clave_maestra(), {
         "punto_venta": pv, "numero_desde": desde, "numero_hasta": hasta,
-        "cai": cai, "cai_vencimiento": vto})
+        "cai": cai, "cai_vencimiento": vto, **({"sin_verificar": True} if sin_verificar else {})})
 
 
 def _borrar_talonario(tid):

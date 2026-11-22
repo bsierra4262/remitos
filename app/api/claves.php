@@ -4,7 +4,8 @@
  * Remitos y Comprobantes — Intellihelp
  *
  * Administración de claves de servicio y consulta de la auditoría.
- * Todo requiere la clave maestra: una clave de servicio no puede administrarse a sí misma.
+ * Requiere la clave maestra o la sesión de un administrador: una clave de servicio no puede
+ * administrarse a sí misma. Crear una clave con sesión exige la identidad confirmada con Google.
  *
  *   GET    claves.php?accion=listar       Claves y resumen de uso.
  *   GET    claves.php?accion=registro     Auditoría paginada (pagina, por_pagina, categoria).
@@ -139,6 +140,9 @@ if ($method === 'POST') {
         if ($name === null) {
             api_error(404, 'No existe esa clave');
         }
+        if (!array_key_exists('activa', $body)) {
+            api_error(400, 'Indicá si la clave queda activa (activa: true o false)');
+        }
         $active = api_bool($body['activa']);
         $pdo->prepare('UPDATE api_keys SET activa = ? WHERE id = ?')->execute([$active ? 1 : 0, $id]);
         audit_event($pdo, ($active ? 'Clave activada: ' : 'Clave desactivada: ') . $name, [
@@ -147,6 +151,7 @@ if ($method === 'POST') {
         api_respond(200, ['ok' => true, 'id' => $id, 'activa' => $active]);
     }
 
+    auth_confirm_identity($auth); // una clave nueva es un acceso permanente a la API
     $name = api_str($body['nombre'] ?? '', 81);
     if ($name === '') {
         api_error(400, 'Indicá un nombre para identificar la clave');

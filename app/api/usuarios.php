@@ -25,6 +25,9 @@ declare(strict_types=1);
 $config = require __DIR__ . '/bootstrap.php';
 api_headers('GET, POST, DELETE, OPTIONS');
 $pdo = api_db($config);
+/** Bloqueo de los cambios de rol y de estado (regla del último administrador). */
+const USUARIOS_LOCK = 'remitos_usuarios';
+
 $auth = auth_require($pdo, $config, 'admin', 'usuarios');
 $selfId = isset($auth['usuario']) ? (int) $auth['usuario']['id'] : 0;
 
@@ -62,6 +65,7 @@ if ($method === 'POST') {
     $action = (string) ($body['accion'] ?? 'crear');
 
     if ($action === 'crear') {
+        auth_confirm_identity($auth);
         $name = api_str($body['nombre'] ?? '', 120);
         $email = user_normalize_email($body['email'] ?? '');
         $role = (string) ($body['rol'] ?? 'operador');
@@ -81,8 +85,15 @@ if ($method === 'POST') {
             api_error(409, 'Ya existe un usuario con ese correo');
         }
 
-        $pdo->prepare('INSERT INTO usuarios (nombre, email, rol, activo, creado) VALUES (?, ?, ?, 1, NOW())')
-            ->execute([$name, $email, $role]);
+        try {
+            $pdo->prepare('INSERT INTO usuarios (nombre, email, rol, activo, creado) VALUES (?, ?, ?, 1, NOW())')
+                ->execute([$name, $email, $role]);
+        } catch (PDOException $e) {
+            if (api_is_duplicate($e)) {
+                api_error(409, 'Ya existe un usuario con ese correo');
+            }
+            throw $e;
+        }
         $id = (int) $pdo->lastInsertId();
         audit_event($pdo, 'Usuario creado: ' . $name, [
             'categoria' => 'usuario', 'detalle' => $email . ' · ' . $role,
@@ -107,14 +118,24 @@ if ($method === 'POST') {
         if (!isset(USER_ROLES[$role])) {
             api_error(400, 'Rol inválido (admin u operador)');
         }
+        if ($role === 'admin' && $user['rol'] !== 'admin') {
+            auth_confirm_identity($auth);
+        }
         if ($id === $selfId && ($role !== 'admin' || !$active)) {
             api_error(409, 'No podés quitarte el rol de administrador ni desactivar tu propio usuario');
         }
-        if (($role !== 'admin' || !$active) && $user['rol'] === 'admin' && user_active_admins($pdo, $id) === 0) {
-            api_error(409, 'Tiene que quedar al menos un administrador activo');
+        // La regla «al menos un administrador activo» se controla y aplica bajo bloqueo:
+        // dos administradores no pueden desactivarse entre sí al mismo tiempo.
+        api_lock($pdo, USUARIOS_LOCK);
+        try {
+            if (($role !== 'admin' || !$active) && $user['rol'] === 'admin' && user_active_admins($pdo, $id) === 0) {
+                api_error(409, 'Tiene que quedar al menos un administrador activo');
+            }
+            $pdo->prepare('UPDATE usuarios SET nombre = ?, rol = ?, activo = ? WHERE id = ?')
+                ->execute([$name, $role, $active ? 1 : 0, $id]);
+        } finally {
+            api_unlock($pdo, USUARIOS_LOCK);
         }
-        $pdo->prepare('UPDATE usuarios SET nombre = ?, rol = ?, activo = ? WHERE id = ?')
-            ->execute([$name, $role, $active ? 1 : 0, $id]);
         if ($role !== $user['rol'] || $active !== (bool) (int) $user['activo']) {
             user_revoke_sessions($pdo, $id);
         }
@@ -134,10 +155,15 @@ if ($method === 'DELETE') {
     if ($id === $selfId) {
         api_error(409, 'No podés eliminar tu propio usuario');
     }
-    if ($user['rol'] === 'admin' && (int) $user['activo'] && user_active_admins($pdo, $id) === 0) {
-        api_error(409, 'Tiene que quedar al menos un administrador activo');
+    api_lock($pdo, USUARIOS_LOCK);
+    try {
+        if ($user['rol'] === 'admin' && (int) $user['activo'] && user_active_admins($pdo, $id) === 0) {
+            api_error(409, 'Tiene que quedar al menos un administrador activo');
+        }
+        $pdo->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
+    } finally {
+        api_unlock($pdo, USUARIOS_LOCK);
     }
-    $pdo->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
     audit_event($pdo, 'Usuario eliminado: ' . $user['nombre'], ['categoria' => 'usuario', 'detalle' => (string) $user['email']]);
     api_respond(200, ['ok' => true, 'id' => $id]);
 }

@@ -146,7 +146,7 @@ openssl req -new -key intellihelp.key \
   -out intellihelp.csr</pre>
   <div class="aviso verde">
     <p><span class="tt">La clave privada es la credencial más sensible.</span> Con ella y el certificado
-    se pueden pedir CAE a nombre de la empresa. Guardá una copia en un gestor de contraseñas o un
+    se pueden pedir CAE a nombre de la empresa. Guardar una copia en un gestor de contraseñas o un
     dispositivo cifrado y nunca la envíes por mail ni por mensajería. Si se pierde, hay que generar
     un certificado nuevo.</p>
   </div>
@@ -211,9 +211,10 @@ openssl req -new -key intellihelp.key \
     algún dato, el sistema indica cuál y no permite activarlo.</p></div>
 
   <div class="aviso verde">
-    <p><span class="tt">Con la emisión electrónica activa</span>, el número de cada factura, recibo o
+    <p><span class="tt">Con la emisión electrónica activa</span>, el número de cada factura o
     nota se toma de ARCA (último comprobante autorizado + 1), así la numeración siempre coincide con la
-    que ARCA espera. El CAE otorgado y su vencimiento se registran en el comprobante.</p>
+    que ARCA espera. El CAE otorgado y su vencimiento se registran en el comprobante. El recibo de
+    cobranza es letra X: es un documento interno y no se informa a ARCA.</p>
   </div>
 
   <div class="paso-tit"><span class="n">6</span><h2>Pasaje a producción</h2></div>

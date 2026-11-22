@@ -22,9 +22,9 @@ La aplicación se ingresa **solo con la cuenta de Google** de Intellihelp (`goog
 
 - La sesión vence tras 8 horas sin actividad o 12 horas desde el ingreso.
 - Cambiar el rol o desactivar al usuario cierra todas sus sesiones.
-- **Freno de ingresos fallidos** (ventana de 15 minutos): 5 por correo desde la misma conexión, 30 por conexión y 50 por correo en total. El freno responde `429` con el mismo mensaje exista o no el correo, y no bloquea la cuenta para los demás.
-- **Ingreso con Google** (`google` en `config.php`; sin esa configuración nadie puede ingresar a la aplicación): `GET google.php?accion=inicio` lleva a Google (OpenID Connect con PKCE, limitado al dominio de Google Workspace configurado) y la vuelta abre la sesión si el correo es de un usuario activo. El estado viaja cifrado en una cookie `SameSite=Lax` de 10 minutos; un error vuelve a la aplicación con `?ingreso=<código>` (`google_sin_usuario`, `google_dominio`, `google_vencido`, `google_cancelado`, `google_error`, `google_limitado`). La seguridad de la cuenta (contraseña, verificación en dos pasos) la administra Google Workspace.
-- **Confirmación de identidad** (cargar o quitar el certificado de ARCA): la sesión informa `confirmado` (ingreso con Google de los últimos 15 minutos). Pasado ese plazo la operación responde `403` con `reconfirmar_google: true`, y `GET google.php?accion=inicio&confirmar=1` vuelve a pasar por Google con la cuenta de la sesión y regresa con `?ingreso=confirmado`.
+- **Freno de ingresos fallidos:** 20 vueltas fallidas desde Google por conexión en 15 minutos llevan a `?ingreso=google_limitado` hasta que pase la ventana. No bloquea la cuenta para los demás.
+- **Ingreso con Google** (`google` en `config.php`; sin esa configuración nadie puede ingresar a la aplicación): `GET google.php?accion=inicio` lleva a Google (OpenID Connect con PKCE, limitado al dominio de Google Workspace configurado) y la vuelta abre la sesión si el correo es de un usuario activo. El estado viaja cifrado en una cookie `SameSite=Lax` de 10 minutos; un error vuelve a la aplicación con `?ingreso=<código>` (`google_no_configurado`, `google_sin_usuario`, `google_dominio`, `google_vencido`, `google_cancelado`, `google_error`, `google_limitado`, `google_otra_cuenta`). La seguridad de la cuenta (contraseña, verificación en dos pasos) la administra Google Workspace.
+- **Confirmación de identidad** (operaciones sensibles con sesión: cargar o quitar el certificado de ARCA, crear claves de API, dar de alta usuarios o el rol de administrador, exportar los datos y cambiar CUIT, CBU, ambiente o emisión del emisor): la sesión informa `confirmado` (ingreso con Google de los últimos 15 minutos). Pasado ese plazo la operación responde `403` con `reconfirmar_google: true` y la aplicación ofrece confirmar. `GET google.php?accion=inicio&confirmar=1[&volver=panel]` vuelve a pasar por Google con la cuenta de la sesión y regresa con `?ingreso=confirmado`; si en Google se elige otra cuenta, no se confirma nada ni se cambia de usuario (`?ingreso=google_otra_cuenta`). Con la clave maestra no se pide confirmación.
 
 ### Clave de API (integraciones)
 
@@ -66,12 +66,12 @@ sequenceDiagram
 
 | Método | Operación | Acceso |
 |---|---|---|
-| `GET sesion.php` | Usuario de la sesión y token CSRF. Sin sesión: `usuario: null` (y `segundo_factor: true` si falta el código) | público |
+| `GET sesion.php` | Con sesión: `usuario` (`id`, `nombre`, `email`, `rol`, `permisos`, `confirmado`) y `csrf`. Sin sesión: `usuario: null` y `google` (si el ingreso con Google está configurado) | público |
 | `POST sesion.php` `{accion: "salir"}` | Cierra la sesión | sesión |
-| `GET usuarios.php` | Lista de usuarios (con `segundo_factor` y `bloqueado`) | admin |
+| `GET usuarios.php` | Lista de usuarios: `id`, `nombre`, `email`, `rol`, `activo`, `ultimo_ingreso`, `creado` | admin |
 | `GET google.php?accion=inicio` | Ingreso con Google (redirige a Google y vuelve a la aplicación) | público |
 | `GET google.php?accion=inicio&confirmar=1` | Vuelve a confirmar la identidad con la cuenta de la sesión | sesión |
-| `POST usuarios.php` `{nombre, email, rol}` | Alta (el correo tiene que ser del dominio de Google configurado); desde ese momento ingresa con Google | admin |
+| `POST usuarios.php` `{nombre, email, rol}` | Alta (el correo tiene que ser del dominio de Google configurado); desde ese momento ingresa con Google. Con sesión, el alta y dar el rol de administrador exigen la identidad confirmada con Google | admin |
 | `POST usuarios.php` `{accion: "editar", id, nombre?, rol?, activo?}` | Edición y activación | admin |
 | `DELETE usuarios.php?id={id}` | Baja | admin |
 
@@ -147,7 +147,7 @@ Respuesta `201`:
 
 | Objeto | Campos |
 |---|---|
-| `cliente` | `senores`, `razonSocial`, `cuit`, `condIVA` (`Responsable Inscripto`, `Monotributo`, `Exento`, `No Responsable`, `Consumidor Final`, `Sujeto no categorizado`), `domicilio`, `localidad`, `telefono`, `cp`, `mail`, `nombre`, `otrosDatos` |
+| `cliente` | `senores`, `razonSocial`, `cuit`, `condIVA` (una de las condiciones oficiales de ARCA, RG 5616: `Responsable Inscripto`, `Monotributo`, `Monotributista Social`, `Monotributo Trabajador Independiente Promovido`, `Exento`, `Consumidor Final`, `Sujeto no categorizado`, `Proveedor del Exterior`, `Cliente del Exterior`, `IVA Liberado - Ley 19.640`, `IVA No Alcanzado`; un valor desconocido se descarta y el borrador informa que falta), `domicilio`, `localidad`, `telefono`, `cp`, `mail`, `nombre`, `otrosDatos` |
 | `items[]` | `articulo`, `descripcion`, `cantidad` |
 | `recibi` | `tipoDoc` (`DNI`, `CI`, `Pasaporte`, `Otro`), `nombre`, `documentoNro`, `sector`, `puesto` |
 | `transporte` | `tipo` (`propio` o `tercero`), `nombre`, `cuit`, `domicilio`, `vehiculo`, `chofer`, `lugarEntrega`, `fecha`, `hora`, `observaciones` |
@@ -190,25 +190,30 @@ Un remito autorizado no se elimina (`409`).
 | `POST comprobantes.php` `{id?, id_local?, tipo, subtipo?, letra, ptoVenta, numero?, cliente, items, …}` | Alta o edición de un borrador | `crear` |
 | `POST comprobantes.php` `{accion: "emitir", id}` | Solicita el CAE a ARCA (WSFEv1) | `crear` |
 | `POST comprobantes.php` `{accion: "registrar_cae", id, numero, cae, caeVto}` | Registra un CAE obtenido fuera del sistema | admin |
-| `DELETE comprobantes.php?id={id}` | Baja de un borrador (con CAE, solo un administrador) | `borrar` |
+| `DELETE comprobantes.php?id={id}` | Baja de un borrador. Un comprobante autorizado o en emisión no se elimina (`409`), para nadie: se conserva por el plazo legal | `borrar` |
 
-**Importes.** El servidor recalcula siempre los totales (no confía en los que envía la interfaz) y los devuelve en `importes` (centavos). Se aceptan en formato argentino (`1.234,56`), con punto decimal (`1234.56`) o con punto de miles (`1.500`). Letra A: precios netos e IVA discriminado; letra B: precios con IVA incluido; C y X: sin IVA. Alícuotas: 0, 2,5, 5, 10,5, 21 y 27 %. Un importe inválido responde `422`.
+Una factura puede llevar `remitoId` (el remito autorizado que factura): cuando obtiene el CAE en **producción**, el remito queda marcado como facturado. En homologación no se marca.
+
+**Importes.** El servidor recalcula siempre los totales (no confía en los que envía la interfaz) y los devuelve en `importes` (centavos). Se aceptan en formato argentino (`1.234,56`), con punto decimal (`1234.56`) o con punto de miles (`1.500`). Letra A: precios netos e IVA discriminado; letra B: precios con IVA incluido; X: sin IVA. La letra C no se admite (`422`): Intellihelp es Responsable Inscripto. Una letra no válida se toma como X. Alícuotas: 0, 2,5, 5, 10,5, 21 y 27 %. Un importe inválido responde `422`.
 
 **Numeración.**
-- Con la emisión electrónica activa (ajustes del emisor), los comprobantes A, B y C no tienen número hasta que ARCA los autoriza; el punto de venta es el configurado para web services.
-- Sin emisión electrónica, o con letra X, el servidor asigna el correlativo de la serie (tipo, letra y punto de venta) o respeta el número indicado si está libre (`00001-00000012` se toma como `00000012`). La base impide duplicados.
+- Los comprobantes A y B no tienen número hasta que ARCA los autoriza (con la emisión electrónica activa, el punto de venta es el configurado para web services). Sin emisión electrónica, un A o B solo recibe número cuando un administrador registra el CAE obtenido fuera del sistema (`registrar_cae`).
+- La letra X (documento interno, como el recibo de cobranza) lleva el correlativo de su serie (tipo, letra y punto de venta) o el número indicado si está libre (`00001-00000012` se toma como `00000012`); el número 0 no se admite. La base impide duplicados.
+- El recibo de cobranza es siempre letra X y nunca se envía a ARCA (RG 1415, art. 10 inc. d): una letra A o B en un recibo responde `422`.
 - El CAE nunca se toma del cliente. Un comprobante autorizado no se modifica (`409`): se corrige con una nota de crédito.
 
 **Emisión (`emitir`).** El servidor valida los datos, toma el número siguiente al último autorizado (`FECompUltimoAutorizado`) bajo un bloqueo por ambiente, punto de venta y tipo, y llama a `FECAESolicitar`. Antes de llamar deja el comprobante en estado `emitiendo` con el número reservado: si la respuesta de ARCA se pierde (`502`), el reintento consulta `FECompConsultar` y, si ese número quedó autorizado para el mismo receptor e importe, recupera el CAE sin pedir otro número. Un rechazo responde `422` con `errores` y `observaciones` de ARCA y el comprobante vuelve a borrador.
 
-Campos para la emisión: `conceptoTipo` (1 productos, 2 servicios, 3 ambos), `servDesde`, `servHasta` y `vtoPago` (servicios; por defecto la fecha del comprobante), `cliente.condIVA` (`Responsable Inscripto`, `Monotributo`, `Exento`, `Consumidor Final`) y, en las notas, `compAsoc` (`tipo`: `Factura`, `Nota de débito` o `Nota de crédito`; `letra`, `pv`, `nro`).
+Campos para la emisión: `conceptoTipo` (1 productos, 2 servicios, 3 ambos), `servDesde`, `servHasta` y `vtoPago` (servicios; por defecto la fecha de emisión, y el vencimiento no puede ser anterior), `cliente.condIVA` (las condiciones oficiales listadas en remitos; una desconocida se toma como `Consumidor Final`, y tiene que corresponder a la letra: A para Responsable Inscripto y Monotributo, B para el resto, validación 10243 de ARCA) y, en las notas, `compAsoc` (`tipo`: `Factura`, `Nota de débito` o `Nota de crédito`; `letra` igual a la de la nota, `pv`, `nro`).
+
+**Factura de Crédito Electrónica MiPyME** (Ley 27.440): con `mipyme` y `cbu` en los ajustes del emisor, la emisión consulta a ARCA (WSFECRED) si el receptor está obligado a recibirla y si el importe alcanza el mínimo; en ese caso se emite como FCE (201/206) con el CBU, la opción de transferencia (SCA/ADC) y el vencimiento del pago. `fce: true` la pide explícitamente; `fceAnulacion` marca una nota de FCE como anulación. Requiere el CUIT del receptor. Si el servicio WSFECRED no está habilitado, se emite la factura común y la respuesta trae un `aviso`.
 
 ## Ajustes
 
 | Método | Operación | Permiso |
 |---|---|---|
-| `GET ajustes.php` | `emisor` (ambiente, CUIT, punto de venta, emisión electrónica) y `remito` (punto de venta, ejemplares) | `leer` |
-| `POST ajustes.php` `{seccion, valores}` | Actualiza una sección. El CUIT se valida con su dígito verificador; la emisión electrónica solo se activa con CUIT, punto de venta y un certificado vigente del mismo CUIT (`422` con `faltan` si no) | admin |
+| `GET ajustes.php` | `emisor` (`ambiente`, `cuit`, `ptoVenta`, `emision`, `mipyme`, `cbu`, `transferencia`) y `remito` (`ptoVenta`, `copias`) | `leer` |
+| `POST ajustes.php` `{seccion, valores}` | Actualiza una sección. El CUIT se valida con su dígito verificador; la emisión electrónica solo se activa con CUIT, punto de venta y un certificado vigente, del emisor o de un representante (`422` con `faltan` si no). `mipyme` exige un `cbu` de 22 dígitos con dígitos verificadores correctos (`422`); `transferencia` es `SCA` o `ADC`. Con sesión, cambiar CUIT, CBU, ambiente o emisión exige la identidad confirmada con Google | admin |
 
 ## Estado
 
@@ -227,10 +232,10 @@ Remitos, comprobantes y clientes en JSON, para la copia descargable de la aplica
 | Método | Operación | Permiso |
 |---|---|---|
 | `GET talonarios.php?accion=listar` | Talonarios con restantes, vencimiento y alertas; `remitos_autorizados` cuenta los remitos autorizados reales | admin |
-| `GET talonarios.php?accion=vigente&pv=1&tipo=91` | Talonario activo, sin consumir número | `leer` |
-| `POST talonarios.php` `{punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, tipo_comprobante?, sin_verificar?}` | Alta (valida tipo de comprobante, rango, superposición, C.A.I. de 14 dígitos y una fecha de vencimiento real y vigente) y **constata el C.A.I. con ARCA** | admin |
+| `GET talonarios.php?accion=vigente&pv=1` | Talonario vigente (activo, con números y C.A.I. no vencido), sin consumir número. Sin `pv`, el de los ajustes de remitos | `leer` |
+| `POST talonarios.php` `{punto_venta, numero_desde, numero_hasta, cai, cai_vencimiento, sin_verificar?}` | Alta de un talonario de remitos R (tipo 91; las facturas llevan CAE). Valida rango, superposición, C.A.I. de 14 dígitos y una fecha de vencimiento real y vigente, y **constata el C.A.I. con ARCA**. Si no se puede constatar (ARCA no responde o no hay certificado de producción) responde `502`/`409` con `puede_cargar_sin_verificar`, y solo se carga reenviando `sin_verificar: true` | admin |
 | `POST talonarios.php` `{accion: "verificar", id}` | Vuelve a constatar un talonario con ARCA | admin |
-| `POST talonarios.php` `{accion: "autorizar", remito_id, pv, tipo, fecha}` | Asigna el próximo número y el C.A.I. al remito, en una transacción con bloqueo de fila | `crear` |
+| `POST talonarios.php` `{accion: "autorizar", remito_id, pv?, fecha?}` | Asigna el próximo número y el C.A.I. al remito, en una transacción con bloqueo de fila. La fecha (por defecto hoy) no puede ser posterior a hoy ni anterior a la del último remito autorizado del punto de venta (`422`); un talonario vencido se saltea y, si no hay otro, responde `409` con `vencido` | `crear` |
 | `POST talonarios.php` `{id, activa}` | Activar o desactivar | admin |
 | `DELETE talonarios.php?id={id}` | Elimina un talonario cargado por error y nunca usado. Uno que ya autorizó remitos es respaldo de esos comprobantes: se desactiva (`409`) | admin |
 
@@ -250,15 +255,15 @@ Remitos, comprobantes y clientes en JSON, para la copia descargable de la aplica
 | Método | Operación | Permiso |
 |---|---|---|
 | `GET arca.php` | Datos públicos del certificado de cada ambiente (titular, CUIT, vigencia, huella) | `leer` |
-| `POST arca.php` `{accion: "cargar", ambiente, cuit?, certificado, clave, frase?}` | Valida el par y lo guarda cifrado. Solo por HTTPS; con sesión exige la identidad confirmada con Google | admin |
-| `POST arca.php` `{accion: "probar", ambiente}` | Verifica los servidores de WSFEv1, obtiene el ticket de WSAA y consulta en nombre del emisor los puntos de venta habilitados (`puntos_venta`, y `aviso` si el configurado no está entre ellos). Devuelve `cuit` (emisor) y `cuit_certificado` (titular del certificado: el emisor o su representante) | `crear` |
+| `POST arca.php` `{accion: "cargar", ambiente, certificado, clave, frase?}` | Valida el par y lo guarda cifrado. Solo por HTTPS; con sesión exige la identidad confirmada con Google | admin |
+| `POST arca.php` `{accion: "probar", ambiente}` | Verifica los servidores de WSFEv1, obtiene el ticket de WSAA y consulta en nombre del emisor los puntos de venta habilitados (`puntos_venta`, y `aviso` si el configurado no está entre ellos). Devuelve `cuit` (emisor), `cuit_certificado` (titular del certificado: el emisor o su representante), `ticket_vence` y `servicios` (estado de wsfe, wscdc y wsfecred: los que falten se informan con el paso exacto para habilitarlos en ARCA) | `crear` |
 | `POST arca.php` `{accion: "quitar", ambiente}` | Elimina el certificado, la clave y los tickets del ambiente (con sesión, con la identidad confirmada con Google) | admin |
 | `DELETE arca.php?ambiente={ambiente}` | Ídem, solo con la clave maestra (integraciones) | admin |
 | `GET proximo.php?ambiente=&tipo=&subtipo=&letra=&pv=` | Próximo número según ARCA (último autorizado + 1), solo informativo | `leer` |
 
 `ambiente`: `homologacion` o `produccion`. `tipo`: `factura` o `nota` (`subtipo` `credito` o `debito`); el recibo es de cobranza y no se numera en ARCA. `letra`: `A` o `B` (Intellihelp es Responsable Inscripto).
 
-Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que la clave privada sea **RSA** de 2048 bits o más y le corresponda, El titular puede ser el emisor o un representante a quien la empresa le delegó el servicio en el Administrador de Relaciones de ARCA: los pedidos se hacen siempre en nombre del emisor (`Auth.Cuit`) y «Probar conexión» confirma la relación. Las respuestas nunca incluyen el certificado ni la clave, y los mensajes de error de ARCA o de la conexión se informan de forma genérica (el detalle queda en el log del servidor).
+Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que la clave privada sea **RSA** de 2048 bits o más y le corresponda. El titular puede ser el emisor o un representante a quien la empresa le delegó el servicio en el Administrador de Relaciones de ARCA: los pedidos se hacen siempre en nombre del emisor (`Auth.Cuit`) y «Probar conexión» confirma la relación. Las respuestas nunca incluyen el certificado ni la clave, y los mensajes de error de ARCA o de la conexión se informan de forma genérica (el detalle queda en el log del servidor).
 
 ## Auditoría y claves
 
@@ -267,8 +272,8 @@ Al cargar un certificado se verifica que sea un PEM X.509 válido y vigente, que
 | `GET claves.php?accion=listar` | Claves de servicio y resumen de uso | admin |
 | `GET claves.php?accion=registro&pagina=&por_pagina=&categoria=` | Auditoría paginada (con `usuario_id`) | admin |
 | `GET claves.php?accion=integridad` | Verifica la cadena de hashes de la auditoría | admin |
-| `POST claves.php` `{nombre, permisos}` | Crea una clave y la devuelve una única vez | admin |
-| `POST claves.php` `{id, activa}` | Activa o desactiva | admin |
+| `POST claves.php` `{nombre, permisos}` | Crea una clave y la devuelve una única vez (con sesión, exige la identidad confirmada con Google) | admin |
+| `POST claves.php` `{id, activa}` | Activa o desactiva (`activa` es obligatorio) | admin |
 | `DELETE claves.php?id={id}` | Elimina | admin |
 | `POST evento.php` `{evento, id?, detalle?}` | Eventos de la interfaz: `remito_impreso`, `comprobante_impreso`, `prueba_impresa`, `error_interfaz` | `crear` |
 

@@ -1,6 +1,8 @@
 # Remitos y Comprobantes — Intellihelp
-# La configuración, el arranque y las librerías no se sirven por web.
-<FilesMatch "^(config|config\.sample|bootstrap)\.php$">
+# La configuración, el arranque y las librerías no se sirven por web. También las copias
+# de config.php (config.php.tmp, config.php.anterior de la rotación de clave): no terminan
+# en .php y se servirían como texto.
+<FilesMatch "^(config\.php.*|config\.sample\.php|bootstrap\.php)$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

@@ -35,6 +35,9 @@ const IVA_CONDICIONES = [
     'IVA No Alcanzado' => ['codigo' => 15, 'leyenda' => 'IVA NO ALCANZADO', 'clase' => 'B'],
 ];
 
+/** Días que vale el enlace de conformidad de un remito digital (RG 5678/2025). */
+const CONFORMIDAD_DIAS = 60;
+
 /** Condiciones de receptores sin CUIT argentino: no se les exige CUIT en el remito. */
 const IVA_SIN_CUIT = ['Consumidor Final', 'Cliente del Exterior', 'Proveedor del Exterior'];
 

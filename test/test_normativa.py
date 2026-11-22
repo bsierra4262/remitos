@@ -39,6 +39,16 @@ def _publico(cuerpo, origen=SITIO):
         return e.code, json.loads(e.read().decode() or "{}")
 
 
+
+def _confirmar_autorizacion(pg):
+    """«Autorizar» consume un número del talonario: pide confirmación en el diálogo propio."""
+    try:
+        pg.wait_for_selector("#dlgConfirmar[open]", timeout=3000)
+        pg.click("#dlgConfirmarSi")
+    except Exception:
+        pass  # sin confirmación (por ejemplo, faltan datos y solo se avisa)
+
+
 @caso("Un remito sin los datos del Anexo V no se autoriza y el borrador informa qué le falta")
 def anexo_v_obligatorio():
     m = clave_maestra()
@@ -60,19 +70,21 @@ def anexo_v_obligatorio():
             _sql("DELETE FROM remitos WHERE cliente IN ('INCOMPLETO', 'CONSUMIDOR')")
 
 
-@caso("Sin certificado de producción el talonario queda «sin constatar» con ARCA y se informa")
+@caso("Sin certificado de producción el talonario solo se carga aceptando que quede «sin constatar», y se informa")
 def talonario_sin_constatar():
     m = clave_maestra()
     pv = random.randint(400, 499)
+    s0, d0 = _talonario(desde=1, hasta=10, pv=pv, sin_verificar=False)
     s, d = _talonario(desde=1, hasta=10, pv=pv)
     try:
         v = d.get("verificacion", {})
         s2, d2 = pedir("/talonarios.php", "POST", m, {"accion": "verificar", "id": d.get("id")})
         _, lista = pedir("/talonarios.php?accion=listar", clave=m)
         t = next(x for x in lista["talonarios"] if x["id"] == d.get("id"))
-        ok = (s == 201 and v.get("estado") == "sin_credenciales" and d2.get("verificacion", {}).get("estado") == "sin_credenciales"
+        ok = (s0 == 409 and d0.get("puede_cargar_sin_verificar") is True
+              and s == 201 and v.get("estado") == "sin_credenciales" and d2.get("verificacion", {}).get("estado") == "sin_credenciales"
               and t["verificado_arca"] is None and "producción" in (t["verificacion"] or ""))
-        return ok, f"alta={s} {v} verificar={s2} talonario={t.get('verificacion')}"
+        return ok, f"sin aceptar={s0} alta={s} {v} verificar={s2} talonario={t.get('verificacion')}"
     finally:
         _borrar_talonario(d.get("id"))
 
@@ -124,6 +136,9 @@ def conformidad_pagina():
                 pg.fill("#cObs", "Llegó completo")
                 pg.check("#cConforme")
                 pg.click("#cEnviar")
+                # Es irreversible: el primer clic muestra el resumen y pide confirmar
+                resumen = pg.inner_text("#cAviso")
+                pg.click("#cEnviar")
                 pg.wait_for_selector("#conformado", state="visible", timeout=10000)
                 texto = pg.inner_text("#confTexto")
                 ancho = pg.evaluate("() => document.documentElement.scrollWidth")
@@ -132,8 +147,8 @@ def conformidad_pagina():
                 invalido = pg.inner_text("#errorTexto")
             finally:
                 b.close()
-        ok = (numero.startswith("Nº ") and "Laura Méndez" in texto and "Llegó completo" in texto and ancho <= 392
-              and "no es válido" in invalido and not errores)
+        ok = (numero.startswith("Nº ") and "No se puede deshacer" in resumen and "Laura Méndez" in texto
+              and "Llegó completo" in texto and ancho <= 392 and "no es válido" in invalido and not errores)
         return ok, f"numero={numero!r} texto={texto!r} ancho={ancho} invalido={invalido!r} errores={errores}"
     finally:
         _borrar_talonario(tid)
@@ -193,6 +208,7 @@ def autorizar_incompleto_ui():
                 ir_a(pg, "remito")
                 pg.evaluate("() => { nuevo(); doc.cliente.razonSocial = 'SIN DATOS'; formFromDoc(); }")
                 pg.click("#btnAutorizar")
+                _confirmar_autorizacion(pg)
                 pg.wait_for_timeout(800)
                 aviso = pg.inner_text("#toast")
                 estado = pg.evaluate("() => doc.estado")

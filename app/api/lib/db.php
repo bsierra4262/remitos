@@ -18,7 +18,7 @@
 declare(strict_types=1);
 
 /** Versión del esquema que espera este código. */
-const API_SCHEMA_VERSION = 5;
+const API_SCHEMA_VERSION = 6;
 
 /** Zona horaria de la sesión de base de datos (Argentina, UTC−3 todo el año). */
 const API_DB_TIMEZONE = '-03:00';
@@ -70,7 +70,9 @@ function api_migrate(PDO $pdo): void
         return;
     }
 
-    $pdo->query("SELECT GET_LOCK('remitos_schema', 15)");
+    if (!api_try_lock($pdo, 'remitos_schema', 15)) {
+        throw new RuntimeException('Otra migración de la base está en curso; reintentar en unos segundos');
+    }
     try {
         $current = api_schema_version($pdo);
         $migrations = [
@@ -79,6 +81,7 @@ function api_migrate(PDO $pdo): void
             3 => 'api_migration_3',
             4 => 'api_migration_4',
             5 => 'api_migration_5',
+            6 => 'api_migration_6',
         ];
         foreach ($migrations as $version => $migration) {
             if ($version > $current) {
@@ -90,7 +93,7 @@ function api_migrate(PDO $pdo): void
             }
         }
     } finally {
-        $pdo->query("SELECT RELEASE_LOCK('remitos_schema')");
+        api_unlock($pdo, 'remitos_schema');
     }
 }
 
@@ -331,7 +334,7 @@ function api_migration_2(PDO $pdo): void
     }
 }
 
-/** Modifica la definición de una columna existente. */
+/** Tipo (COLUMN_TYPE) de una columna existente. */
 function api_column_type(PDO $pdo, string $table, string $column): string
 {
     $st = $pdo->prepare(
@@ -463,4 +466,39 @@ function api_migration_5(PDO $pdo): void
     }
     $pdo->exec("DELETE FROM intentos WHERE tipo IN ('ingreso', 'totp', 'reconfirmar')");
     $pdo->exec('UPDATE usuarios SET sesion_version = sesion_version + 1');
+}
+
+/**
+ * Noviembre de 2026, emisión con ARCA:
+ * - Cada comprobante guarda el tipo de ARCA (1, 6, 201, 206…) y el ambiente (homologación
+ *   o producción) con que se reservó o autorizó su número. ARCA numera por separado cada
+ *   tipo y cada ambiente: la Factura de Crédito no comparte numeración con la factura
+ *   común, y lo emitido en pruebas no choca con lo real. La clave única incluye los dos.
+ * - Para los comprobantes internos (letra X) los dos quedan vacíos (0 y '').
+ */
+function api_migration_6(PDO $pdo): void
+{
+    api_add_column($pdo, 'comprobantes', 'cbte_tipo', 'SMALLINT UNSIGNED NOT NULL DEFAULT 0');
+    api_add_column($pdo, 'comprobantes', 'ambiente', "VARCHAR(12) NOT NULL DEFAULT ''");
+    $tipos = [
+        'factura' => ['A' => 1, 'B' => 6], 'debito' => ['A' => 2, 'B' => 7], 'credito' => ['A' => 3, 'B' => 8],
+    ];
+    $fceTipos = [
+        'factura' => ['A' => 201, 'B' => 206], 'debito' => ['A' => 202, 'B' => 207], 'credito' => ['A' => 203, 'B' => 208],
+    ];
+    $rows = $pdo->query("SELECT id, tipo, subtipo, letra, data FROM comprobantes WHERE estado IN ('autorizado', 'emitiendo')")->fetchAll();
+    foreach ($rows as $r) {
+        $d = json_decode((string) $r['data'], true) ?: [];
+        $familia = $r['tipo'] === 'nota' ? ($r['subtipo'] === 'debito' ? 'debito' : 'credito') : $r['tipo'];
+        $tabla = !empty($d['fce']) ? $fceTipos : $tipos;
+        $pdo->prepare('UPDATE comprobantes SET cbte_tipo = ?, ambiente = ? WHERE id = ?')->execute([
+            (int) ($tabla[$familia][$r['letra']] ?? 0),
+            in_array($d['ambienteArca'] ?? '', ['homologacion', 'produccion'], true) ? $d['ambienteArca'] : '',
+            $r['id'],
+        ]);
+    }
+    if (api_index_exists($pdo, 'comprobantes', 'uq_num')) {
+        $pdo->exec('ALTER TABLE comprobantes DROP INDEX uq_num');
+    }
+    $pdo->exec('ALTER TABLE comprobantes ADD UNIQUE KEY uq_num (tipo, subtipo, letra, pto_vta, numero_int, cbte_tipo, ambiente)');
 }

@@ -297,3 +297,308 @@ dialog.dlg.peligro .dlg-aceptar:hover {
     width: 100%;
   }
 }
+
+/* ---------------------------------------------------------------- desplegable propio (js/controles.js) */
+.sel {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.sel.grow {
+  flex: 1;
+}
+.sel > select.sel-nativo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+.sel-boton {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 41px;
+  padding: 10px 36px 10px 12px;
+  border: 1px solid #ddd8e4;
+  border-radius: 10px;
+  background: #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23663399' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 12px center / 16px 16px;
+  color: #161922;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.sel.sm .sel-boton {
+  min-height: 36px;
+  padding: 7px 32px 7px 10px;
+  font-size: 13px;
+}
+.sel-texto {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sel-boton.vacio .sel-texto {
+  color: #8f899b;
+}
+.sel-boton:hover {
+  border-color: #c9bfd3;
+}
+.sel-boton:focus-visible,
+.sel.abierto .sel-boton {
+  outline: 0;
+  border-color: #663399;
+  box-shadow: 0 0 0 3px #e6dcec;
+}
+.sel.abierto .sel-boton {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23663399' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
+}
+.sel-boton:disabled {
+  background-color: #f5eef7;
+  color: #6b6f7b;
+  cursor: default;
+  background-image: none;
+}
+.sel-lista {
+  position: fixed;
+  z-index: 2000;
+  max-width: min(440px, calc(100vw - 16px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #ebe2ef;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(30, 10, 60, 0.18);
+  font-family: 'Saira', system-ui, sans-serif;
+  animation: sel-entrar 0.12s ease-out;
+}
+@keyframes sel-entrar {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.sel-op {
+  position: relative;
+  padding: 9px 12px 9px 34px;
+  border-radius: 8px;
+  color: #161922;
+  font-size: 14px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.sel-op.vacio {
+  color: #8f899b;
+}
+.sel-op.activo,
+.sel-op:hover {
+  background: #fff6ff;
+  color: #663399;
+}
+.sel-op.elegido {
+  font-weight: 600;
+  color: #663399;
+}
+.sel-op.elegido::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  background: center / 16px 16px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23663399' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+.sel-op[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- fecha con calendario propio */
+.fecha-env {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+.fecha-env.grow {
+  flex: 1;
+}
+.fecha-env > input.fecha {
+  width: 100%;
+  padding-right: 40px;
+  font-variant-numeric: tabular-nums;
+}
+.fecha-boton {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  margin-top: -15px;
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #663399;
+  cursor: pointer;
+}
+.fecha-boton svg,
+.cal-nav svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fecha-boton:hover {
+  background: #fff6ff;
+}
+input.fecha[readonly] + .fecha-boton {
+  display: none;
+}
+.cal {
+  position: fixed;
+  z-index: 2000;
+  width: 284px;
+  padding: 12px;
+  border: 1px solid #ebe2ef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(30, 10, 60, 0.18);
+  font-family: 'Saira', system-ui, sans-serif;
+  color: #161922;
+  animation: sel-entrar 0.12s ease-out;
+}
+.cal-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.cal-cab b {
+  font-size: 14.5px;
+  text-transform: capitalize;
+}
+.cal-nav {
+  width: 32px;
+  height: 32px;
+  padding: 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #663399;
+  cursor: pointer;
+}
+.cal-nav:hover {
+  background: #fff6ff;
+}
+.cal-grilla {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-dia-sem {
+  padding: 4px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  text-transform: capitalize;
+  color: #8f899b;
+}
+.cal-dia {
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #161922;
+  font:
+    500 13.5px 'Saira',
+    system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cal-dia:hover {
+  background: #fff6ff;
+  color: #663399;
+}
+.cal-dia.fuera {
+  color: #c4bccd;
+}
+.cal-dia.hoy {
+  box-shadow: inset 0 0 0 1.5px #9f88b1;
+}
+.cal-dia.elegido {
+  background: #663399;
+  color: #fff;
+  font-weight: 700;
+}
+.cal-pie {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f5eef7;
+}
+.cal-accion {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #663399;
+  font:
+    600 13px 'Saira',
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.cal-accion:hover {
+  background: #fff6ff;
+}
+
+/* ---------- Error por campo (controles.marcarError) ---------- */
+.con-error,
+input.con-error,
+textarea.con-error,
+.sel.con-error .sel-boton {
+  border-color: var(--danger, #b3261e) !important;
+  box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.14) !important;
+}
+.error-campo {
+  margin-top: 5px;
+  color: var(--danger, #b3261e);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.error-campo::before {
+  content: '';
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b3261e' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5M12 16.5v.01'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+}
+
+/* ---------- Autocompletado del navegador: sin el fondo celeste/amarillo ---------- */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink, #1d1b20);
+  -webkit-box-shadow: 0 0 0 1000px #fff inset;
+  transition: background-color 9999s ease-out 0s;
+}

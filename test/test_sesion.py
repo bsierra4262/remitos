@@ -175,6 +175,23 @@ def alta_dominio_y_reconfirmacion():
     return ok, f"alta_gmail={ajeno} reconfirmar_con_la_cuenta={sugerida} ingreso_elige_cuenta={elegir}"
 
 
+@caso("Confirmar la identidad eligiendo en Google otra cuenta no confirma nada ni cambia de usuario")
+def reconfirmar_otra_cuenta():
+    asegurar_usuario(*OPERADOR, "operador")
+    s = _admin()
+    base.iniciar_google_simulado()
+    _, h = s.get(API + "/google.php?accion=inicio&confirmar=1&volver=panel")
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(h.get("Location", "")).query)
+    pedido = {"email": OPERADOR[0], "nonce": q["nonce"][0], "challenge": q["code_challenge"][0], "claims": {}}
+    codigo = base._b64(json.dumps(pedido).encode())
+    _, h = s.get(API + "/google.php?state=" + q["state"][0] + "&code=" + codigo)
+    destino = h.get("Location", "")
+    _, d, _ = s.pedir("/sesion.php")
+    sigue = (d.get("usuario") or {}).get("email")
+    ok = "panel.html" in destino and _error(destino) == "google_otra_cuenta" and sigue == ADMIN_EMAIL
+    return ok, f"vuelta={destino} sesion={sigue}"
+
+
 @caso("El operador trabaja con documentos pero no administra usuarios, ajustes ni certificados")
 def permisos_operador():
     asegurar_usuario(*OPERADOR, "operador")
