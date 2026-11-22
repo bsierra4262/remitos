@@ -220,8 +220,13 @@
       .querySelectorAll('[data-borrar]')
       .forEach(b =>
         b.addEventListener('click', async () => {
-          if (!confirm('¿Eliminar la clave «' + b.dataset.nombre + '»?\n\nQuien la use pierde el acceso en el acto.'))
-            return;
+          const ok = await confirmar({
+            titulo: '¿Eliminar la clave «' + b.dataset.nombre + '»?',
+            mensaje: 'Quien la use pierde el acceso en el acto.',
+            aceptar: 'Eliminar',
+            peligro: true,
+          });
+          if (!ok) return;
           b.disabled = true;
           const { d: r2 } = await api('api/claves.php?id=' + encodeURIComponent(b.dataset.borrar), {
             method: 'DELETE',
@@ -470,7 +475,13 @@
       .querySelectorAll('[data-tborrar]')
       .forEach(b =>
         b.addEventListener('click', async () => {
-          if (!confirm('¿Eliminar este talonario?')) return;
+          const ok = await confirmar({
+            titulo: '¿Eliminar el talonario?',
+            mensaje: 'Solo se puede eliminar un talonario sin remitos autorizados.',
+            aceptar: 'Eliminar',
+            peligro: true,
+          });
+          if (!ok) return;
           b.disabled = true;
           const { d: r2 } = await api('api/talonarios.php?id=' + encodeURIComponent(b.dataset.tborrar), {
             method: 'DELETE',
@@ -490,13 +501,12 @@
     };
     let { d } = await api('api/talonarios.php', { method: 'POST', body: JSON.stringify(cuerpo) });
     if (d && d.puede_cargar_sin_verificar) {
-      if (
-        !confirm(
-          d.error +
-            '\n\n¿Cargarlo igual sin constatar? Quedará marcado «sin constatar» y podés constatarlo después desde esta lista.'
-        )
-      )
-        return;
+      const ok = await confirmar({
+        titulo: '¿Cargar el talonario sin constatar?',
+        mensaje: d.error + ' Quedará marcado «sin constatar» y se puede constatar después desde esta lista.',
+        aceptar: 'Cargar sin constatar',
+      });
+      if (!ok) return;
       ({ d } = await api('api/talonarios.php', {
         method: 'POST',
         body: JSON.stringify(Object.assign(cuerpo, { sin_verificar: true })),

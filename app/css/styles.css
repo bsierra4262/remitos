@@ -85,20 +85,7 @@ a {
   overflow: hidden;
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #d9cfe0 transparent;
-}
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-thumb {
-  background: #d9cfe0;
-  border-radius: 10px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
-}
+/* Barras de desplazamiento, desplegables, fechas y casillas: css/controles.css */
 
 /* ---------- Navegación lateral ---------- */
 .navbar {
@@ -1392,6 +1379,31 @@ body[data-view='clientes'] .only-doc {
 .doc-state.auth {
   background: var(--primary);
   color: #fff;
+}
+.doc-state.neutro {
+  background: var(--line-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.saved-item {
+  width: 100%;
+  background: #fff;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.saved-der {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: none;
+}
+.importe {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
 }
 .doc-state.draft {
   background: var(--cream);

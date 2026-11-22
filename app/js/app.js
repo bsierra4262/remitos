@@ -1006,9 +1006,14 @@ function wireCalib() {
     });
   bind('#calGuide', 'guideOpacity', '#calGuidev', ' %');
   /* Restablece solo el juego del modo activo y conserva el resto de las preferencias. */
-  $('#calReset').addEventListener('click', () => {
+  $('#calReset').addEventListener('click', async () => {
     const modo = isFull() ? 'del documento completo' : 'del pre-impreso';
-    if (!confirm('¿Restablecer la calibración ' + modo + ' a los valores de fábrica?')) return;
+    const ok = await confirmar({
+      titulo: '¿Restablecer la calibración?',
+      mensaje: 'La calibración ' + modo + ' de este equipo vuelve a los valores de fábrica.',
+      aceptar: 'Restablecer',
+    });
+    if (!ok) return;
     const fab = clone(DEFAULT_CALIB);
     const claves = isFull()
       ? ['fullPaper', 'fullOffsetX', 'fullOffsetY', 'fullScaleX', 'fullScaleY', 'fullFontScale', 'adjustFull']
@@ -1169,8 +1174,13 @@ function wireAdjust() {
   $('#adjStep').addEventListener('change', e => {
     adjStep = parseFloat(e.target.value);
   });
-  $('#adjResetAll').addEventListener('click', () => {
-    if (!confirm('¿Restablecer TODOS los ajustes finos por campo?')) return;
+  $('#adjResetAll').addEventListener('click', async () => {
+    const ok = await confirmar({
+      titulo: '¿Restablecer los ajustes por campo?',
+      mensaje: 'Todos los campos vuelven a su posición original en este modo de impresión.',
+      aceptar: 'Restablecer',
+    });
+    if (!ok) return;
     if (isFull()) calib.adjustFull = {};
     else calib.adjust = {};
     save(LS.calib, calib);
@@ -1299,20 +1309,36 @@ function renderInicio() {
 
   const list = $('#inicioRecent');
   const borrador = borradorRecuperable();
-  const sorted = [...docs].sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const sorted = [...docs.map(d => ({ d, comp: false })), ...datos.comprobantes.map(d => ({ d, comp: true }))].sort(
+    (a, b) => (b.d.updated || 0) - (a.d.updated || 0)
+  );
   const totalPag = Math.max(1, Math.ceil(sorted.length / RECENT_PER));
   if (recentPage > totalPag) recentPage = totalPag;
   const desde = (recentPage - 1) * RECENT_PER;
   const pagina = sorted.slice(desde, desde + RECENT_PER);
 
   const cnt = $('#recentCount');
-  cnt.textContent = datos.remitosTotal;
-  cnt.hidden = !datos.remitosTotal;
+  const total = datos.remitosTotal + datos.comprobantesTotal;
+  cnt.textContent = total;
+  cnt.hidden = !total;
 
-  if (!docs.length && !borrador) {
-    list.innerHTML = `<div class="empty">${ICN.doc}<span>Todavía no hay remitos guardados.<br>Creá el primero con «Nuevo remito».</span></div>`;
+  if (!sorted.length && !borrador) {
+    list.innerHTML = `<div class="empty">${ICN.doc}<span>Todavía no hay documentos guardados.<br>Creá el primero con «Nuevo remito» o «Nueva factura».</span></div>`;
     return;
   }
+
+  const filaComp = c => {
+    const autor = c.actualizado_por ? ' · ' + c.actualizado_por : '';
+    return `<div class="doc-row" data-comp="${escA(c.id)}">
+      <span class="doc-ico">${ICN.receipt}</span>
+      <div class="doc-main"><strong>${esc(c.cliente.razonSocial || 'Consumidor final')}</strong><small>${esc(etiquetaComprobante(c))} · ${esc(c.cliente.cuit || 'sin CUIT')}</small></div>
+      <div class="doc-meta">${esc(c.fecha || '')} · <b class="importe">${esc(totalComprobante(c))}</b>${esc(autor)}</div>
+      ${estadoComprobante(c)}
+      <div class="doc-act">
+        <button class="icon-btn" data-open title="Abrir">${ICN.edit}</button>
+        <button class="icon-btn" data-print title="Imprimir">${ICN.print}</button>
+      </div></div>`;
+  };
 
   const fila = (d, esBorrador) => {
     const fecha = d.fecha || (d.updated ? new Date(d.updated).toLocaleDateString('es-AR') : '');
@@ -1338,7 +1364,7 @@ function renderInicio() {
 
   let html = '';
   if (borrador && recentPage === 1) html += fila(borrador, true);
-  html += pagina.map(d => fila(d, false)).join('');
+  html += pagina.map(x => (x.comp ? filaComp(x.d) : fila(x.d, false))).join('');
   if (totalPag > 1) {
     html += `<div class="doc-pager">
       <button class="btn sm" data-rp="${recentPage - 1}" ${recentPage <= 1 ? 'disabled' : ''}>← Anteriores</button>
@@ -1355,11 +1381,22 @@ function renderInicio() {
     })
   );
   list.querySelectorAll('.doc-row').forEach(r =>
-    r.addEventListener('click', e => {
+    r.addEventListener('click', async e => {
+      if (r.dataset.comp) {
+        abrirComprobante(r.dataset.comp);
+        if (e.target.closest('[data-print]')) setTimeout(imprimirComprobante, 250);
+        return;
+      }
       const esBorr = r.dataset.borrador === '1';
       if (e.target.closest('[data-del]')) {
         if (esBorr) {
-          if (!confirm('¿Descartar el borrador en curso? Se perderá lo que estabas cargando.')) return;
+          const ok = await confirmar({
+            titulo: '¿Descartar el borrador?',
+            mensaje: 'Se pierde lo que estabas cargando en este remito.',
+            aceptar: 'Descartar',
+            peligro: true,
+          });
+          if (!ok) return;
           doc = emptyRemito();
           save(LS.draft, doc);
           formFromDoc();
@@ -1397,7 +1434,13 @@ function cargarRemito(d) {
 async function eliminarRemito(id) {
   const d = datos.remitos.find(x => x.id === id);
   const nombre = d ? d.cliente.razonSocial || d.cliente.senores || 'este remito' : 'este remito';
-  if (!confirm('¿Eliminar el remito de «' + nombre + '»? Se elimina para todo el equipo.')) return false;
+  const ok = await confirmar({
+    titulo: '¿Eliminar el remito?',
+    mensaje: 'El remito de «' + nombre + '» se elimina para todo el equipo.',
+    aceptar: 'Eliminar',
+    peligro: true,
+  });
+  if (!ok) return false;
   try {
     await api('remitos.php?id=' + encodeURIComponent(id), { method: 'DELETE' });
   } catch (e) {
@@ -1744,7 +1787,16 @@ async function probarConexionArca() {
 }
 async function quitarCertificado() {
   const ambiente = $('#apiAmbiente').value;
-  if (!confirm('¿Quitar el certificado de ' + ambienteNombre(ambiente) + '? Se borra del servidor.')) return;
+  const ok = await confirmar({
+    titulo: '¿Quitar el certificado?',
+    mensaje:
+      'Se borran del servidor el certificado y la clave privada de ' +
+      ambienteNombre(ambiente) +
+      '. Hasta cargar otro no se podrá emitir en ese ambiente.',
+    aceptar: 'Quitar certificado',
+    peligro: true,
+  });
+  if (!ok) return;
   try {
     await api('arca.php', { method: 'POST', body: { accion: 'quitar', ambiente } });
     certEstado[ambiente] = null;
@@ -1908,9 +1960,18 @@ async function guardar(opts = {}) {
     _guardando = false;
   }
 }
-function nuevo() {
+async function nuevo() {
   cerrarPrueba(); // primero vuelve el documento real: si no, dirty() compararía los datos de ejemplo
-  if (dirty() && !confirm('¿Empezar un remito nuevo? Se perderán los cambios sin guardar.')) return false;
+  if (
+    dirty() &&
+    !(await confirmar({
+      titulo: '¿Empezar un remito nuevo?',
+      mensaje: 'Hay cambios sin guardar en el remito actual y se van a perder.',
+      aceptar: 'Empezar uno nuevo',
+      peligro: true,
+    }))
+  )
+    return false;
   doc = emptyRemito();
   formFromDoc();
   applyCurrentDate(true);
@@ -1963,9 +2024,66 @@ function applyCurrentDate(force) {
   renderPreview();
 }
 
+/* Comprobantes: etiqueta, estado e importe para los listados. */
+function etiquetaComprobante(c) {
+  const nombre =
+    c.tipo === 'nota' ? 'Nota de ' + (c.subtipo === 'debito' ? 'débito' : 'crédito') : COMP_INFO[c.tipo].badge;
+  const nro = c.numero ? pv5(c.ptoVenta) + '-' + String(c.numero).padStart(8, '0') : 'sin número';
+  return nombre + ' ' + (c.letra || 'X') + ' · ' + nro;
+}
+function estadoComprobante(c) {
+  if (compAutorizado(c)) return '<span class="doc-state auth">Con CAE</span>';
+  if (!/^[AB]$/.test(c.letra)) return '<span class="doc-state neutro">Interno</span>';
+  return '<span class="doc-state saved">Sin autorizar</span>';
+}
+function totalComprobante(c) {
+  const t = compTotals(c);
+  return t.errores && t.errores.length ? '' : fmtMoney(t.total);
+}
+/* Abre un comprobante guardado en su vista. */
+function abrirComprobante(id) {
+  const c = datos.comprobantes.find(x => x.id === id);
+  if (!c) return;
+  cerrarPrueba();
+  compDoc = Object.assign(emptyComprobante(c.tipo), clone(c));
+  saveCompDraft();
+  showView(c.tipo);
+}
+
+function renderSavedComprobantes(tipo) {
+  const list = $('#savedList');
+  const docs = datos.comprobantes.filter(c => c.tipo === tipo).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const nombre = {
+    factura: 'Facturas guardadas',
+    recibo: 'Recibos guardados',
+    nota: 'Notas de crédito y débito guardadas',
+  }[tipo];
+  $('#savedTitulo').textContent = nombre;
+  if (!docs.length) {
+    list.innerHTML = `<div class="empty">${ICN.receipt}<span>Todavía no hay ${tipo === 'recibo' ? 'recibos guardados' : nombre.toLowerCase()}.</span></div>`;
+    return;
+  }
+  list.innerHTML = docs
+    .map(
+      c => `<button class="saved-item" type="button" data-comp="${escA(c.id)}">
+        <div><strong>${esc(c.cliente.razonSocial || 'Consumidor final')}</strong>
+        <div class="meta">${esc(etiquetaComprobante(c))} · ${esc(c.fecha || '')}</div></div>
+        <div class="saved-der"><span class="importe">${esc(totalComprobante(c))}</span>${estadoComprobante(c)}</div>
+      </button>`
+    )
+    .join('');
+  list.querySelectorAll('[data-comp]').forEach(b =>
+    b.addEventListener('click', () => {
+      abrirComprobante(b.dataset.comp);
+      closePanels();
+    })
+  );
+}
+
 function renderSavedList() {
   const docs = datos.remitos;
   const list = $('#savedList');
+  $('#savedTitulo').textContent = 'Remitos guardados';
   list.innerHTML = '';
   if (!docs.length) {
     list.innerHTML = `<div class="empty">${ICN.doc}<span>Todavía no hay remitos guardados.</span></div>`;
@@ -2176,12 +2294,13 @@ async function saveClienteModal() {
 async function delCliente(id) {
   const c = clienteDeAgenda(id);
   if (!c) return;
-  if (
-    !confirm(
-      '¿Eliminar a «' + (c.razonSocial || c.cuit || 'este cliente') + '» de la agenda? Se elimina para todo el equipo.'
-    )
-  )
-    return;
+  const ok = await confirmar({
+    titulo: '¿Eliminar el cliente?',
+    mensaje: '«' + (c.razonSocial || c.cuit || 'Este cliente') + '» se elimina de la agenda de todo el equipo.',
+    aceptar: 'Eliminar',
+    peligro: true,
+  });
+  if (!ok) return;
   try {
     await api('clientes.php?id=' + encodeURIComponent(c.id), { method: 'DELETE' });
   } catch (e) {
@@ -2838,7 +2957,7 @@ function renderComprobante() {
       })
       .join('');
     body = `
-      ${d.tipo === 'nota' ? `<div class="cmp-periodo"><span><b>Comprobante asociado:</b> ${esc(d.compAsoc.tipo)} ${esc(d.compAsoc.letra)} — ${esc(d.compAsoc.pv)}-${esc(d.compAsoc.nro || '—')}</span></div>` : ''}
+      ${d.tipo === 'nota' ? `<div class="cmp-periodo"><span><b>Comprobante asociado:</b> ${esc(d.compAsoc.tipo)} ${esc(d.compAsoc.letra)} N° ${esc(pv5(d.compAsoc.pv))}-${esc(d.compAsoc.nro ? String(d.compAsoc.nro).padStart(8, '0') : '—')}</span></div>` : ''}
       <table class="cmp-items">
         <thead><tr>
           <th class="num c-cod">Código</th>
@@ -3049,22 +3168,17 @@ async function emitirComprobante() {
   if (_emitiendo || !compDoc || compAutorizado(compDoc)) return;
   const d = compDoc;
   const tot = compTotals(d);
-  if (
-    !confirm(
-      'Se va a emitir ' +
-        COMP_INFO[d.tipo].badge.toLowerCase() +
-        ' ' +
-        d.letra +
-        ' por ' +
-        fmtMoney(tot.total) +
-        ' a «' +
-        (d.cliente.razonSocial || 'consumidor final') +
-        '» en ARCA (' +
-        ambienteNombre(emisor().ambiente) +
-        ').\n\nUn comprobante autorizado no se puede modificar. ¿Emitir?'
-    )
-  )
-    return;
+  const okEmitir = await confirmar({
+    titulo: '¿Emitir ' + COMP_INFO[d.tipo].badge.toLowerCase() + ' ' + d.letra + ' por ' + fmtMoney(tot.total) + '?',
+    mensaje:
+      'Se autoriza en ARCA (' +
+      ambienteNombre(emisor().ambiente) +
+      ') a nombre de «' +
+      (d.cliente.razonSocial || 'consumidor final') +
+      '». Un comprobante autorizado no se puede modificar: se corrige con una nota de crédito.',
+    aceptar: 'Emitir',
+  });
+  if (!okEmitir) return;
   _emitiendo = true;
   const btn = $('#tbCompEmitir');
   btn.disabled = true;
@@ -3269,7 +3383,12 @@ async function abrirDigital() {
   openPanel($('#digitalModal'), $('#backdrop8'));
 }
 async function renovarDigital() {
-  if (!confirm('¿Generar un enlace nuevo? El anterior deja de funcionar.')) return;
+  const ok = await confirmar({
+    titulo: '¿Generar un enlace nuevo?',
+    mensaje: 'El enlace de conformidad anterior deja de funcionar.',
+    aceptar: 'Generar enlace',
+  });
+  if (!ok) return;
   try {
     await generarEnlaceDigital();
     pintarDigital();
@@ -3565,16 +3684,17 @@ function importAll(file) {
       return toast('El archivo no tiene el formato de una copia de seguridad de esta aplicación', 3200, 'err');
     }
     const n = docsOk ? d.docs.length : 0;
-    if (
-      !confirm(
-        'Se van a agregar al servidor ' +
-          n +
-          ' remitos, los comprobantes y los clientes de la copia.\n\n' +
-          'Los documentos entran como borradores sin número fiscal ni CAE (esos datos solo los asigna la ' +
-          'autorización). Para recuperar el servidor completo se usa el respaldo cifrado. ¿Continuar?'
-      )
-    )
-      return;
+    const okImportar = await confirmar({
+      titulo: '¿Importar la copia de seguridad?',
+      mensaje:
+        'Se agregan al servidor ' +
+        n +
+        ' remitos, los comprobantes y los clientes de la copia. Los documentos entran como borradores, sin ' +
+        'número fiscal ni CAE (esos datos solo los asigna la autorización). Para recuperar el servidor completo ' +
+        'se usa el respaldo cifrado.',
+      aceptar: 'Importar',
+    });
+    if (!okImportar) return;
     let fallas = 0;
     try {
       if (lista(d.clientes) && d.clientes.length) {
@@ -3667,7 +3787,7 @@ function wire() {
     b.addEventListener('click', () => {
       const q = b.dataset.quick;
       if (q === 'remito') {
-        if (nuevo()) showView('remito');
+        nuevo().then(ok => ok && showView('remito'));
         return;
       }
       if (q === 'cliente') {
@@ -3683,6 +3803,10 @@ function wire() {
     renderSavedList();
     openPanel($('#saved'), $('#backdrop2'));
   };
+  $('#tbCompGuardados').addEventListener('click', () => {
+    renderSavedComprobantes(compDoc ? compDoc.tipo : 'factura');
+    openPanel($('#saved'), $('#backdrop2'));
+  });
   $('#btnGestionar').addEventListener('click', abrirGuardados);
   $('#btnGuardados').addEventListener('click', abrirGuardados);
   $('#savedClose').addEventListener('click', closePanels);

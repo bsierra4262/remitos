@@ -97,7 +97,7 @@ def numero_solo_autorizado():
     return _con_pagina(prueba)
 
 
-@caso("«Nuevo» sobre un remito vacío no pide confirmación")
+@caso("«Nuevo» sobre un remito vacío no pide confirmación; con cambios la pide en un diálogo propio, no el del navegador")
 def nuevo_sin_confirmar():
     def prueba(pg, _):
         ir_a(pg, "remito")
@@ -105,7 +105,20 @@ def nuevo_sin_confirmar():
         pg.on("dialog", lambda d: (dialogos.append(d.message), d.dismiss()))
         pg.click("#btnNuevo")
         pg.wait_for_timeout(300)
-        return not dialogos, f"diálogos={dialogos}"
+        propio = pg.evaluate("() => !!(document.querySelector('#dlgConfirmar') || {}).open")
+        pg.fill("[data-path='cliente.razonSocial']", "CAMBIO SIN GUARDAR")
+        pg.wait_for_timeout(300)
+        pg.click("#btnNuevo")
+        pg.wait_for_selector("#dlgConfirmar[open]", timeout=3000)
+        titulo = pg.inner_text("#dlgConfirmarTitulo")
+        pg.click("#dlgConfirmarNo")
+        conserva = pg.input_value("[data-path='cliente.razonSocial']") == "CAMBIO SIN GUARDAR"
+        pg.click("#btnNuevo")
+        pg.click("#dlgConfirmarSi")
+        pg.wait_for_timeout(300)
+        vacio = pg.input_value("[data-path='cliente.razonSocial']") == ""
+        ok = not dialogos and not propio and "nuevo" in titulo and conserva and vacio
+        return ok, f"nativos={dialogos} pide_vacío={propio} título={titulo!r} cancelar_conserva={conserva} aceptar_limpia={vacio}"
     return _con_pagina(prueba)
 
 

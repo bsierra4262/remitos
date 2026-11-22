@@ -284,9 +284,10 @@ def traspaso_de_datos_locales():
                 localStorage.setItem('remitos_docs', JSON.stringify([{ id: 'viejo01', numero: '00000005',
                     cliente: { razonSocial: 'REMITO LOCAL VIEJO' }, items: [{ descripcion: 'x' }] }]));
             }""")
-            pg.on("dialog", lambda d: d.accept())
             pg.reload(wait_until="networkidle")
             pg.wait_for_selector(".navbar", state="visible")
+            pg.wait_for_selector("#dlgConfirmar[open]", timeout=8000)   # diálogo propio, no el del navegador
+            pg.click("#dlgConfirmarSi")
             pg.wait_for_timeout(2000)
             quedan = pg.evaluate("() => [localStorage.getItem('remitos_clientes'), localStorage.getItem('remitos_docs')]")
         finally:

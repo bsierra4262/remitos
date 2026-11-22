@@ -7,6 +7,9 @@ client_secret*.json
 *.csr
 *.p12
 
+# Material de referencia local (diseño de origen, escaneos): no se publica
+referencias/
+
 # Pruebas y herramientas
 __pycache__/
 *.pyc

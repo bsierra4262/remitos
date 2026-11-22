@@ -7,9 +7,10 @@
 <meta name="description" content="Remitos, facturas, recibos y notas de crédito y débito de Intellihelp.">
 <meta name="robots" content="noindex, nofollow">
 <title>Remitos y Comprobantes · Intellihelp</title>
-<link rel="stylesheet" href="css/fuentes.css?v=245">
+<link rel="stylesheet" href="css/fuentes.css?v=246">
 <link rel="icon" href="assets/logos/favicon.png">
-<link rel="stylesheet" href="css/styles.css?v=245">
+<link rel="stylesheet" href="css/styles.css?v=246">
+<link rel="stylesheet" href="css/controles.css?v=246">
 </head>
 <body data-view="inicio" class="sin-sesion">
 <div class="app">
@@ -97,6 +98,8 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>Nuevo</span></button>
         <button class="btn ghost" id="tbCompGuardar" title="Guardar (Ctrl+S)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Guardar</span></button>
+        <button class="btn ghost" id="tbCompGuardados" title="Comprobantes guardados de este tipo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Guardados</span></button>
         <button class="btn ghost" id="tbCompPdf" title="Descargar en PDF">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span>PDF</span></button>
         <button class="btn ghost" id="tbCompTest" title="Imprimir una prueba con datos ficticios">
@@ -337,7 +340,7 @@
             <div class="cfg-alert" id="apiAlert" hidden></div>
             <div class="cfg-actions">
               <button class="btn primary" id="apiSave">Guardar</button>
-              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=245" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
+              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=246" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
             </div>
           </div>
 
@@ -449,7 +452,7 @@
 <div class="backdrop" id="backdrop2"></div>
 <aside class="calib" id="saved" aria-label="Remitos guardados">
   <div class="calib-head">
-    <h3>Remitos guardados</h3>
+    <h3 id="savedTitulo">Remitos guardados</h3>
     <button class="btn ghost icon" id="savedClose" aria-label="Cerrar">✕</button>
   </div>
   <div class="calib-body"><div id="savedList"></div></div>
@@ -653,10 +656,11 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="js/config.js?v=245"></script>
-<script src="js/calculos.js?v=245"></script>
-<script src="js/lib/qrcode.js?v=245"></script>
-<script src="js/app.js?v=245"></script>
-<script src="js/servidor.js?v=245"></script>
+<script src="js/dialogo.js?v=246"></script>
+<script src="js/config.js?v=246"></script>
+<script src="js/calculos.js?v=246"></script>
+<script src="js/lib/qrcode.js?v=246"></script>
+<script src="js/app.js?v=246"></script>
+<script src="js/servidor.js?v=246"></script>
 </body>
 </html>

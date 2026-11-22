@@ -242,7 +242,12 @@ async function cerrarSesion() {
   const pendiente = sesion.usuario && typeof dirty === 'function' && (doc.pendiente || dirty());
   if (
     pendiente &&
-    !confirm('Hay un remito con cambios sin guardar. Si salís, se descarta de este equipo. ¿Salir igual?')
+    !(await confirmar({
+      titulo: '¿Salir sin guardar?',
+      mensaje: 'Hay un remito con cambios sin guardar. Si salís, se descarta de este equipo.',
+      aceptar: 'Salir igual',
+      peligro: true,
+    }))
   )
     return;
   try {
@@ -357,7 +362,16 @@ async function guardarUsuario(e) {
 
 async function eliminarUsuario() {
   const u = usuarioEditando;
-  if (!u || !confirm('¿Eliminar el usuario de ' + u.nombre + '? Sus documentos se conservan.')) return;
+  if (
+    !u ||
+    !(await confirmar({
+      titulo: '¿Eliminar el usuario de ' + u.nombre + '?',
+      mensaje: 'Deja de poder ingresar. Los documentos que cargó se conservan.',
+      aceptar: 'Eliminar',
+      peligro: true,
+    }))
+  )
+    return;
   try {
     await api('usuarios.php?id=' + encodeURIComponent(u.id), { method: 'DELETE' });
     closePanels();
@@ -387,13 +401,16 @@ async function traspasarDatosLocales() {
   ]
     .filter(Boolean)
     .join(', ');
-  if (
-    !confirm(
+  const subirlos = await confirmar({
+    titulo: '¿Subir los datos de la versión anterior?',
+    mensaje:
       'En este navegador hay datos de la versión anterior (' +
-        detalle +
-        ').\n\n¿Subirlos al servidor para que los vea todo el equipo?'
-    )
-  ) {
+      detalle +
+      '). Al subirlos al servidor los ve todo el equipo.',
+    aceptar: 'Subir al servidor',
+    cancelar: 'Ahora no',
+  });
+  if (!subirlos) {
     sessionStorage.setItem('remitos_traspaso_omitido', '1');
     return;
   }

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.png" alt="Remitos y Comprobantes — Intellihelp" width="100%">
+  <img src="docs/imagenes/banner.png" alt="Remitos y Comprobantes — Intellihelp" width="100%">
 </p>
 
 <p align="center">
@@ -43,32 +43,32 @@
 
 ## Capturas
 
-> Las capturas usan datos ficticios de demostración.
+> Las capturas usan datos ficticios de demostración y se regeneran con `python tools/capturas.py` contra el entorno local de pruebas.
 
 ### Ingreso
 
-<p align="center"><img src="docs/screenshots/ingreso.png" alt="Ingreso" width="100%"></p>
+<p align="center"><img src="docs/imagenes/capturas/ingreso.png" alt="Ingreso" width="100%"></p>
 
 ### Inicio
 
 Accesos rápidos, totales y documentos recientes con su estado (autorizado, facturado, sin autorizar o borrador sin guardar) y quién los modificó por última vez.
 
-<p align="center"><img src="docs/screenshots/inicio.png" alt="Inicio" width="100%"></p>
+<p align="center"><img src="docs/imagenes/capturas/inicio.png" alt="Inicio" width="100%"></p>
 
 ### Remito
 
 El formulario se completa a la izquierda y la vista previa se actualiza en el acto. El modo **sobre pre-impreso** muestra el talonario como guía tenue e imprime solo los datos; el **documento completo** genera el remito entero con el sello de autorizado.
 
-<p align="center"><img src="docs/screenshots/remito-documento-completo.png" alt="Remito en documento completo" width="100%"></p>
+<p align="center"><img src="docs/imagenes/capturas/remito-documento-completo.png" alt="Remito en documento completo" width="100%"></p>
 
 <table>
   <tr>
-    <td width="50%"><b>Sobre el talonario pre-impreso</b><br><img src="docs/screenshots/remito-preimpreso.png" alt="Remito sobre pre-impreso"></td>
-    <td width="50%"><b>Calibración por impresora</b><br><img src="docs/screenshots/calibracion.png" alt="Calibración"></td>
+    <td width="50%"><b>Sobre el talonario pre-impreso</b><br><img src="docs/imagenes/capturas/remito-preimpreso.png" alt="Remito sobre pre-impreso"></td>
+    <td width="50%"><b>Calibración por impresora</b><br><img src="docs/imagenes/capturas/calibracion.png" alt="Calibración"></td>
   </tr>
   <tr>
-    <td width="50%"><b>Ajuste fino de cada campo</b><br><img src="docs/screenshots/ajuste-por-campo.png" alt="Ajuste por campo"></td>
-    <td width="50%"><b>Agenda de clientes</b><br><img src="docs/screenshots/clientes.png" alt="Clientes"></td>
+    <td width="50%"><b>Ajuste fino de cada campo</b><br><img src="docs/imagenes/capturas/ajuste-por-campo.png" alt="Ajuste por campo"></td>
+    <td width="50%"><b>Agenda de clientes</b><br><img src="docs/imagenes/capturas/clientes.png" alt="Clientes"></td>
   </tr>
 </table>
 
@@ -78,12 +78,16 @@ Diseño tomado de los comprobantes que emite ARCA: banda de ejemplar, letra y c�
 
 <table>
   <tr>
-    <td width="50%"><b>Factura A autorizada</b><br><img src="docs/screenshots/factura.png" alt="Factura"></td>
-    <td width="50%"><b>Factura de Crédito Electrónica MiPyME</b><br><img src="docs/screenshots/factura-credito.png" alt="Factura de Crédito MiPyME"></td>
+    <td width="50%"><b>Factura A autorizada</b><br><img src="docs/imagenes/capturas/factura.png" alt="Factura"></td>
+    <td width="50%"><b>Factura de Crédito Electrónica MiPyME</b><br><img src="docs/imagenes/capturas/factura-credito.png" alt="Factura de Crédito MiPyME"></td>
   </tr>
   <tr>
-    <td width="50%"><b>Recibo de cobranza (no válido como factura)</b><br><img src="docs/screenshots/recibo.png" alt="Recibo"></td>
-    <td width="50%"></td>
+    <td width="50%"><b>Nota de crédito asociada a una factura</b><br><img src="docs/imagenes/capturas/nota-credito.png" alt="Nota de crédito"></td>
+    <td width="50%"><b>Recibo de cobranza (no válido como factura)</b><br><img src="docs/imagenes/capturas/recibo.png" alt="Recibo"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Comprobantes guardados, con importe y estado</b><br><img src="docs/imagenes/capturas/comprobantes-guardados.png" alt="Comprobantes guardados"></td>
+    <td width="50%"><b>Confirmaciones con diseño propio</b><br><img src="docs/imagenes/capturas/dialogo-confirmacion.png" alt="Diálogo de confirmación"></td>
   </tr>
 </table>
 
@@ -93,11 +97,11 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 
 <table>
   <tr>
-    <td width="50%"><b>Datos del emisor y certificado</b><br><img src="docs/screenshots/conexion-arca.png" alt="Conexión con ARCA"></td>
-    <td width="50%"><b>Carga del certificado (archivo o texto)</b><br><img src="docs/screenshots/carga-certificado.png" alt="Carga del certificado"></td>
+    <td width="50%"><b>Datos del emisor y certificado</b><br><img src="docs/imagenes/capturas/conexion-arca.png" alt="Conexión con ARCA"></td>
+    <td width="50%"><b>Carga del certificado (archivo o texto)</b><br><img src="docs/imagenes/capturas/carga-certificado.png" alt="Carga del certificado"></td>
   </tr>
   <tr>
-    <td width="50%"><b>Aviso de servicio de ARCA sin activar</b><br><img src="docs/screenshots/aviso-servicio-arca.png" alt="Servicio de ARCA sin activar"></td>
+    <td width="50%"><b>Aviso de servicio de ARCA sin activar</b><br><img src="docs/imagenes/capturas/aviso-servicio-arca.png" alt="Servicio de ARCA sin activar"></td>
     <td width="50%"></td>
   </tr>
 </table>
@@ -106,8 +110,8 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 
 <table>
   <tr>
-    <td width="50%"><b>Usuarios y roles</b><br><img src="docs/screenshots/usuarios.png" alt="Usuarios"></td>
-    <td width="50%"><b>Alta de usuario</b><br><img src="docs/screenshots/usuario-nuevo.png" alt="Nuevo usuario"></td>
+    <td width="50%"><b>Usuarios y roles</b><br><img src="docs/imagenes/capturas/usuarios.png" alt="Usuarios"></td>
+    <td width="50%"><b>Alta de usuario</b><br><img src="docs/imagenes/capturas/usuario-nuevo.png" alt="Nuevo usuario"></td>
   </tr>
 </table>
 
@@ -115,23 +119,23 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 
 <table>
   <tr>
-    <td width="50%"><b>Talonarios de C.A.I.</b><br><img src="docs/screenshots/panel-cai.png" alt="Talonarios"></td>
-    <td width="50%"><b>Claves de servicio</b><br><img src="docs/screenshots/panel-claves.png" alt="Claves"></td>
+    <td width="50%"><b>Talonarios de C.A.I.</b><br><img src="docs/imagenes/capturas/panel-cai.png" alt="Talonarios"></td>
+    <td width="50%"><b>Claves de servicio</b><br><img src="docs/imagenes/capturas/panel-claves.png" alt="Claves"></td>
   </tr>
   <tr>
-    <td width="50%"><b>Estado de los documentos</b><br><img src="docs/screenshots/panel-estado.png" alt="Estado"></td>
-    <td width="50%"><b>Auditoría</b><br><img src="docs/screenshots/panel-actividad.png" alt="Actividad"></td>
+    <td width="50%"><b>Estado de los documentos</b><br><img src="docs/imagenes/capturas/panel-estado.png" alt="Estado"></td>
+    <td width="50%"><b>Auditoría</b><br><img src="docs/imagenes/capturas/panel-actividad.png" alt="Actividad"></td>
   </tr>
 </table>
 
 ### Celular
 
 <p align="center">
-  <img src="docs/screenshots/mobile-inicio.png" alt="Inicio en celular" width="30%">
+  <img src="docs/imagenes/capturas/mobile-inicio.png" alt="Inicio en celular" width="30%">
   &nbsp;
-  <img src="docs/screenshots/mobile-menu.png" alt="Menú en celular" width="30%">
+  <img src="docs/imagenes/capturas/mobile-menu.png" alt="Menú en celular" width="30%">
   &nbsp;
-  <img src="docs/screenshots/mobile-remito.png" alt="Remito en celular" width="30%">
+  <img src="docs/imagenes/capturas/mobile-remito.png" alt="Remito en celular" width="30%">
 </p>
 
 ## Funcionalidades
@@ -225,12 +229,15 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   ├── index.html           # Aplicación
 │   ├── panel.html           # Panel de administración de la API
 │   ├── conformidad.html     # Página pública para confirmar la recepción de un remito digital
-│   ├── css/                 # Estilos de la aplicación y del panel, y la fuente autoalojada
+│   ├── css/                 # styles (aplicación) · panel · conformidad · controles (diálogos y controles
+│   │                        # de formulario comunes) · fuentes (Saira autoalojada)
 │   ├── js/
 │   │   ├── config.js        # Papel, posición de cada campo, calibración de fábrica, datos del emisor
 │   │   ├── calculos.js      # Importes, IVA, CUIT y montos en letras (también se prueba con Node)
 │   │   ├── app.js           # Edición, vista previa, impresión, emisión, agenda y configuración
 │   │   ├── servidor.js      # API, sesión, ingreso con Google, usuarios y datos compartidos
+│   │   ├── dialogo.js       # Diálogo de confirmación propio (en lugar del nativo del navegador)
+│   │   ├── conformidad.js   # Página pública de conformidad del remito digital
 │   │   ├── panel.js         # Panel de la API
 │   │   └── lib/             # SheetJS y generador de QR (versión y hash en docs/dependencias.md)
 │   ├── api/
@@ -255,9 +262,14 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   │   └── config.sample.php
 │   ├── docs/                # Instructivo de alta en ARCA (HTML y PDF)
 │   └── assets/              # Logos y fuente Saira
-├── docs/                    # API, normativa, seguridad, dependencias, remediación, banner y capturas
+├── docs/
+│   ├── api.md · normativa.md · seguridad.md · dependencias.md
+│   ├── historial/           # Revisiones y remediaciones anteriores
+│   └── imagenes/            # Banner y capturas de pantalla del README
 ├── test/                    # Batería (Playwright) y pruebas unitarias (Node y PHP)
-├── tools/                   # Generación del instructivo en PDF
+├── tools/
+│   ├── capturas.py          # Regenera todas las capturas del README contra el entorno local
+│   └── guia_pdf.py          # Genera el instructivo de ARCA en PDF desde su HTML
 └── .github/workflows/       # Integración continua
 ```
 
@@ -267,7 +279,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 | Datos | En el servidor; en el equipo solo la calibración de la impresora y el borrador en curso |
 | Servidor | PHP 8.2+ (PDO, OpenSSL, cURL, DOM) |
 | Base de datos | MariaDB 10.6+ / MySQL 8, esquema versionado con migraciones idempotentes |
-| Integraciones | ARCA WSAA y WSFEv1 (SOAP) |
+| Integraciones | ARCA WSAA, WSFEv1, WSCDC y WSFECRED (SOAP) |
 | Calidad | PSR-12 (PHP-CS-Fixer), Prettier, batería de pruebas de API e interfaz, pruebas unitarias y CI en GitHub Actions |
 | Identidad | Tipografía Saira · paleta `#663399` · `#9f88b1` · `#fff6ff` · `#fffade` · colores planos |
 
@@ -306,7 +318,7 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 - Escape de todo dato mostrado en pantalla.
 - El panel de la API se abre con la sesión de un administrador; una clave de API solo se conserva mientras la pestaña está abierta (`sessionStorage`).
 
-Modelo de amenazas, respaldos, rotación de claves, respuesta a incidentes y retención de datos personales: [`docs/seguridad.md`](docs/seguridad.md). Estado de la revisión de noviembre de 2026: [`docs/remediacion-2026-11.md`](docs/remediacion-2026-11.md).
+Modelo de amenazas, respaldos, rotación de claves, respuesta a incidentes y retención de datos personales: [`docs/seguridad.md`](docs/seguridad.md). Estado de la revisión de noviembre de 2026: [`docs/historial/remediacion-2026-11.md`](docs/historial/remediacion-2026-11.md).
 
 ## Instalación y despliegue
 
