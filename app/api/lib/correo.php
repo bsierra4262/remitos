@@ -7,8 +7,9 @@
  *
  *  - Sale con la función mail() del hosting. El dominio autoriza a ese servidor en su
  *    registro SPF, así que el mensaje llega como enviado por la empresa.
- *  - El remitente se configura en config.php (`correo.remitente`). Las respuestas van a
- *    quien lo envió (Reply-To), que además puede recibir una copia.
+ *  - El remitente es la casilla de la empresa de quien lo envía, con el nombre de la
+ *    empresa a la vista; config.php puede fijar otra (`correo.remitente`). Las respuestas
+ *    van a quien lo envió (Reply-To), que además puede recibir una copia.
  *  - El cuerpo lleva el detalle del documento en HTML y en texto, y para los comprobantes
  *    con CAE el enlace de verificación de ARCA (el mismo del código QR, RG 4892/2020).
  *    Se puede adjuntar el PDF que se descargó desde la aplicación.
@@ -28,14 +29,21 @@ const CORREO_MAX_ADJUNTO = 3145728;
 /** Envíos permitidos por usuario en una hora (evita usar el sistema para enviar correo masivo). */
 const CORREO_MAX_POR_HORA = 40;
 
-/** Remitente y nombre de la empresa, desde config.php (con valores por defecto). */
-function correo_config(array $config): array
+/**
+ * Remitente y nombre de la empresa. Si config.php no fija una casilla (`correo.remitente`),
+ * el mensaje sale desde la dirección de la empresa de quien lo envía: es una casilla real,
+ * así que los rebotes y las respuestas le llegan a esa persona.
+ */
+function correo_config(array $config, string $usuario = ''): array
 {
     $c = is_array($config['correo'] ?? null) ? $config['correo'] : [];
     $remitente = (string) ($c['remitente'] ?? '');
     if (!filter_var($remitente, FILTER_VALIDATE_EMAIL)) {
-        $dominio = (string) (($config['google']['dominio'] ?? '') ?: 'intellihelp.tech');
-        $remitente = 'comprobantes@' . $dominio;
+        $dominio = strtolower((string) (($config['google']['dominio'] ?? '') ?: 'intellihelp.tech'));
+        $usuario = strtolower(trim($usuario));
+        $remitente = filter_var($usuario, FILTER_VALIDATE_EMAIL) && str_ends_with($usuario, '@' . $dominio)
+            ? $usuario
+            : 'comprobantes@' . $dominio;
     }
 
     return ['remitente' => $remitente, 'empresa' => (string) (($c['empresa'] ?? '') ?: 'INTELLIHELP S.A.')];
@@ -157,7 +165,7 @@ function correo_cuerpo(string $empresa, string $titulo, string $mensaje, array $
  */
 function correo_enviar(array $config, array $para, array $copia, string $responderA, string $asunto, array $cuerpo, ?array $adjunto): bool
 {
-    $cfg = correo_config($config);
+    $cfg = correo_config($config, $responderA);
     $limpio = static fn (string $s): string => trim(str_replace(["\r", "\n"], ' ', $s));
     $alt = 'alt_' . bin2hex(random_bytes(12));
     $mixto = 'mix_' . bin2hex(random_bytes(12));

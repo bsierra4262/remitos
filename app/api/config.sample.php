@@ -48,11 +48,11 @@ return [
         'dominio' => 'intellihelp.tech',
     ],
 
-    // Envío de comprobantes y remitos por correo (función mail() del hosting). El remitente
-    // tiene que ser del dominio de la empresa, que autoriza al hosting en su registro SPF.
-    // Sin este bloque se usa comprobantes@<dominio de Google> y el nombre INTELLIHELP S.A.
+    // Envío de comprobantes y remitos por correo (función mail() del hosting). Sin remitente,
+    // el mensaje sale desde la casilla de quien lo envía (del dominio de Google), con el nombre
+    // de la empresa. Si se fija uno, tiene que ser una casilla que exista en ese dominio.
     'correo' => [
-        'remitente' => 'comprobantes@intellihelp.tech',
+        'remitente' => '',
         'empresa' => 'INTELLIHELP S.A.',
     ],
 

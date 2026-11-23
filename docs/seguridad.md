@@ -92,4 +92,4 @@ curl -sI https://intellihelp.tech/remitos/api/sesion.php | grep -i cache-control
 - Las direcciones se validan una por una (hasta 5) y nunca se copian sin control a las cabeceras: un salto de línea en el destinatario responde `422`, así que no se puede inyectar `Bcc` ni otras cabeceras.
 - Solo documentos emitidos; el enlace de conformidad tiene que ser de la propia aplicación; el PDF adjunto se verifica por su contenido (`%PDF-`) y su tamaño (3 MB).
 - Máximo de 40 envíos por hora por usuario y cada envío queda en la auditoría con sus destinatarios.
-- El remitente es del dominio de la empresa, autorizado en su SPF; las respuestas van a quien lo envió.
+- El remitente es la casilla de la empresa de quien lo envía (una casilla real, del dominio autorizado en el SPF), así que los rebotes y las respuestas le llegan a esa persona.

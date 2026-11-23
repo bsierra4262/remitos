@@ -177,8 +177,10 @@ def correo_servidor():
         c_pdf, _ = s.pedir("/correo.php", "POST", {"tipo": "comprobante", "id": f.get("id"), "para": "a@b.com", "pdf": "aG9sYQ=="})
         c_cab, _ = s.pedir("/correo.php", "POST", {"tipo": "comprobante", "id": f.get("id"),
                                                      "para": "a@b.com\r\nBcc: espia@ejemplo.com"})
+        # Sin casilla configurada sale desde la de quien envía
+        remitente = next((linea for linea in eml.splitlines() if linea.startswith("From: ")), "")
         ok = (c_clave == 401 and c_ok == 200 and "To: cliente@ejemplo.com.ar" in eml and "Cc: " + ADMIN_EMAIL in eml
-              and "application/pdf" in eml and "Reply-To: " + ADMIN_EMAIL in eml and c_b == 409 and c_mal == 422
+              and "application/pdf" in eml and "Reply-To: " + ADMIN_EMAIL in eml and remitente.endswith("<" + ADMIN_EMAIL + ">") and c_b == 409 and c_mal == 422
               and c_pdf == 422 and c_cab == 422 and "espia" not in eml)
         return ok, (f"clave={c_clave} sesión={c_ok} {d_ok.get('error', '')} eml={'sí' if eml else 'no'} · B sin CAE={c_b} · "
                     f"dirección={c_mal} · no-PDF={c_pdf} · inyección={c_cab}")

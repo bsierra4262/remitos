@@ -233,7 +233,7 @@ Campos para la emisión: `conceptoTipo` (1 productos, 2 servicios, 3 ambos), `se
 - `para`: hasta 5 direcciones separadas por coma; una inválida responde `422`. Las respuestas van a quien lo envía (`Reply-To`) y `copia: true` le manda una copia.
 - `pdf`: el PDF descargado desde la aplicación, en base64, hasta 3 MB (`413`); un archivo que no es PDF responde `422`.
 - Máximo de 40 envíos por hora por usuario (`429`). Cada envío queda en la auditoría.
-- Sale con `mail()` del hosting y el remitente de `config.php` (`correo.remitente`), del dominio de la empresa, autorizado en su registro SPF. Si el servidor de correo no acepta el mensaje, responde `502`.
+- Sale con `mail()` del hosting desde la casilla de la empresa de quien lo envía, con el nombre de la empresa como remitente (el dominio autoriza al hosting en su registro SPF). `config.php` puede fijar otra casilla existente en `correo.remitente`. Si el servidor de correo no acepta el mensaje, responde `502`.
 
 ## Ajustes
 
