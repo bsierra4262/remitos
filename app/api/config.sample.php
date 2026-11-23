@@ -48,6 +48,14 @@ return [
         'dominio' => 'intellihelp.tech',
     ],
 
+    // Envío de comprobantes y remitos por correo (función mail() del hosting). El remitente
+    // tiene que ser del dominio de la empresa, que autoriza al hosting en su registro SPF.
+    // Sin este bloque se usa comprobantes@<dominio de Google> y el nombre INTELLIHELP S.A.
+    'correo' => [
+        'remitente' => 'comprobantes@intellihelp.tech',
+        'empresa' => 'INTELLIHELP S.A.',
+    ],
+
     // IP de los proxies inversos de confianza. Solo desde estas IP se acepta la cabecera
     // X-Forwarded-Proto para saber si la conexión original fue HTTPS. Sin proxy: vacío.
     'trusted_proxies' => [],

@@ -62,6 +62,15 @@ foreach ($casos['totales'] as $caso) {
     );
 }
 verificar(importe_totales(['letra' => 'A', 'items' => [['cantidad' => '1', 'precio' => 'abc']]])['errores'] !== [], 'importe inválido informado');
+foreach ($casos['totales'] as $caso) {
+    if (isset($caso['alicuotas'])) {
+        $detalle = array_map(static fn (array $x): array => [$x['alicuota'], $x['neto'], $x['iva']], importe_totales($caso['doc'])['alicuotas']);
+        verificar($detalle === $caso['alicuotas'], 'por alícuota: ' . $caso['nombre'] . ' → ' . json_encode($detalle));
+    }
+}
+foreach ($casos['invalidos'] as $caso) {
+    verificar(count(importe_totales($caso['doc'])['errores']) === 1, 'inválido: ' . $caso['nombre']);
+}
 verificar(importe_alicuota('19') === null && importe_alicuota('10,5') === '10.5', 'alícuotas admitidas');
 
 foreach ($casos['cuit'] as [$cuit, $valido]) {
@@ -81,6 +90,22 @@ $xml = arca_cae_detail([
 verificar(str_contains($xml, '<ar:ImpTotal>2987.64</ar:ImpTotal>') && str_contains($xml, '<ar:ImpIVA>518.52</ar:ImpIVA>'), 'importes para ARCA');
 verificar(strpos($xml, 'FchServDesde') < strpos($xml, 'MonId') && strpos($xml, 'CbtesAsoc') < strpos($xml, '<ar:Iva>'), 'orden del esquema WSFEv1');
 verificar(!str_contains($xml, '<ar:CbteFch></ar:CbteFch>'), 'fecha del asociado vacía se omite');
+
+// IVA por renglón: un AlicIva por alícuota, con su base y su importe (los mismos de importe_totales).
+$mixto = importe_totales(['letra' => 'A', 'items' => [
+    ['cantidad' => '1', 'precio' => '1.000', 'alicuota' => '21'],
+    ['cantidad' => '2', 'precio' => '500', 'alicuota' => '10.5'],
+]]);
+$xmlMixto = arca_cae_detail([
+    'concepto' => 1, 'doc_tipo' => 80, 'doc_nro' => '20123456786', 'numero' => 1, 'fecha' => '20261122',
+    'total' => $mixto['total'], 'neto' => $mixto['neto'], 'iva' => $mixto['iva'], 'exento' => 0, 'no_gravado' => 0,
+    'cond_iva_receptor' => 1,
+    'alicuotas' => array_map(static fn (array $a): array => ['id' => IVA_ALICUOTAS[$a['alicuota']], 'base' => $a['neto'], 'importe' => $a['iva']], $mixto['alicuotas']),
+]);
+verificar(substr_count($xmlMixto, '<ar:AlicIva>') === 2
+    && str_contains($xmlMixto, '<ar:AlicIva><ar:Id>5</ar:Id><ar:BaseImp>1000.00</ar:BaseImp><ar:Importe>210.00</ar:Importe></ar:AlicIva>')
+    && str_contains($xmlMixto, '<ar:AlicIva><ar:Id>4</ar:Id><ar:BaseImp>1000.00</ar:BaseImp><ar:Importe>105.00</ar:Importe></ar:AlicIva>')
+    && str_contains($xmlMixto, '<ar:ImpIVA>315.00</ar:ImpIVA>'), 'un AlicIva por alícuota (IVA por renglón)');
 verificar(arca_xml('<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>') === null, 'XML con DOCTYPE rechazado');
 
 // WSCDC: pedido de constatación de un remito con C.A.I. (importe en cero) y lectura de la

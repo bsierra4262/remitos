@@ -8,9 +8,12 @@
  *
  *  - Importes en formato argentino («1.234,56»), y también «1234.56» o «1.500»
  *    (mil quinientos). Las cuentas se hacen en centavos enteros.
- *  - Cada renglón se redondea a centavos; el IVA se calcula sobre el neto total.
+ *  - Cada renglón (cantidad × precio, menos la bonificación) se redondea a centavos.
+ *  - Cada renglón tiene su alícuota de IVA (si no la tiene, vale la del comprobante).
+ *    El IVA se calcula por alícuota, sobre la suma de los renglones de esa alícuota,
+ *    y ARCA recibe un importe por alícuota (Iva/AlicIva de WSFEv1).
  *  - Letra A: precios netos e IVA discriminado. Letra B: precios finales con IVA
- *    incluido. Letras C y X: sin IVA.
+ *    incluido. Letra X: sin IVA.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -51,60 +54,114 @@ function alicuotaIVA(v) {
   return ALICUOTAS_IVA.includes(k) ? k : null;
 }
 
+/** Unidades de medida para los renglones de facturas y notas. */
+const UNIDADES = [
+  'unidades',
+  'horas',
+  'servicio',
+  'kilogramos',
+  'gramos',
+  'metros',
+  'metros cuadrados',
+  'metros cúbicos',
+  'litros',
+  'pares',
+  'docenas',
+  'otras unidades',
+];
+
+/** Bonificación de un renglón en porcentaje (0 a 100); NaN si no es válida. Vacío = 0. */
+function bonificacion(v) {
+  const n = numeroAR(String(v == null ? '' : v).replace('%', ''));
+  return isNaN(n) || n > 100 ? NaN : n;
+}
+
+/** Importe de un renglón en centavos: cantidad × precio menos la bonificación (NaN si algo es inválido). */
+function centavosItem(it) {
+  const cant = numeroAR(it.cantidad);
+  const precio = centavos(it.precio);
+  const bonif = bonificacion(it.bonif);
+  if (isNaN(cant) || isNaN(precio) || isNaN(bonif)) return NaN;
+  return Math.round(cant * precio * (1 - bonif / 100));
+}
+
 /**
  * Totales de un comprobante. Devuelve los importes en pesos (neto, iva, total), los
- * mismos en centavos y la lista de errores de carga.
+ * mismos en centavos, el detalle por alícuota y la lista de errores de carga.
  */
 function compTotals(d) {
   const errores = [];
-  let alic = alicuotaIVA(d.alicuota == null ? '21' : d.alicuota);
-  if (alic === null) {
+  let general = alicuotaIVA(d.alicuota == null || d.alicuota === '' ? '21' : d.alicuota);
+  if (general === null) {
     errores.push('La alícuota de IVA no es válida');
-    alic = '21';
+    general = '21';
   }
-  let suma = 0;
+  const grupos = {}; // alícuota → suma de los renglones en centavos
   if (d.tipo === 'recibo') {
     const m = centavos(d.monto);
     if (isNaN(m)) errores.push('El monto no es un importe válido');
-    else suma = m;
+    else grupos[general] = m;
   } else {
     (d.items || []).forEach((it, i) => {
-      const cant = numeroAR(it.cantidad);
-      const precio = centavos(it.precio);
-      if (isNaN(cant) || isNaN(precio)) errores.push('El ítem ' + (i + 1) + ' tiene una cantidad o un precio inválido');
-      else suma += Math.round(cant * precio);
+      const n = i + 1;
+      let alic = general;
+      if (it.alicuota != null && it.alicuota !== '') {
+        alic = alicuotaIVA(it.alicuota);
+        if (alic === null) {
+          errores.push('El ítem ' + n + ' tiene una alícuota de IVA inválida');
+          return;
+        }
+      }
+      if (isNaN(bonificacion(it.bonif))) {
+        errores.push('El ítem ' + n + ' tiene una bonificación inválida (0 a 100 %)');
+        return;
+      }
+      const imp = centavosItem(it);
+      if (isNaN(imp)) errores.push('El ítem ' + n + ' tiene una cantidad o un precio inválido');
+      else grupos[alic] = (grupos[alic] || 0) + imp;
     });
   }
-  const tasa = parseFloat(alic) / 100;
-  let neto, iva, total;
-  if (d.letra === 'A') {
-    neto = suma;
-    iva = Math.round(neto * tasa);
-    total = neto + iva;
-  } else if (d.letra === 'B') {
-    total = suma;
-    neto = Math.round(total / (1 + tasa));
-    iva = total - neto;
-  } else {
-    neto = total = suma;
+  if (!Object.keys(grupos).length) grupos[general] = 0;
+  const alicuotas = [];
+  let neto = 0,
     iva = 0;
-  }
+  Object.keys(grupos)
+    .sort((a, b) => parseFloat(b) - parseFloat(a))
+    .forEach(alic => {
+      const suma = grupos[alic],
+        tasa = parseFloat(alic) / 100;
+      let n, v;
+      if (d.letra === 'A') {
+        n = suma;
+        v = Math.round(n * tasa);
+      } else if (d.letra === 'B') {
+        n = Math.round(suma / (1 + tasa));
+        v = suma - n;
+      } else {
+        n = suma;
+        v = 0;
+      }
+      neto += n;
+      iva += v;
+      alicuotas.push({ alicuota: alic, neto: n / 100, iva: v / 100, centavos: { neto: n, iva: v } });
+    });
+  const total = neto + iva;
   return {
     neto: neto / 100,
     iva: iva / 100,
     total: total / 100,
     disc: d.letra === 'A',
     centavos: { neto, iva, total },
-    alicuota: alic,
+    alicuota: alicuotas.length === 1 ? alicuotas[0].alicuota : general,
+    alicuotas,
     errores,
   };
 }
 
-/** Subtotal de un renglón en pesos (redondeado a centavos). */
+/** Subtotal de un renglón en pesos, con la bonificación aplicada (redondeado a centavos). */
 function subtotalItem(it) {
-  const cant = numeroAR(it.cantidad);
-  const precio = centavos(it.precio);
-  return isNaN(cant) || isNaN(precio) ? 0 : Math.round(cant * precio) / 100;
+  const c = centavosItem(it);
+  return isNaN(c) ? 0 : c / 100;
 }
 
 /* ---- número a letras (para el recibo) ---- */
@@ -313,6 +370,9 @@ if (typeof module !== 'undefined' && module.exports) {
     numF,
     centavos,
     alicuotaIVA,
+    bonificacion,
+    centavosItem,
+    UNIDADES,
     compTotals,
     subtotalItem,
     enteroALetras,

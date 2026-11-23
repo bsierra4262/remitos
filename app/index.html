@@ -7,10 +7,10 @@
 <meta name="description" content="Remitos, facturas, recibos y notas de crédito y débito de Intellihelp.">
 <meta name="robots" content="noindex, nofollow">
 <title>Remitos y Comprobantes · Intellihelp</title>
-<link rel="stylesheet" href="css/fuentes.css?v=247">
+<link rel="stylesheet" href="css/fuentes.css?v=248">
 <link rel="icon" href="assets/logos/favicon.png">
-<link rel="stylesheet" href="css/styles.css?v=247">
-<link rel="stylesheet" href="css/controles.css?v=247">
+<link rel="stylesheet" href="css/styles.css?v=248">
+<link rel="stylesheet" href="css/controles.css?v=248">
 </head>
 <body data-view="inicio" class="sin-sesion">
 <div class="app">
@@ -102,6 +102,8 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Guardados</span></button>
         <button class="btn ghost" id="tbCompPdf" title="Descargar en PDF">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span>PDF</span></button>
+        <button class="btn ghost" id="tbCompCorreo" title="Enviar el comprobante emitido por correo electrónico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg><span>Correo</span></button>
         <button class="btn ghost" id="tbCompTest" title="Imprimir una prueba con datos ficticios">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/></svg><span>Prueba</span></button>
         <button class="btn ghost" id="tbCompEmitir" hidden title="Guarda el comprobante y solicita el CAE a ARCA">
@@ -131,7 +133,7 @@
         <div class="card">
           <div class="card-head">
             <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Documentos recientes <em class="count" id="recentCount" hidden></em></h2>
-            <div class="actions"><button class="btn sm" id="btnGestionar" title="Exportar o importar una copia de seguridad">Copia de seguridad</button></div>
+            <div class="actions"><button class="btn sm" id="btnVerTodos" title="Todos los remitos guardados, con búsqueda">Ver todos</button><button class="btn sm solo-admin" id="btnGestionar" title="Exportar o importar una copia de seguridad">Copia de seguridad</button></div>
           </div>
           <div class="doc-list" id="inicioRecent"></div>
         </div>
@@ -293,7 +295,8 @@
             </div>
             <ul class="cfg-list">
               <li>Impresión sobre el remito pre-impreso, calibrada al milímetro, o documento completo en papel en blanco o PDF.</li>
-              <li>Agenda de clientes con importación desde CSV o Excel.</li>
+              <li>Agenda de clientes en tabla, con importación desde CSV o Excel y vista previa antes de cargar.</li>
+              <li>Comprobantes y remitos enviados por correo desde la casilla de la empresa.</li>
               <li>Copia de seguridad: exportar e importar todos los datos en un archivo.</li>
             </ul>
             <div class="cfg-actions">
@@ -330,7 +333,7 @@
             <div class="cfg-alert" id="apiAlert" hidden></div>
             <div class="cfg-actions">
               <button class="btn primary" id="apiSave">Guardar</button>
-              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=247" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
+              <a class="btn ghost" href="docs/guia-credenciales-arca.pdf?v=248" target="_blank" rel="noopener">Instructivo de alta en ARCA (PDF)</a>
             </div>
           </div>
 
@@ -388,7 +391,7 @@
           </div>
           <span class="panel-count" id="cliCount"></span>
         </div>
-        <div class="cli-grid" id="cliGrid"></div>
+        <div class="cli-tabla-wrap" id="cliGrid"></div>
       </div>
     </section>
 
@@ -423,12 +426,12 @@
     <p class="cal-mode-wrap">Ajustando: <span class="cal-mode ov" id="calModeBadge">Sobre pre-impreso</span></p>
     <p class="hint">Cada modo guarda su propia calibración: lo que se mueve en el documento completo no afecta al pre-impreso.</p>
     <div class="row"><label for="calPaper">Tamaño de papel</label><select id="calPaper" class="select-sm"></select></div>
-    <div class="row"><label for="calOffX">Desplazamiento horizontal (mm)</label><div class="slider"><input type="range" id="calOffX" min="-20" max="20" step="0.5"><output id="calOffXv"></output></div></div>
-    <div class="row"><label for="calOffY">Desplazamiento vertical (mm)</label><div class="slider"><input type="range" id="calOffY" min="-20" max="20" step="0.5"><output id="calOffYv"></output></div></div>
-    <div class="row"><label for="calScaleX">Escala horizontal (%)</label><div class="slider"><input type="range" id="calScaleX" min="90" max="110" step="0.25"><output id="calScaleXv"></output></div></div>
-    <div class="row"><label for="calScaleY">Escala vertical (%)</label><div class="slider"><input type="range" id="calScaleY" min="90" max="110" step="0.25"><output id="calScaleYv"></output></div></div>
-    <div class="row"><label for="calFont">Tamaño de letra (%)</label><div class="slider"><input type="range" id="calFont" min="80" max="130" step="1"><output id="calFontv"></output></div></div>
-    <div class="row"><label for="calGuide">Opacidad del formulario guía (%)</label><div class="slider"><input type="range" id="calGuide" min="0" max="70" step="1"><output id="calGuidev"></output></div></div>
+    <div class="row"><label for="calOffX">Desplazamiento horizontal (mm)</label><div class="slider"><input type="range" id="calOffX" min="-20" max="20" step="0.5"><span class="cal-num"><input id="calOffXv" type="text" inputmode="decimal" maxlength="6" aria-label="Valor exacto (mm, de -20 a 20)"><span>mm</span></span></div></div>
+    <div class="row"><label for="calOffY">Desplazamiento vertical (mm)</label><div class="slider"><input type="range" id="calOffY" min="-20" max="20" step="0.5"><span class="cal-num"><input id="calOffYv" type="text" inputmode="decimal" maxlength="6" aria-label="Valor exacto (mm, de -20 a 20)"><span>mm</span></span></div></div>
+    <div class="row"><label for="calScaleX">Escala horizontal (%)</label><div class="slider"><input type="range" id="calScaleX" min="90" max="110" step="0.25"><span class="cal-num"><input id="calScaleXv" type="text" inputmode="decimal" maxlength="6" aria-label="Valor exacto (%, de 90 a 110)"><span>%</span></span></div></div>
+    <div class="row"><label for="calScaleY">Escala vertical (%)</label><div class="slider"><input type="range" id="calScaleY" min="90" max="110" step="0.25"><span class="cal-num"><input id="calScaleYv" type="text" inputmode="decimal" maxlength="6" aria-label="Valor exacto (%, de 90 a 110)"><span>%</span></span></div></div>
+    <div class="row"><label for="calFont">Tamaño de letra (%)</label><div class="slider"><input type="range" id="calFont" min="80" max="130" step="1"><span class="cal-num"><input id="calFontv" type="text" inputmode="decimal" maxlength="6" aria-label="Valor exacto (%, de 80 a 130)"><span>%</span></span></div></div>
+    <div class="row"><label for="calGuide">Opacidad del formulario guía (%)</label><div class="slider"><input type="range" id="calGuide" min="0" max="70" step="1"><span class="cal-num"><input id="calGuidev" type="text" inputmode="decimal" maxlength="6" aria-label="Valor exacto (%, de 0 a 70)"><span>%</span></span></div></div>
     <p class="hint">Para calibrar: imprimí la hoja de prueba sobre un remito pre-impreso y ajustá el desplazamiento hasta que todo coincida. Imprimí con márgenes en cero y sin «ajustar a la página».</p>
   </div>
   <div class="calib-foot">
@@ -553,7 +556,7 @@
     </div>
     <div class="inline-row mt-sm">
       <button class="btn sm" type="button" id="digitalCompartir">Compartir</button>
-      <a class="btn sm" id="digitalCorreo" href="#">Enviar por correo</a>
+      <button class="btn sm" type="button" id="digitalCorreo">Enviar por correo</button>
       <button class="btn sm" type="button" id="digitalRenovar">Generar un enlace nuevo</button>
     </div>
     <p class="hint">El enlace vence a los 60 días. Generar uno nuevo invalida el anterior.</p>
@@ -561,6 +564,47 @@
   <div class="calib-foot">
     <button class="btn primary" type="button" id="digitalPdf">Descargar PDF digital</button>
     <button class="btn ghost" type="button" id="digitalCancelar">Cerrar</button>
+  </div>
+</aside>
+
+<!-- ======================= Vista previa de la importación ======================= -->
+<div class="backdrop" id="backdrop10"></div>
+<aside class="calib wide" id="importModal" aria-labelledby="importTitulo">
+  <div class="calib-head">
+    <h3 id="importTitulo">Importar clientes</h3>
+    <button class="btn ghost icon" id="importClose" type="button" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="calib-body">
+    <div class="import-resumen" id="importResumen"></div>
+    <div class="cli-tabla-wrap" id="importTabla"></div>
+  </div>
+  <div class="calib-foot">
+    <button class="btn primary" type="button" id="importConfirmar">Importar</button>
+    <button class="btn ghost" type="button" id="importCancelar">Cancelar</button>
+  </div>
+</aside>
+
+<!-- =========================== Enviar por correo =========================== -->
+<div class="backdrop" id="backdrop9"></div>
+<aside class="calib" id="correoModal" aria-labelledby="correoTitulo">
+  <div class="calib-head">
+    <h3 id="correoTitulo">Enviar por correo</h3>
+    <button class="btn ghost icon" id="correoClose" type="button" aria-label="Cerrar">✕</button>
+  </div>
+  <form class="calib-body" id="correoForm" novalidate>
+    <p class="correo-doc" id="correoDoc"></p>
+    <div class="field full"><label for="correoPara">Para</label>
+      <input id="correoPara" type="text" inputmode="email" autocomplete="off" maxlength="600" placeholder="cliente@empresa.com.ar" required>
+      <p class="hint">Hasta 5 direcciones, separadas por coma. Las respuestas te llegan a vos.</p></div>
+    <div class="field full"><label for="correoMensaje">Mensaje</label><textarea id="correoMensaje" rows="5" maxlength="2000"></textarea></div>
+    <div class="field full"><label>PDF adjunto <span class="note">(opcional, hasta 3 MB)</span></label>
+      <div class="file-pick"><input type="file" id="correoPdf" accept="application/pdf,.pdf"><label for="correoPdf" class="btn sm">Elegir PDF</label><span class="file-name" data-for="correoPdf">Ningún archivo elegido</span></div>
+      <p class="hint">Descargalo antes con «PDF» (en el diálogo de impresión, «Guardar como PDF»). El correo ya lleva el detalle y, si tiene CAE, el enlace para verificarlo en ARCA.</p></div>
+    <label class="check full"><input type="checkbox" id="correoCopia" checked> Enviarme una copia</label>
+  </form>
+  <div class="calib-foot">
+    <button class="btn primary" type="submit" form="correoForm" id="correoEnviar">Enviar</button>
+    <button class="btn ghost" type="button" id="correoCancelar">Cancelar</button>
   </div>
 </aside>
 
@@ -635,12 +679,12 @@
 
 <div class="toast" id="toast" aria-live="polite"></div>
 
-<script src="js/controles.js?v=247"></script>
-<script src="js/dialogo.js?v=247"></script>
-<script src="js/config.js?v=247"></script>
-<script src="js/calculos.js?v=247"></script>
-<script src="js/lib/qrcode.js?v=247"></script>
-<script src="js/app.js?v=247"></script>
-<script src="js/servidor.js?v=247"></script>
+<script src="js/controles.js?v=248"></script>
+<script src="js/dialogo.js?v=248"></script>
+<script src="js/config.js?v=248"></script>
+<script src="js/calculos.js?v=248"></script>
+<script src="js/lib/qrcode.js?v=248"></script>
+<script src="js/app.js?v=248"></script>
+<script src="js/servidor.js?v=248"></script>
 </body>
 </html>

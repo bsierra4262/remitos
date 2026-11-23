@@ -106,6 +106,7 @@ jobs:
       REMITOS_DB_PORT: '3306'
       REMITOS_DB_PASS: testroot
       REMITOS_DB: remitos_test
+      REMITOS_CORREO_DIR: /tmp/correo
     steps:
       - uses: actions/checkout@v4
 
@@ -144,6 +145,7 @@ jobs:
 
       - name: Servidor
         run: |
+          mkdir -p "$REMITOS_CORREO_DIR"
           php -S 127.0.0.1:8765 -t app > /tmp/php-server.log 2>&1 &
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null && break; sleep 1; done
           curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null || { cat /tmp/php-server.log; exit 1; }

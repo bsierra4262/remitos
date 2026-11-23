@@ -15,6 +15,7 @@ Los datos son ficticios: clientes, CUIT y CAE de ejemplo.
 import argparse
 import os
 import sys
+import tempfile
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(RAIZ, 'test'))
@@ -37,9 +38,20 @@ CLIENTES = [
      'domicilio': 'Tucumán 1580 3° B', 'localidad': 'CABA', 'cp': 'C1050', 'telefono': '11 4371-2290',
      'mail': 'estudio@arias.com.ar', 'nombre': 'Marcela Arias'},
 ]
-ITEMS = [{'descripcion': 'Soporte técnico mensual — 40 horas', 'cantidad': '1', 'precio': '1.200.000'},
-         {'descripcion': 'Reparación de control de acceso biométrico', 'cantidad': '2', 'precio': '135.000'},
-         {'descripcion': 'Materiales (cableado, fichas, canaleta)', 'cantidad': '1', 'precio': '48.750,50'}]
+ITEMS = [{'codigo': 'SOP-40', 'descripcion': 'Soporte técnico mensual', 'cantidad': '40', 'unidad': 'horas',
+          'precio': '30.000', 'alicuota': '21'},
+         {'codigo': 'BIO-F22', 'descripcion': 'Reparación de control de acceso biométrico', 'cantidad': '2',
+          'unidad': 'unidades', 'precio': '135.000', 'bonif': '10', 'alicuota': '21'},
+         {'codigo': 'MAT-01', 'descripcion': 'Materiales (cableado, fichas, canaleta)', 'cantidad': '1',
+          'unidad': 'unidades', 'precio': '48.750,50', 'alicuota': '21'},
+         {'codigo': 'MAN-02', 'descripcion': 'Manual técnico impreso de la instalación', 'cantidad': '2',
+          'unidad': 'unidades', 'precio': '18.000', 'alicuota': '10.5'}]
+IMPORTAR = ('Razón Social,CUIT,Condición frente al IVA,Localidad\n'
+            'LOGÍSTICA ANDINA S.R.L.,30-71589630-9,Responsable Inscripto,Mendoza\n'
+            'DISTRIBUIDORA DEL SUR S.A.,30-50001091-2,Responsable Inscripto,CABA\n'
+            'FERRETERÍA EL TORNILLO,20-30123456-3,Monotributo,Rosario\n'
+            'CLÍNICA SAN MARTÍN S.A.,30-12345678-0,IVA Exento,Córdoba\n'
+            ',,,\n')
 CAI = '75041234567890'
 
 
@@ -101,8 +113,9 @@ def preparar():
                                'cliente': cli, 'items': [{'descripcion': 'Bonificación por demora en el servicio', 'cantidad': '1', 'precio': '120.000'}],
                                'compAsoc': {'tipo': 'Factura', 'letra': 'A', 'pv': '3', 'nro': '158'},
                                'servDesde': '01/11/2026', 'servHasta': '30/11/2026', 'vtoPago': '21/12/2026'}, '7', '86471092872208')
-    ids['recibo'] = comprobante({'tipo': 'recibo', 'letra': 'X', 'cliente': cli, 'monto': '1.837.688,11',
-                                 'medioPago': 'Transferencia', 'concepto': 'Pago total de la Factura A 00003-00000158'})
+    ids['recibo'] = comprobante({'tipo': 'recibo', 'letra': 'X', 'cliente': cli, 'monto': '1.000.000,00',
+                                 'medioPago': 'Transferencia', 'concepto': 'Pago a cuenta de la Factura A 00003-00000158',
+                                 'cancela': [{'id': ids['factura'], 'importe': '1.000.000,00'}]})
     return ids
 
 
@@ -185,6 +198,13 @@ def capturar(salida, filtros):
 
         base.ir_a(pg, 'clientes', 900)
         foto(pg, 'clientes')
+        csv = os.path.join(tempfile.gettempdir(), 'clientes-nuevos.csv')
+        open(csv, 'w', encoding='utf-8').write(IMPORTAR)
+        pg.set_input_files('#cliImportFile', csv)
+        pg.wait_for_selector('#importModal.open')
+        pg.wait_for_timeout(400)
+        foto(pg, 'importar-clientes')
+        pg.evaluate('closePanels()')
 
         abrir_comp(pg, 'factura', ids['factura'])
         foto(pg, 'factura')
@@ -195,6 +215,11 @@ def capturar(salida, filtros):
         abrir_comp(pg, 'recibo', ids['recibo'])
         foto(pg, 'recibo')
         abrir_comp(pg, 'factura', ids['factura'])
+        pg.click('#tbCompCorreo')
+        pg.wait_for_selector('#correoModal.open')
+        pg.wait_for_timeout(400)
+        foto(pg, 'correo')
+        pg.evaluate('closePanels()')
         pg.click('#tbCompGuardados')
         foto(pg, 'comprobantes-guardados')
         pg.evaluate('closePanels()')

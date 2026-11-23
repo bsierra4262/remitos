@@ -26,7 +26,7 @@ except Exception:
 
 import base  # noqa: E402
 
-MODULOS_INTERFAZ = ["test_impresion", "test_formulario", "test_documentos", "test_inicio", "test_interfaz"]
+MODULOS_INTERFAZ = ["test_impresion", "test_formulario", "test_documentos", "test_inicio", "test_interfaz", "test_novedades"]
 MODULOS_API = ["test_api", "test_seguridad", "test_controles", "test_sesion", "test_cai", "test_normativa"]
 MODULOS = MODULOS_INTERFAZ + MODULOS_API
 

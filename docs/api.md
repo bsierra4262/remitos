@@ -194,6 +194,16 @@ Un remito autorizado no se elimina (`409`).
 
 Una factura puede llevar `remitoId` (el remito autorizado que factura): cuando obtiene el CAE en **producción**, el remito queda marcado como facturado. En homologación no se marca.
 
+**Renglones (`items`).** Cada renglón tiene `codigo` (opcional, hasta 30 caracteres), `descripcion`, `cantidad`, `unidad`, `precio`, `bonif` y `alicuota`:
+- `unidad`: `unidades`, `horas`, `servicio`, `kilogramos`, `gramos`, `metros`, `metros cuadrados`, `metros cúbicos`, `litros`, `pares`, `docenas` u `otras unidades`. Otro valor se guarda como `unidades`.
+- `bonif`: porcentaje de bonificación, de 0 a 100 (vacío = 0). El importe del renglón es cantidad × precio menos la bonificación, redondeado a centavos.
+- `alicuota`: la del renglón (0, 2,5, 5, 10,5, 21 o 27). Vacía, vale la `alicuota` del comprobante (los comprobantes guardados antes de esta opción).
+- El IVA se calcula **por alícuota**, sobre la suma de los renglones de cada una, y la emisión informa a ARCA un `AlicIva` por alícuota. Una bonificación o una alícuota inválidas responden `422` con el número de ítem.
+
+**Receptor (`cliente.docTipo`).** Tipo de documento de la tabla de ARCA: `80` CUIT, `86` CUIL, `96` DNI o `99` sin identificar (consumidor final). Con `99` no se guarda número. Si falta, se deduce por la cantidad de dígitos (11 → CUIT, 7 u 8 → DNI, ninguno → sin identificar). La emisión verifica que el número corresponda al tipo (dígito verificador del CUIT o CUIL; 7 u 8 dígitos del DNI) y responde `422` si no.
+
+**Recibo de cobranza (`cancela`).** Lista de `{id, importe}` con las facturas y notas de débito que cancela el recibo (hasta 30). Al guardar, el servidor verifica que cada una exista y esté emitida (con CAE, o X numerada), que el importe no supere su saldo (total menos lo que cancelan otros recibos) y que la suma no supere el `monto` del recibo; si algo no se cumple, responde `422`. Completa la `etiqueta` oficial de cada comprobante.
+
 **Importes.** El servidor recalcula siempre los totales (no confía en los que envía la interfaz) y los devuelve en `importes` (centavos). Se aceptan en formato argentino (`1.234,56`), con punto decimal (`1234.56`) o con punto de miles (`1.500`). Letra A: precios netos e IVA discriminado; letra B: precios con IVA incluido; X: sin IVA. La letra C no se admite (`422`): Intellihelp es Responsable Inscripto. Una letra no válida se toma como X. Alícuotas: 0, 2,5, 5, 10,5, 21 y 27 %. Un importe inválido responde `422`.
 
 **Numeración.**
@@ -207,6 +217,23 @@ Una factura puede llevar `remitoId` (el remito autorizado que factura): cuando o
 Campos para la emisión: `conceptoTipo` (1 productos, 2 servicios, 3 ambos), `servDesde`, `servHasta` y `vtoPago` (servicios; por defecto la fecha de emisión, y el vencimiento no puede ser anterior), `cliente.condIVA` (las condiciones oficiales listadas en remitos; una desconocida se toma como `Consumidor Final`, y tiene que corresponder a la letra: A para Responsable Inscripto y Monotributo, B para el resto, validación 10243 de ARCA) y, en las notas, `compAsoc` (`tipo`: `Factura`, `Nota de débito` o `Nota de crédito`; `letra` igual a la de la nota, `pv`, `nro`).
 
 **Factura de Crédito Electrónica MiPyME** (Ley 27.440): con `mipyme` y `cbu` en los ajustes del emisor, la emisión consulta a ARCA (WSFECRED) si el receptor está obligado a recibirla y si el importe alcanza el mínimo; en ese caso se emite como FCE (201/206) con el CBU, la opción de transferencia (SCA/ADC) y el vencimiento del pago. `fce: true` la pide explícitamente; `fceAnulacion` marca una nota de FCE como anulación. Requiere el CUIT del receptor. Si el servicio WSFECRED no está habilitado, se emite la factura común y la respuesta trae un `aviso`.
+
+## Envío por correo
+
+### `POST correo.php` — enviar un comprobante o un remito · sesión con permiso `crear`
+
+```json
+{ "tipo": "comprobante", "id": "…", "para": "compras@cliente.com.ar, pagos@cliente.com.ar",
+  "mensaje": "…", "copia": true, "pdf": "<base64>", "pdfNombre": "factura.pdf" }
+```
+
+- Solo con la sesión de un usuario: una clave de API recibe `401`.
+- `tipo: "comprobante"`: comprobantes emitidos (con CAE, o X guardados con número); un borrador responde `409`. El mensaje lleva el detalle, los totales por alícuota y, con CAE, el enlace de verificación de ARCA (el del código QR, RG 4892/2020).
+- `tipo: "remito"`: remitos autorizados; `enlace` (opcional) es el enlace de conformidad del remito digital, que tiene que ser de esta aplicación (`422` si no).
+- `para`: hasta 5 direcciones separadas por coma; una inválida responde `422`. Las respuestas van a quien lo envía (`Reply-To`) y `copia: true` le manda una copia.
+- `pdf`: el PDF descargado desde la aplicación, en base64, hasta 3 MB (`413`); un archivo que no es PDF responde `422`.
+- Máximo de 40 envíos por hora por usuario (`429`). Cada envío queda en la auditoría.
+- Sale con `mail()` del hosting y el remitente de `config.php` (`correo.remitente`), del dominio de la empresa, autorizado en su registro SPF. Si el servidor de correo no acepta el mensaje, responde `502`.
 
 ## Ajustes
 

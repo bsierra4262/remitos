@@ -1,56 +1,384 @@
 {
   "_descripcion": "Casos compartidos por las pruebas unitarias de app/js/calculos.js y api/lib/importes.php: los dos tienen que dar exactamente lo mismo.",
   "numeros": [
-    ["1.234,56", 1234.56],
-    ["1234,56", 1234.56],
-    ["1234.56", 1234.56],
-    ["1.500", 1500],
-    ["1.500.000", 1500000],
-    ["0,5", 0.5],
-    ["$ 2.000,00", 2000],
-    ["", 0],
-    ["12a", null],
-    ["1,2,3", null],
-    ["-5", null]
+    [
+      "1.234,56",
+      1234.56
+    ],
+    [
+      "1234,56",
+      1234.56
+    ],
+    [
+      "1234.56",
+      1234.56
+    ],
+    [
+      "1.500",
+      1500
+    ],
+    [
+      "1.500.000",
+      1500000
+    ],
+    [
+      "0,5",
+      0.5
+    ],
+    [
+      "$ 2.000,00",
+      2000
+    ],
+    [
+      "",
+      0
+    ],
+    [
+      "12a",
+      null
+    ],
+    [
+      "1,2,3",
+      null
+    ],
+    [
+      "-5",
+      null
+    ]
   ],
   "totales": [
     {
       "nombre": "Factura A con miles y coma",
-      "doc": { "letra": "A", "alicuota": "21", "items": [{ "cantidad": "2", "precio": "1.234,56" }] },
-      "centavos": { "neto": 246912, "iva": 51852, "total": 298764 }
+      "doc": {
+        "letra": "A",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "2",
+            "precio": "1.234,56"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 246912,
+        "iva": 51852,
+        "total": 298764
+      }
     },
     {
       "nombre": "Factura B: IVA incluido, se discrimina solo para ARCA",
-      "doc": { "letra": "B", "alicuota": "21", "items": [{ "cantidad": "1", "precio": "121" }] },
-      "centavos": { "neto": 10000, "iva": 2100, "total": 12100 }
+      "doc": {
+        "letra": "B",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "121"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 10000,
+        "iva": 2100,
+        "total": 12100
+      }
     },
     {
       "nombre": "Factura C sin IVA",
-      "doc": { "letra": "C", "alicuota": "21", "items": [{ "cantidad": "3", "precio": "1.000" }] },
-      "centavos": { "neto": 300000, "iva": 0, "total": 300000 }
+      "doc": {
+        "letra": "C",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "3",
+            "precio": "1.000"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 300000,
+        "iva": 0,
+        "total": 300000
+      }
     },
     {
       "nombre": "Redondeo por renglón (0,333 × 3)",
-      "doc": { "letra": "A", "alicuota": "10.5", "items": [{ "cantidad": "3", "precio": "0,333" }, { "cantidad": "1,5", "precio": "10,01" }] },
-      "centavos": { "neto": 1601, "iva": 168, "total": 1769 }
+      "doc": {
+        "letra": "A",
+        "alicuota": "10.5",
+        "items": [
+          {
+            "cantidad": "3",
+            "precio": "0,333"
+          },
+          {
+            "cantidad": "1,5",
+            "precio": "10,01"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 1601,
+        "iva": 168,
+        "total": 1769
+      }
     },
     {
       "nombre": "Recibo con monto en formato argentino",
-      "doc": { "tipo": "recibo", "letra": "X", "monto": "158.750,50" },
-      "centavos": { "neto": 15875050, "iva": 0, "total": 15875050 }
+      "doc": {
+        "tipo": "recibo",
+        "letra": "X",
+        "monto": "158.750,50"
+      },
+      "centavos": {
+        "neto": 15875050,
+        "iva": 0,
+        "total": 15875050
+      }
     },
     {
       "nombre": "Alícuota 27 % con decimales",
-      "doc": { "letra": "A", "alicuota": "27", "items": [{ "cantidad": "1", "precio": "999,99" }] },
-      "centavos": { "neto": 99999, "iva": 27000, "total": 126999 }
+      "doc": {
+        "letra": "A",
+        "alicuota": "27",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "999,99"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 99999,
+        "iva": 27000,
+        "total": 126999
+      }
+    },
+    {
+      "nombre": "Factura A con bonificación del 10 %",
+      "doc": {
+        "letra": "A",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "3",
+            "precio": "1.000",
+            "bonif": "10"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 270000,
+        "iva": 56700,
+        "total": 326700
+      },
+      "alicuotas": [
+        [
+          "21",
+          270000,
+          56700
+        ]
+      ]
+    },
+    {
+      "nombre": "Factura A con IVA por renglón (21 y 10,5)",
+      "doc": {
+        "letra": "A",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "1.000",
+            "alicuota": "21"
+          },
+          {
+            "cantidad": "2",
+            "precio": "500",
+            "alicuota": "10.5"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 200000,
+        "iva": 31500,
+        "total": 231500
+      },
+      "alicuotas": [
+        [
+          "21",
+          100000,
+          21000
+        ],
+        [
+          "10.5",
+          100000,
+          10500
+        ]
+      ]
+    },
+    {
+      "nombre": "Factura B con IVA por renglón: cada alícuota se discrimina aparte",
+      "doc": {
+        "letra": "B",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "121",
+            "alicuota": "21"
+          },
+          {
+            "cantidad": "1",
+            "precio": "110,50",
+            "alicuota": "10,5"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 20000,
+        "iva": 3150,
+        "total": 23150
+      },
+      "alicuotas": [
+        [
+          "21",
+          10000,
+          2100
+        ],
+        [
+          "10.5",
+          10000,
+          1050
+        ]
+      ]
+    },
+    {
+      "nombre": "Renglón sin alícuota propia: vale la del comprobante",
+      "doc": {
+        "letra": "A",
+        "alicuota": "10.5",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "100"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 10000,
+        "iva": 1050,
+        "total": 11050
+      },
+      "alicuotas": [
+        [
+          "10.5",
+          10000,
+          1050
+        ]
+      ]
+    },
+    {
+      "nombre": "Bonificación con coma y renglón exento al 0 %",
+      "doc": {
+        "letra": "A",
+        "alicuota": "21",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "200",
+            "bonif": "12,5"
+          },
+          {
+            "cantidad": "1",
+            "precio": "50",
+            "alicuota": "0"
+          }
+        ]
+      },
+      "centavos": {
+        "neto": 22500,
+        "iva": 3675,
+        "total": 26175
+      },
+      "alicuotas": [
+        [
+          "21",
+          17500,
+          3675
+        ],
+        [
+          "0",
+          5000,
+          0
+        ]
+      ]
     }
   ],
   "cuit": [
-    ["20-12345678-6", true],
-    ["30-50001091-2", true],
-    ["30-71140975-7", true],
-    ["30-12345678-0", false],
-    ["2012345678", false],
-    ["", false]
+    [
+      "20-12345678-6",
+      true
+    ],
+    [
+      "30-50001091-2",
+      true
+    ],
+    [
+      "30-71140975-7",
+      true
+    ],
+    [
+      "30-12345678-0",
+      false
+    ],
+    [
+      "2012345678",
+      false
+    ],
+    [
+      "",
+      false
+    ]
+  ],
+  "invalidos": [
+    {
+      "nombre": "bonificación mayor a 100",
+      "doc": {
+        "letra": "A",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "1",
+            "bonif": "120"
+          }
+        ]
+      }
+    },
+    {
+      "nombre": "bonificación con letras",
+      "doc": {
+        "letra": "A",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "1",
+            "bonif": "diez"
+          }
+        ]
+      }
+    },
+    {
+      "nombre": "alícuota de renglón inexistente",
+      "doc": {
+        "letra": "A",
+        "items": [
+          {
+            "cantidad": "1",
+            "precio": "1",
+            "alicuota": "19"
+          }
+        ]
+      }
+    }
   ]
 }

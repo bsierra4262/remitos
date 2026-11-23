@@ -45,6 +45,7 @@ Algunas pruebas limpian en la base local datos que la API protege a propósito (
 | `REMITOS_DB` | `remitos_test` | Base de pruebas |
 | `REMITOS_DB_PORT` | `3307` | Puerto del servidor de pruebas |
 | `REMITOS_DB_PASS` | `testroot` | Contraseña de `root` en el servidor de pruebas |
+| `REMITOS_CORREO_DIR` | — | Carpeta donde el servidor de pruebas escribe los correos como `.eml` en lugar de enviarlos (el servidor `php -S` tiene que arrancar con la misma variable). Sin ella, los casos de correo se omiten |
 | `REMITOS_SIN_RED` | — | `1` omite (y lo informa) el caso que firma contra WSAA de homologación; sin esta variable, la falta de conexión con ARCA hace fallar el caso |
 
 Ejemplo en Linux: `REMITOS_MYSQL=mysql REMITOS_DB_PORT=3306 REMITOS_DB_PASS=secreto python test/correr.py`.
@@ -77,6 +78,7 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_documentos.py` | Instructivo en PDF y remito en documento completo |
 | `test_inicio.py` | Inicio, paginado, recuperación de borradores e indicador de conexión |
 | `test_interfaz.py` | Fechas, atajos, numeración, CAE por comprobante, Factura de Crédito MiPyME y recibo de cobranza impresos, copias de seguridad, certificado (archivo o texto pegado), respaldo, celular |
+| `test_novedades.py` | IVA, bonificación, código y unidad por renglón (servidor y editor), tipo de documento del receptor, recibo que cancela facturas sin pasar su saldo, envío por correo (sesión, documentos emitidos, direcciones, PDF, inyección de cabeceras), agenda en tabla, vista previa de la importación, calibración con valor exacto y acciones de Inicio en el celular |
 | `test_api.py` | Autenticación, permisos y ciclo de vida de las claves, auditoría |
 | `test_seguridad.py` | Credenciales de ARCA (incluida la firma contra WSAA y el certificado de un representante), reglas oficiales de emisión antes de pedir el CAE (letra según la condición frente al IVA, identificación del consumidor final, nota sin asociado, letra C, recibo con CAE, Factura de Crédito MiPyME), validación de datos, cabeceras, archivos internos |
 | `test_controles.py` | Integridad de la auditoría ante un evento alterado, freno de claves de API (429), permisos de exportación y de registro de CAE externo, CORS con origen ajeno, importación de clientes (CUIT inválido y reimportación sin duplicados), vínculo factura → remito |

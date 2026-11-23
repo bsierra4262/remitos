@@ -13,7 +13,7 @@
  */
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 
 /* Sistema de coordenadas de calibración (mm). Los % de los campos se
    interpretan SIEMPRE sobre este alto/ancho de referencia, sin importar el

@@ -425,7 +425,7 @@ def facturar_remito_y_nota_asociada():
             return { boton, letra: f.letra, remitoId: f.remitoId, item: f.items[0], obs: f.observaciones, opcion,
                      asoc: n.compAsoc, itemsNota: n.items.length };
         }""")
-        ok = (r["boton"] and r["letra"] == "A" and r["remitoId"] == "aaaaaaaaaaaaaaaa" and r["item"]["descripcion"] == "A1 · Router"
+        ok = (r["boton"] and r["letra"] == "A" and r["remitoId"] == "aaaaaaaaaaaaaaaa" and r["item"]["descripcion"] == "Router" and r["item"]["codigo"] == "A1"
               and r["item"]["cantidad"] == "2" and "00001-00000007" in r["obs"] and r["opcion"]
               and r["asoc"] == {"tipo": "Factura", "letra": "A", "pv": "00003", "nro": "00000042"} and r["itemsNota"] == 1
               and not errores)

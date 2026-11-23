@@ -103,21 +103,22 @@ function api_error(int $code, string $message, array $extra = []): never
 }
 
 /**
- * Devuelve el cuerpo JSON de la petición como arreglo asociativo.
+ * Devuelve el cuerpo JSON de la petición como arreglo asociativo (hasta $max bytes; el
+ * envío por correo admite más para el PDF adjunto).
  *
  * @return array<string, mixed>
  */
-function api_body(): array
+function api_body(int $max = API_MAX_BODY): array
 {
     static $body = null;
     if ($body !== null) {
         return $body;
     }
-    $raw = file_get_contents('php://input', false, null, 0, API_MAX_BODY + 1);
+    $raw = file_get_contents('php://input', false, null, 0, $max + 1);
     if ($raw === false || $raw === '') {
         api_error(400, 'El cuerpo de la petición está vacío');
     }
-    if (strlen($raw) > API_MAX_BODY) {
+    if (strlen($raw) > $max) {
         api_error(413, 'El cuerpo de la petición es demasiado grande');
     }
     $data = json_decode($raw, true);

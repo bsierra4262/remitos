@@ -32,7 +32,17 @@ test('totales de comprobantes en centavos', () => {
     const t = c.compTotals(caso.doc);
     assert.deepEqual(t.centavos, caso.centavos, caso.nombre);
     assert.deepEqual(t.errores, [], caso.nombre);
+    if (caso.alicuotas)
+      assert.deepEqual(
+        t.alicuotas.map(x => [x.alicuota, x.centavos.neto, x.centavos.iva]),
+        caso.alicuotas,
+        caso.nombre + ' (por alícuota)'
+      );
   }
+});
+
+test('bonificación o alícuota de renglón inválidas se informan', () => {
+  for (const caso of casos.invalidos) assert.equal(c.compTotals(caso.doc).errores.length, 1, caso.nombre);
 });
 
 test('un importe inválido se informa como error y no suma', () => {
@@ -45,6 +55,7 @@ test('un importe inválido se informa como error y no suma', () => {
 test('subtotal de un renglón redondeado a centavos', () => {
   assert.equal(c.subtotalItem({ cantidad: '2', precio: '1.234,56' }), 2469.12);
   assert.equal(c.subtotalItem({ cantidad: 'x', precio: '1' }), 0);
+  assert.equal(c.subtotalItem({ cantidad: '3', precio: '1.000', bonif: '10' }), 2700);
 });
 
 test('montos en letras', () => {

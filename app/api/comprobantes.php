@@ -63,6 +63,35 @@ const COMP_LOCK = 'remitos_comprobantes';
  */
 const COMP_IDENTIFICAR_CF_DESDE = 1000000000;
 
+/** Tipos de documento del receptor (tabla de ARCA): CUIT, CUIL, DNI y sin identificar. */
+const COMP_DOC_TIPOS = [80 => 'CUIT', 86 => 'CUIL', 96 => 'DNI', 99 => 'Sin identificar'];
+
+/**
+ * Tipo y número de documento del receptor para ARCA. Si el comprobante no indica el tipo
+ * (los guardados antes de existir el selector), se deduce por la cantidad de dígitos.
+ *
+ * @return array{0: int, 1: string}
+ */
+function comp_documento(array $cliente): array
+{
+    $digits = preg_replace('/\D/', '', (string) ($cliente['cuit'] ?? ''));
+    $tipo = (int) ($cliente['docTipo'] ?? 0);
+    if (!isset(COMP_DOC_TIPOS[$tipo])) {
+        $tipo = strlen($digits) === 11 ? 80 : (strlen($digits) === 7 || strlen($digits) === 8 ? 96 : 99);
+    }
+    if ($tipo === 99) {
+        return [99, '0'];
+    }
+    if (($tipo === 80 || $tipo === 86) && !api_cuit_valid($digits)) {
+        api_error(422, 'El ' . COMP_DOC_TIPOS[$tipo] . ' del cliente no es válido: revisá los 11 dígitos');
+    }
+    if ($tipo === 96 && !preg_match('/^\d{7,8}$/', $digits)) {
+        api_error(422, 'El DNI del cliente tiene que tener 7 u 8 dígitos');
+    }
+
+    return [$tipo, $digits];
+}
+
 /** Concepto de WSFEv1: 1 productos, 2 servicios, 3 productos y servicios. */
 const COMP_CONCEPTOS = [1, 2, 3];
 
@@ -100,12 +129,18 @@ function comp_from_input(array $body): array
     $items = [];
     foreach (array_slice(is_array($body['items'] ?? null) ? $body['items'] : [], 0, COMP_MAX_ITEMS) as $item) {
         if (is_array($item)) {
+            $unidad = $str($item['unidad'] ?? '', 30);
             $row = [
+                'codigo' => $str($item['codigo'] ?? '', 30),
                 'descripcion' => $str($item['descripcion'] ?? '', 300),
                 'cantidad' => $str($item['cantidad'] ?? '', 12),
+                'unidad' => in_array($unidad, IMPORTE_UNIDADES, true) ? $unidad : 'unidades',
                 'precio' => $str($item['precio'] ?? '', 16),
+                'bonif' => $str($item['bonif'] ?? '', 8),
+                'alicuota' => $str($item['alicuota'] ?? '', 5),
             ];
-            if (implode('', $row) !== '') {
+            // Un renglón sin código, descripción ni importes no se guarda.
+            if ($row['codigo'] . $row['descripcion'] . $row['precio'] !== '') {
                 $items[] = $row;
             }
         }
@@ -132,7 +167,10 @@ function comp_from_input(array $body): array
         'fecha' => $date($body['fecha'] ?? '', 'fecha del comprobante', true),
         'cliente' => [
             'razonSocial' => $str($client['razonSocial'] ?? '', 160),
-            'cuit' => api_require_cuit($str($client['cuit'] ?? '', 13), 'CUIT del cliente', true),
+            'docTipo' => isset(COMP_DOC_TIPOS[(int) ($client['docTipo'] ?? 0)]) ? (int) $client['docTipo'] : 0,
+            // Sin identificar (99): no se guarda ningún número.
+            'cuit' => (int) ($client['docTipo'] ?? 0) === 99 ? ''
+                : api_require_cuit($str($client['cuit'] ?? '', 13), 'CUIT del cliente', true),
             'condIVA' => isset(IVA_CONDICIONES[$condIva]) ? $condIva : 'Consumidor Final',
             'domicilio' => $str($client['domicilio'] ?? '', 160),
             'localidad' => $str($client['localidad'] ?? '', 80),
@@ -159,9 +197,95 @@ function comp_from_input(array $body): array
         'fceAnulacion' => api_bool($body['fceAnulacion'] ?? false),
         // Remito que factura esta factura («Facturar este remito»): al autorizarse en
         // producción, el remito queda marcado como facturado.
+        // Recibo: facturas y notas de débito que cancela, con el importe que se paga de cada una.
+        'cancela' => $type === 'recibo' ? comp_cancela_input($body['cancela'] ?? null) : [],
         'remitoId' => $type === 'factura' && preg_match('/^[0-9a-f]{16}$/', (string) ($body['remitoId'] ?? ''))
             ? (string) $body['remitoId'] : '',
     ];
+}
+
+/** Máximo de comprobantes que cancela un recibo. */
+const COMP_CANCELA_MAX = 30;
+
+/**
+ * Lista de comprobantes que cancela un recibo, con forma controlada (la etiqueta y el
+ * saldo los completa el servidor al guardar, con comp_cancela_validar()).
+ *
+ * @return array<int, array{id: string, importe: string, etiqueta: string}>
+ */
+function comp_cancela_input(mixed $list): array
+{
+    $out = [];
+    foreach (array_slice(is_array($list) ? $list : [], 0, COMP_CANCELA_MAX) as $item) {
+        $id = is_array($item) ? (string) ($item['id'] ?? '') : '';
+        if (preg_match('/^[0-9a-f]{16}$/', $id) && !isset($out[$id])) {
+            $out[$id] = [
+                'id' => $id,
+                'importe' => api_str($item['importe'] ?? '', 16),
+                'etiqueta' => api_str($item['etiqueta'] ?? '', 80),
+            ];
+        }
+    }
+
+    return array_values($out);
+}
+
+/** Lo ya cobrado de un comprobante con otros recibos (en centavos). */
+function comp_cobrado(PDO $pdo, string $id, string $exceptReceipt): int
+{
+    $st = $pdo->prepare("SELECT data FROM comprobantes WHERE tipo = 'recibo' AND id <> ? AND data LIKE ?");
+    $st->execute([$exceptReceipt, '%' . $id . '%']);
+    $paid = 0;
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $json) {
+        foreach ((array) ((json_decode((string) $json, true) ?: [])['cancela'] ?? []) as $c) {
+            if (($c['id'] ?? '') === $id) {
+                $paid += importe_centavos($c['importe'] ?? '') ?? 0;
+            }
+        }
+    }
+
+    return $paid;
+}
+
+/**
+ * Valida los comprobantes que cancela un recibo: tienen que existir, ser facturas o notas
+ * de débito ya emitidas (con CAE, o X numeradas) y no cobrarse por encima de su saldo. La
+ * suma no puede superar el monto del recibo. Devuelve la lista con la etiqueta oficial.
+ */
+function comp_cancela_validar(PDO $pdo, array $doc, string $receiptId): array
+{
+    $list = [];
+    $sum = 0;
+    foreach ($doc['cancela'] as $c) {
+        $row = comp_find($pdo, $c['id']);
+        if ($row === null) {
+            api_error(422, 'Uno de los comprobantes que cancela el recibo ya no existe');
+        }
+        $label = comp_label($row);
+        $isDebit = $row['tipo'] === 'factura' || ($row['tipo'] === 'nota' && $row['subtipo'] === 'debito');
+        $issued = $row['estado'] === 'autorizado' || ($row['letra'] === 'X' && (string) $row['numero'] !== '');
+        if (!$isDebit || !$issued) {
+            api_error(422, $label . ' no se puede cancelar con un recibo: tiene que ser una factura o nota de débito emitida');
+        }
+        $amount = importe_centavos($c['importe']);
+        if ($amount === null || $amount <= 0) {
+            api_error(422, 'El importe que se cancela de ' . $label . ' no es válido');
+        }
+        $total = importe_totales(json_decode((string) $row['data'], true) ?: [])['total'];
+        $balance = $total - comp_cobrado($pdo, $row['id'], $receiptId);
+        if ($amount > $balance) {
+            api_error(422, 'De ' . $label . ' quedan $ ' . number_format($balance / 100, 2, ',', '.')
+                . ' por cobrar: el recibo no puede cancelar más que eso');
+        }
+        $sum += $amount;
+        $list[] = ['id' => $row['id'], 'importe' => $c['importe'], 'etiqueta' => $label, 'fecha' => (string) (json_decode((string) $row['data'], true)['fecha'] ?? '')];
+    }
+    $amountReceipt = importe_centavos($doc['monto']) ?? 0;
+    if ($sum > $amountReceipt) {
+        api_error(422, 'Lo que cancela el recibo ($ ' . number_format($sum / 100, 2, ',', '.') . ') supera su monto');
+    }
+
+    return $list;
 }
 
 /** Punto de venta con 5 dígitos (por defecto 00001). */
@@ -260,14 +384,7 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
         api_error(422, 'El comprobante no tiene importe: cargá al menos un ítem con cantidad y precio');
     }
 
-    $digits = preg_replace('/\D/', '', $doc['cliente']['cuit']);
-    if (strlen($digits) === 11) {
-        [$docTipo, $docNro] = [80, $digits];
-    } elseif (strlen($digits) === 7 || strlen($digits) === 8) {
-        [$docTipo, $docNro] = [96, $digits];
-    } else {
-        [$docTipo, $docNro] = [99, '0'];
-    }
+    [$docTipo, $docNro] = comp_documento($doc['cliente']);
     if ($doc['letra'] === 'A' && $docTipo !== 80) {
         api_error(422, 'Un comprobante A requiere el CUIT del cliente');
     }
@@ -297,7 +414,10 @@ function comp_cae_detail(PDO $pdo, array $doc, array $emisor, int $number, strin
         'alicuotas' => [],
         'asociados' => [],
     ];
-    $detail['alicuotas'][] = ['id' => IVA_ALICUOTAS[$totals['alicuota']], 'base' => $totals['neto'], 'importe' => $totals['iva']];
+    // Un AlicIva por alícuota usada en los renglones (BaseImp y Importe de cada una).
+    foreach ($totals['alicuotas'] as $a) {
+        $detail['alicuotas'][] = ['id' => IVA_ALICUOTAS[$a['alicuota']], 'base' => $a['neto'], 'importe' => $a['iva']];
+    }
     if ($concept !== 1) {
         // Sin fechas cargadas, el período y el vencimiento son el día de la emisión ($date),
         // no el del borrador: ARCA exige que el vencimiento no sea anterior al comprobante.
@@ -702,6 +822,9 @@ if ($method === 'POST') {
             api_error(409, comp_label($existing) . ($existing['estado'] === 'autorizado'
                 ? ' ya está autorizado y no se puede modificar. Para corregirlo, emití una nota de crédito.'
                 : ' tiene una emisión en curso. Volvé a intentar la emisión.'), ['comprobante' => comp_public($existing)]);
+        }
+        if ($doc['cancela'] !== []) {
+            $doc['cancela'] = comp_cancela_validar($pdo, $doc, (string) ($existing['id'] ?? ''));
         }
 
         $series = [$doc['tipo'], $doc['subtipo'], $doc['letra'], $doc['ptoVenta']];

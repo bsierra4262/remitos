@@ -74,7 +74,7 @@ El formulario se completa a la izquierda y la vista previa se actualiza en el ac
 
 ### Facturas, recibos y notas
 
-Diseño tomado de los comprobantes que emite ARCA: banda de ejemplar, letra y código, emisor, receptor, detalle, totales con IVA discriminado en la letra A (e «IVA contenido» en la B, Ley 27.743) y pie con CAE y QR fiscal. Sin CAE, el documento se imprime marcado «SIN AUTORIZAR».
+Diseño tomado de los comprobantes que emite ARCA: banda de ejemplar, letra y código, emisor, receptor, detalle con código, unidad, bonificación y alícuota de cada renglón, totales con el IVA de cada alícuota en la letra A (e «IVA contenido» en la B, Ley 27.743) y pie con CAE y QR fiscal. Sin CAE, el documento se imprime marcado «SIN AUTORIZAR». El recibo detalla las facturas que cancela.
 
 <table>
   <tr>
@@ -84,6 +84,10 @@ Diseño tomado de los comprobantes que emite ARCA: banda de ejemplar, letra y c�
   <tr>
     <td width="50%"><b>Nota de crédito asociada a una factura</b><br><img src="docs/imagenes/capturas/nota-credito.png" alt="Nota de crédito"></td>
     <td width="50%"><b>Recibo de cobranza (no válido como factura)</b><br><img src="docs/imagenes/capturas/recibo.png" alt="Recibo"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Envío por correo, con el PDF adjunto</b><br><img src="docs/imagenes/capturas/correo.png" alt="Envío por correo"></td>
+    <td width="50%"><b>Vista previa de la importación de clientes</b><br><img src="docs/imagenes/capturas/importar-clientes.png" alt="Importar clientes"></td>
   </tr>
   <tr>
     <td width="50%"><b>Comprobantes guardados, con importe y estado</b><br><img src="docs/imagenes/capturas/comprobantes-guardados.png" alt="Comprobantes guardados"></td>
@@ -157,8 +161,11 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 ### Facturas, recibos y notas de crédito y débito
 - Letras **A y B**, las que emite Intellihelp como Responsable Inscripto (la C, de monotributistas y exentos, se rechaza), y X para documentos internos «no válidos como factura», con el código oficial de cada comprobante.
 - **Condición frente al IVA del receptor** con la tabla oficial de ARCA (RG 5616): la letra se ajusta sola (A para inscriptos y monotributistas, B para el resto) y se valida antes de pedir el CAE.
-- Ítems, alícuotas de IVA de la tabla de ARCA, concepto (productos o servicios con su período) y comprobante asociado obligatorio en las notas, **elegido de los comprobantes con CAE** (primero los del mismo cliente). Desde una factura autorizada, «Nota de crédito de este comprobante» arma la nota asociada.
-- **Recibo de cobranza** (RG 1415, art. 10): respalda el pago de una factura ya emitida, con importe en letras; no vale como factura ni lleva CAE.
+- Renglones con **código, unidad de medida, bonificación y alícuota de IVA propia**, con el subtotal de cada uno a la vista. El IVA se calcula por alícuota y ARCA recibe un importe por cada una; la factura A impresa muestra la alícuota y el subtotal con IVA de cada renglón y el IVA de cada tasa, como el diseño de ARCA.
+- **Tipo de documento del receptor** de la tabla de ARCA: CUIT, CUIL, DNI o consumidor final sin identificar.
+- Concepto (productos o servicios con su período) y comprobante asociado obligatorio en las notas, **elegido de los comprobantes con CAE** (primero los del mismo cliente). Desde una factura autorizada, «Nota de crédito de este comprobante» arma la nota asociada.
+- **Recibo de cobranza** (RG 1415, art. 10): respalda el pago de facturas ya emitidas, con importe en letras; no vale como factura ni lleva CAE. Se eligen las **facturas que cancela** con su saldo (o «Registrar el cobro» desde la factura), el monto y el concepto se completan solos, y los listados muestran cada factura como **cobrada** o con **cobro parcial**.
+- **Envío por correo** desde la aplicación: el comprobante emitido o el remito autorizado sale desde la casilla de la empresa con su detalle, el enlace de verificación de ARCA (o el de conformidad del remito digital) y, si se quiere, el PDF adjunto. Las respuestas le llegan a quien lo envió.
 - **Factura de Crédito Electrónica MiPyME** (Ley 27.440): si la empresa es MiPyME, al facturar a un CUIT se consulta a ARCA si el cliente está obligado a recibirla y sale como tal, con CBU y opción de transferencia; sus notas siguen al comprobante asociado.
 - Una factura B desde $ 10.000.000 exige identificar al comprador, como valida ARCA.
 - Importes en formato argentino (`1.234,56`) con cuentas en centavos: la interfaz y el servidor calculan exactamente lo mismo y el servidor recalcula antes de emitir.
@@ -166,7 +173,9 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 - **QR fiscal** (RG 4892) generado en el navegador. Un comprobante autorizado no se modifica: se corrige con una nota de crédito.
 
 ### Datos y operación
-- **Agenda de clientes compartida** con búsqueda e importación desde **CSV o Excel** (detección de encabezados en español, con o sin acentos; actualiza por CUIT sin duplicar).
+- **Agenda de clientes compartida** en tabla, con búsqueda, orden por columna y accesos directos a remito y factura. Importación desde **CSV o Excel** con **vista previa** (nuevos, actualizaciones por CUIT y filas con error, antes de cargar nada; detección de encabezados en español, con o sin acentos).
+- **Calibración** con controles deslizantes y el **valor exacto** escrito a mano (en milímetros o porcentaje).
+- En el **celular**, Inicio muestra la fecha, el importe y las acciones de cada documento.
 - **Numeración asignada por el servidor**: dos personas autorizando a la vez nunca reciben el mismo número, y un reintento tras un corte no duplica el documento (`id_local`).
 - **Respaldo cifrado** del servidor por consola (diario con `cron`), con verificación y restauración probada; copia descargable para administradores.
 - **Borrador protegido**: el documento en curso se guarda en el equipo mientras se escribe; ante un corte, queda pendiente y se sube solo al volver la red. Se borra al cerrar sesión y a los 7 días sin uso.
@@ -371,7 +380,7 @@ node --test test/unitarias/calculos.test.js   # unitarias de la interfaz
 php test/unitarias/importes.test.php          # unitarias del servidor
 ```
 
-**110 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
+**123 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), IVA y bonificación por renglón, recibo que cancela facturas, envío por correo, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 
