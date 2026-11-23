@@ -48,11 +48,11 @@ return [
         'dominio' => 'intellihelp.tech',
     ],
 
-    // Envío de comprobantes y remitos por correo (función mail() del hosting). Sin remitente,
-    // el mensaje sale desde la casilla de quien lo envía (del dominio de Google), con el nombre
-    // de la empresa. Si se fija uno, tiene que ser una casilla que exista en ese dominio.
+    // Envío de comprobantes y remitos por correo (función mail() del hosting). El remitente
+    // tiene que ser una casilla que exista en el dominio: recibe los rebotes y las respuestas.
+    // Vacío, el mensaje sale desde la casilla de quien lo envía. Siempre con el nombre de la empresa.
     'correo' => [
-        'remitente' => '',
+        'remitente' => 'soporte@intellihelp.tech',
         'empresa' => 'INTELLIHELP S.A.',
     ],
 
