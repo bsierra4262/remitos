@@ -3183,9 +3183,16 @@ body.es-admin .solo-operador {
   pointer-events: none;
 }
 
-/* ============================ Ingreso con Google ============================ */
-.ingreso-google {
+/* ===================== Ingreso con ITHub o con Google ===================== */
+.ingreso-google,
+.ingreso-ithub {
   margin-top: 4px;
+}
+.ingreso-ithub .btn {
+  text-decoration: none;
+}
+.usr-ithub {
+  margin-bottom: 14px;
 }
 .btn.google {
   display: flex;

@@ -67,6 +67,7 @@ jobs:
         run: |
           node --test test/unitarias/calculos.test.js
           php test/unitarias/importes.test.php
+          php test/unitarias/ithub.test.php
 
   # El hosting puede tener PHP 8.2: la sintaxis y las unitarias del servidor se prueban también ahí.
   php82:
@@ -84,6 +85,7 @@ jobs:
         run: |
           find app/api test -name '*.php' -print0 | xargs -0 -n1 php -l
           php test/unitarias/importes.test.php
+          php test/unitarias/ithub.test.php
 
   pruebas:
     name: Batería completa (API e interfaz)
@@ -107,6 +109,7 @@ jobs:
       REMITOS_DB_PASS: testroot
       REMITOS_DB: remitos_test
       REMITOS_CORREO_DIR: /tmp/correo
+      REMITOS_ITHUB_URL: http://127.0.0.1:8767
     steps:
       - uses: actions/checkout@v4
 
@@ -141,12 +144,21 @@ jobs:
               'google' => ['client_id' => 'pruebas.apps.googleusercontent.com', 'client_secret' => 'secreto-de-pruebas', 'dominio' => 'intellihelp.tech', 'token_url' => 'http://127.0.0.1:8766/token'],
           ];
           PHP
+          # Segunda instancia, con ITHub: la usa test_ithub.py contra un ITHub simulado en 8768.
+          cat > /tmp/config.ithub.php <<'PHP'
+          <?php
+          $c = require '/tmp/config.test.php';
+          $c['app_url'] = 'http://127.0.0.1:8767';
+          $c['ithub'] = ['client_id' => 'remitos', 'client_secret' => 'secreto-de-pruebas', 'issuer' => 'http://127.0.0.1:8768'];
+          return $c;
+          PHP
           php app/api/cli/migrar.php
 
       - name: Servidor
         run: |
           mkdir -p "$REMITOS_CORREO_DIR"
           php -S 127.0.0.1:8765 -t app > /tmp/php-server.log 2>&1 &
+          REMITOS_CONFIG=/tmp/config.ithub.php php -S 127.0.0.1:8767 -t app > /tmp/php-server-ithub.log 2>&1 &
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null && break; sleep 1; done
           curl -fs http://127.0.0.1:8765/api/sesion.php >/dev/null || { cat /tmp/php-server.log; exit 1; }
 
@@ -156,12 +168,12 @@ jobs:
       - name: Errores del servidor
         if: always()
         run: |
-          ! grep -E 'PHP (Fatal|Parse|Warning|Notice|Deprecated)' /tmp/php-server.log
+          ! grep -E 'PHP (Fatal|Parse|Warning|Notice|Deprecated)' /tmp/php-server.log /tmp/php-server-ithub.log
 
       - name: Registro del servidor (si algo falló)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: php-server-log
-          path: /tmp/php-server.log
+          path: /tmp/php-server*.log
           retention-days: 7

@@ -48,6 +48,16 @@ return [
         'dominio' => 'intellihelp.tech',
     ],
 
+    // Ingreso con ITHub (sesión única de Intellihelp). Con client_id y client_secret, la aplicación
+    // entra solo por ITHub: quién accede y con qué rol (admin | operador) lo decide ITHub, y Google
+    // ya no abre sesiones por su cuenta. Sin esta sección (o vacía), sigue el ingreso con Google.
+    // Alta en ITHub → Aplicaciones → Remitos: URI de vuelta https://<dominio>/api/ithub.php (una por
+    // dominio), URI después de salir https://<dominio>/ y aviso de cierre https://<dominio>/api/ithub-logout.php.
+    // 'ithub' => [
+    //     'client_id' => 'remitos',
+    //     'client_secret' => 'ith_...',                 // NUNCA en git
+    // ],
+
     // Envío de comprobantes y remitos por correo (función mail() del hosting). El remitente
     // tiene que ser una casilla que exista en el dominio: recibe los rebotes y las respuestas.
     // Vacío, el mensaje sale desde la casilla de quien lo envía. Siempre con el nombre de la empresa.

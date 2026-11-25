@@ -1,8 +1,8 @@
 /**
  * Remitos y Comprobantes — Intellihelp
  *
- * Capa de servidor: llamadas a la API, sesión de usuario, pantalla de ingreso (solo
- * con la cuenta de Google de Intellihelp),
+ * Capa de servidor: llamadas a la API, sesión de usuario, pantalla de ingreso (con
+ * ITHub, la sesión única de Intellihelp, o con la cuenta de Google de Intellihelp),
  * datos compartidos (clientes, remitos, comprobantes y ajustes), administración
  * de usuarios y traspaso al servidor de los datos de versiones anteriores que
  * habían quedado guardados en el navegador.
@@ -16,7 +16,7 @@
 'use strict';
 
 /* ================================ API ================================ */
-const sesion = { usuario: null, csrf: '' };
+const sesion = { usuario: null, csrf: '', ithub: false };
 
 const datos = {
   clientes: [],
@@ -72,8 +72,8 @@ async function api(ruta, opciones = {}) {
   return j;
 }
 
-/* Operación sensible fuera de los 15 minutos del ingreso: se ofrece confirmar con Google
-   (vuelve a la aplicación y se repite la operación). Una sola ventana a la vez. */
+/* Operación sensible fuera de los 15 minutos del ingreso: se ofrece confirmar la identidad
+   con ITHub o con Google (vuelve a la aplicación y se repite la operación). Una sola ventana a la vez. */
 let confirmandoGoogle = false;
 async function ofrecerConfirmarGoogle() {
   if (confirmandoGoogle) return;
@@ -82,10 +82,12 @@ async function ofrecerConfirmarGoogle() {
     const ok = await confirmar({
       titulo: 'Confirmá tu identidad',
       mensaje:
-        'Por seguridad, esta operación pide confirmar con Google que sos vos. Después de confirmar, volvé a hacer la operación.',
-      aceptar: 'Confirmar con Google',
+        'Por seguridad, esta operación pide confirmar con ' +
+        proveedorIngreso() +
+        ' que sos vos. Después de confirmar, volvé a hacer la operación.',
+      aceptar: 'Confirmar con ' + proveedorIngreso(),
     });
-    if (ok) location.href = URL_CONFIRMAR_GOOGLE;
+    if (ok) location.href = urlConfirmar();
   } finally {
     confirmandoGoogle = false;
   }
@@ -172,11 +174,21 @@ function aplicarClavesLocales(uid) {
 async function iniciarSesionApp() {
   try {
     const j = await api('sesion.php', { sinSesion: true });
+    sesion.ithub = !!j.ithub;
+    const manual = new URLSearchParams(location.search).has('manual');
     const aviso = avisoIngresoGoogle();
     if (!j.usuario) {
+      // Con ITHub, la pantalla de ingreso no se ve: se va directo a la sesión única y, si ya
+      // estaba abierta, se entra sin ver nada. Se muestra solo cuando hay algo que explicar
+      // (un aviso de la vuelta) o con ?manual=1; ahí se entra con el botón.
+      if (j.ithub && !aviso && !manual) return location.replace(URL_INGRESO_ITHUB);
+      $('#ingresoIthubFila').hidden = !j.ithub;
       $('#ingresoGoogleFila').hidden = !j.google;
+      $('#ingresoBajada').textContent = j.ithub
+        ? 'Con la sesión única de Intellihelp.'
+        : 'Con tu cuenta de Google de Intellihelp.';
       return mostrarAcceso(
-        j.google
+        j.ithub || j.google
           ? aviso
           : 'El ingreso con Google todavía no está configurado en el servidor. Avisale a un administrador.'
       );
@@ -188,8 +200,16 @@ async function iniciarSesionApp() {
   }
 }
 
-/* Resultado de la vuelta desde Google (?ingreso=…): se muestra una vez y se limpia de la URL. */
+/* Resultado de la vuelta desde ITHub o Google (?ingreso=…): se muestra una vez y se limpia de la URL. */
 const AVISOS_GOOGLE = {
+  ithub_no_configurado: 'El ingreso con ITHub todavía no está configurado.',
+  ithub_vencido: 'El ingreso con ITHub venció o no se pudo verificar. Probá de nuevo.',
+  ithub_error: 'ITHub no pudo confirmar el ingreso. Probá de nuevo en unos minutos.',
+  ithub_sin_acceso:
+    'Tu usuario de ITHub no tiene acceso a Remitos. Si lo necesitás, pedíselo a un administrador de ITHub.',
+  ithub_rol: 'Tu rol en ITHub no corresponde a ninguno de Remitos. Avisale a un administrador de ITHub.',
+  ithub_limitado: 'Demasiados intentos de ingreso con ITHub. Esperá unos minutos.',
+  ithub_otra_cuenta: 'La sesión de ITHub es de otra cuenta que la de esta sesión. No se confirmó nada.',
   google_no_configurado: 'El ingreso con Google todavía no está configurado.',
   google_cancelado: 'Se canceló el ingreso con Google.',
   google_vencido: 'El ingreso con Google venció o no se pudo verificar. Probá de nuevo.',
@@ -200,31 +220,35 @@ const AVISOS_GOOGLE = {
   google_limitado: 'Demasiados intentos de ingreso con Google. Esperá unos minutos.',
   google_otra_cuenta:
     'Para confirmar tu identidad elegí en Google la misma cuenta con la que ingresaste. No se confirmó nada.',
-  confirmado: 'Identidad confirmada con Google. Ya podés repetir la operación.',
+  confirmado: 'Identidad confirmada. Ya podés repetir la operación.',
 };
 function avisoIngresoGoogle() {
   const params = new URLSearchParams(location.search);
   const codigo = params.get('ingreso');
   if (!codigo) return '';
   params.delete('ingreso');
+  params.delete('manual');
   history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : ''));
   return AVISOS_GOOGLE[codigo] || '';
 }
 
-/* Las operaciones sensibles valen dentro de los 15 minutos del ingreso con Google;
-   después el servidor pide volver a confirmar la identidad con Google. */
-const URL_CONFIRMAR_GOOGLE = 'api/google.php?accion=inicio&confirmar=1';
+/* Las operaciones sensibles valen dentro de los 15 minutos del ingreso; después el servidor
+   pide volver a confirmar la identidad, con ITHub si está configurado o con Google. */
+const URL_INGRESO_ITHUB = 'api/ithub.php?accion=inicio';
+const proveedorIngreso = () => (sesion.ithub ? 'ITHub' : 'Google');
+const urlConfirmar = () => (sesion.ithub ? 'api/ithub.php' : 'api/google.php') + '?accion=inicio&confirmar=1';
 /** Detalle de un error para avisoCert: si hay que reconfirmar con Google, ofrece hacerlo. */
 function detalleError(err) {
   const texto = ' ' + esc(err && err.message ? err.message : 'Error inesperado');
   return err && err.respuesta && err.respuesta.reconfirmar_google
-    ? texto + ` <a class="btn sm google-confirmar" href="${URL_CONFIRMAR_GOOGLE}">Confirmar con Google</a>`
+    ? texto + ` <a class="btn sm google-confirmar" href="${urlConfirmar()}">Confirmar con ${proveedorIngreso()}</a>`
     : texto;
 }
 
 function aplicarSesion(j) {
   sesion.usuario = j.usuario;
   sesion.csrf = j.csrf;
+  sesion.ithub = !!j.ithub;
   entrarApp();
 }
 
@@ -264,13 +288,15 @@ async function cerrarSesion() {
     }))
   )
     return;
+  let salida = '';
   try {
-    await api('sesion.php', { method: 'POST', body: { accion: 'salir' } });
+    // Con ITHub, el servidor devuelve la dirección que cierra la sesión única (todas las aplicaciones).
+    salida = (await api('sesion.php', { method: 'POST', body: { accion: 'salir' } })).salida || '';
   } catch (e) {
     /* aunque falle la red, la sesión local se descarta */
   }
   if (sesion.usuario) [LS.draft, LS.compDraft].forEach(k => localStorage.removeItem(k));
-  location.replace(location.pathname);
+  location.replace(/^https?:\/\//.test(salida) ? salida : location.pathname + (sesion.ithub ? '?manual=1' : ''));
 }
 
 /* ---------------------------- Pantalla de acceso ---------------------------- */
@@ -280,8 +306,15 @@ function mostrarAcceso(aviso) {
   const el = $('#accesoAviso');
   el.textContent = aviso || '';
   el.hidden = !aviso;
+  // Con ITHub (también cuando la sesión vence estando adentro) se entra con su botón.
+  if (sesion.ithub) {
+    $('#ingresoIthubFila').hidden = false;
+    $('#ingresoGoogleFila').hidden = true;
+    $('#ingresoBajada').textContent = 'Con la sesión única de Intellihelp.';
+  }
   setTimeout(() => {
-    if (!$('#ingresoGoogleFila').hidden) $('#ingresoGoogle').focus();
+    if (!$('#ingresoIthubFila').hidden) $('#ingresoIthub').focus();
+    else if (!$('#ingresoGoogleFila').hidden) $('#ingresoGoogle').focus();
   }, 50);
 }
 function ocultarAcceso() {
@@ -312,6 +345,7 @@ let usuarioEditando = null;
 async function renderUsuarios() {
   const box = $('#usuariosLista');
   if (!box || !esAdmin()) return;
+  $('#usrIthubAviso').hidden = !sesion.ithub;
   try {
     usuarios = (await api('usuarios.php')).usuarios;
   } catch (e) {

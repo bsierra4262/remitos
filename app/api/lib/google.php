@@ -122,11 +122,14 @@ function google_auth_url(array $g, string $state, string $nonce, string $verifie
     return GOOGLE_AUTH_URL . '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 }
 
-/** Guarda el estado del pedido en la cookie cifrada de 10 minutos. */
-function google_save_state(array $config, array $state): void
+/**
+ * Guarda el estado del pedido en la cookie cifrada de 10 minutos. El ingreso con ITHub
+ * (lib/ithub.php) usa lo mismo con su propia cookie y su propio propósito de cifrado.
+ */
+function google_save_state(array $config, array $state, string $cookie = GOOGLE_COOKIE, string $purpose = 'oauth:google'): void
 {
-    $value = crypto_encrypt(json_encode($state + ['exp' => time() + GOOGLE_COOKIE_SECONDS]), $config, 'oauth:google');
-    setcookie(GOOGLE_COOKIE, $value, [
+    $value = crypto_encrypt(json_encode($state + ['exp' => time() + GOOGLE_COOKIE_SECONDS]), $config, $purpose);
+    setcookie($cookie, $value, [
         'expires' => time() + GOOGLE_COOKIE_SECONDS,
         'path' => session_cookie_path() . 'api/',
         'secure' => api_is_https(),
@@ -136,10 +139,10 @@ function google_save_state(array $config, array $state): void
 }
 
 /** Lee y borra el estado del pedido. Null si no está, venció o fue alterado. */
-function google_take_state(array $config): ?array
+function google_take_state(array $config, string $cookie = GOOGLE_COOKIE, string $purpose = 'oauth:google'): ?array
 {
-    $raw = (string) ($_COOKIE[GOOGLE_COOKIE] ?? '');
-    setcookie(GOOGLE_COOKIE, '', [
+    $raw = (string) ($_COOKIE[$cookie] ?? '');
+    setcookie($cookie, '', [
         'expires' => time() - 3600,
         'path' => session_cookie_path() . 'api/',
         'secure' => api_is_https(),
@@ -150,7 +153,7 @@ function google_take_state(array $config): ?array
         return null;
     }
     try {
-        $state = json_decode(crypto_decrypt($raw, $config, 'oauth:google'), true);
+        $state = json_decode(crypto_decrypt($raw, $config, $purpose), true);
     } catch (RuntimeException) {
         return null;
     }

@@ -10,8 +10,8 @@
  *                                             para operaciones sensibles (vuelve con ?ingreso=confirmado).
  *   GET google.php?code=…&state=…             Vuelta desde Google: valida, abre la sesión y vuelve a la aplicación.
  *
- * Es la única forma de ingresar: la aplicación no tiene contraseñas ni segundo factor
- * propios (es de uso interno y Google ya protege la cuenta de Workspace). Solo ingresa
+ * Con ITHub configurado (ithub.php), este endpoint solo deriva a ITHub. Sin ITHub, es la
+ * única forma de ingresar: la aplicación no tiene contraseñas ni segundo factor propios (es de uso interno y Google ya protege la cuenta de Workspace). Solo ingresa
  * quien ya es usuario activo de la aplicación con ese correo: los usuarios los da de
  * alta un administrador. Cualquier error vuelve a la pantalla de ingreso con un código
  * (?ingreso=…) que la aplicación traduce.
@@ -42,6 +42,15 @@ function google_back(string $result = '', string $page = ''): never
 
 if (api_method() !== 'GET') {
     http_response_code(405);
+    exit;
+}
+
+// Con ITHub configurado, el ingreso (y la reconfirmación de identidad) es por ITHub: Google
+// ya no abre sesiones por su cuenta, porque se saltearía los permisos que da ITHub.
+if (ithub_config($config) !== null) {
+    $q = array_intersect_key($_GET, ['accion' => 1, 'confirmar' => 1, 'volver' => 1]);
+    header('Location: ' . google_base_url() . '/' . (($q['accion'] ?? '') === 'inicio'
+        ? 'api/ithub.php?' . http_build_query(array_map('strval', array_filter($q, 'is_string'))) : ''), true, 302);
     exit;
 }
 

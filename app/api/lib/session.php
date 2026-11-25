@@ -3,8 +3,9 @@
 /**
  * Remitos y Comprobantes — Intellihelp
  *
- * Sesión de usuario: se abre con el ingreso con Google (ver google.php), con cookie
- * segura y token CSRF. La aplicación no tiene contraseñas ni segundo factor propios.
+ * Sesión de usuario: se abre con el ingreso con ITHub, la sesión única de Intellihelp (ver
+ * ithub.php), o, sin ITHub configurado, con el ingreso con Google (ver google.php), con
+ * cookie segura y token CSRF. La aplicación no tiene contraseñas ni segundo factor propios.
  *
  * - Cookie HttpOnly, Secure (bajo HTTPS) y SameSite=Strict, limitada a la ruta de la aplicación.
  * - El identificador de sesión se regenera al ingresar.
@@ -16,6 +17,8 @@
  *   sensibles la aceptan durante SESSION_CONFIRM_SECONDS y después piden volver a pasar
  *   por Google (ver user_confirm_identity).
  * - Toda escritura con sesión exige el token CSRF en la cabecera X-CSRF-Token.
+ * - Una sesión abierta con ITHub guarda el `sid` de la sesión única: si ITHub avisa que se
+ *   cerró (api/ithub-logout.php), se corta en el pedido siguiente.
  *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
@@ -26,7 +29,7 @@ declare(strict_types=1);
 const SESSION_NAME = 'remitos_sid';
 const SESSION_IDLE_SECONDS = 8 * 3600;
 const SESSION_MAX_SECONDS = 12 * 3600;
-/** Plazo en que el ingreso con Google vale como confirmación de identidad para operaciones sensibles. */
+/** Plazo en que el ingreso (con ITHub o Google) vale como confirmación de identidad para operaciones sensibles. */
 const SESSION_CONFIRM_SECONDS = 15 * 60;
 
 /** Roles de usuario y sus permisos. */
@@ -87,6 +90,16 @@ function session_user(PDO $pdo): ?array
         return null;
     }
 
+    // Sesión abierta con ITHub que ITHub ya cerró (aviso por detrás en ithub-logout.php).
+    if (!empty($_SESSION['ithub_sid']) && ithub_sid_cerrado($pdo, (string) $_SESSION['ithub_sid'])) {
+        audit_event($pdo, 'Salida del sistema', [
+            'categoria' => 'acceso', 'recurso' => 'sesion', 'usuario_id' => $id, 'detalle' => 'cierre desde ITHub (sesión única)',
+        ]);
+        session_end();
+
+        return null;
+    }
+
     $st = $pdo->prepare('SELECT id, nombre, email, rol, activo, sesion_version FROM usuarios WHERE id = ?');
     $st->execute([$id]);
     $row = $st->fetch();
@@ -116,8 +129,14 @@ function session_confirmation_valid(array $session, ?int $now = null): bool
     return $at > 0 && $now - $at >= 0 && $now - $at <= SESSION_CONFIRM_SECONDS;
 }
 
-/** Abre la sesión de un usuario que acaba de ingresar con Google (con la versión de sesión vigente). */
-function session_login(PDO $pdo, int $userId): void
+/**
+ * Abre la sesión de un usuario que acaba de ingresar (con la versión de sesión vigente).
+ * Con ITHub, $extra trae el `sid` de la sesión única y el id_token (para salir sin que ITHub
+ * pregunte).
+ *
+ * @param array{ithub_sid?: string, ithub_id_token?: string} $extra
+ */
+function session_login(PDO $pdo, int $userId, array $extra = []): void
 {
     $st = $pdo->prepare('SELECT sesion_version FROM usuarios WHERE id = ?');
     $st->execute([$userId]);
@@ -130,7 +149,13 @@ function session_login(PDO $pdo, int $userId): void
         'visto' => time(),
         'csrf' => bin2hex(random_bytes(32)),
         'confirmado' => time(),
-    ];
+    ] + $extra;
+}
+
+/** Datos de ITHub de la sesión actual (para salir): sid e id_token, vacíos si no se entró con ITHub. */
+function session_ithub(): array
+{
+    return ['sid' => (string) ($_SESSION['ithub_sid'] ?? ''), 'id_token' => (string) ($_SESSION['ithub_id_token'] ?? '')];
 }
 
 /** Cierra la sesión y borra la cookie. */

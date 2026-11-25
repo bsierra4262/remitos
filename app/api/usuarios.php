@@ -16,6 +16,10 @@
  * desactivarse ni eliminarse. Cambiar el rol o desactivar cierra las sesiones abiertas
  * de ese usuario.
  *
+ * Con ITHub configurado, quién entra y con qué rol lo decide ITHub (→ Permisos): el rol de
+ * ITHub se aplica en cada ingreso y el usuario se crea solo la primera vez. Lo que se cambie
+ * acá vale hasta el próximo ingreso de la persona.
+ *
  * @author    Brian Gabriel Sierra <bsierra@intellihelp.tech>
  * @copyright 2026 Intellihelp
  */
@@ -101,7 +105,9 @@ if ($method === 'POST') {
         api_respond(201, [
             'ok' => true,
             'usuario' => user_public(user_find($pdo, $id)),
-            'aviso' => 'Ya puede ingresar con «Ingresar con Google» usando ' . $email . '.',
+            'aviso' => ithub_config($config) !== null
+                ? 'Para que pueda ingresar, dale acceso a Remitos en ITHub → Permisos (' . $email . '): el rol que tenga ahí se aplica en cada ingreso.'
+                : 'Ya puede ingresar con «Ingresar con Google» usando ' . $email . '.',
         ]);
     }
 
