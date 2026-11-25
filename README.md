@@ -47,7 +47,9 @@
 
 ### Ingreso
 
-<p align="center"><img src="docs/imagenes/capturas/ingreso.png" alt="Ingreso" width="100%"></p>
+Con ITHub, la aplicación pasa directo por la sesión única; la pantalla de ingreso solo se ve con un aviso o con `?manual=1`:
+
+<p align="center"><img src="docs/imagenes/capturas/ingreso-ithub.png" alt="Ingreso con ITHub" width="100%"></p>
 
 ### Inicio
 
