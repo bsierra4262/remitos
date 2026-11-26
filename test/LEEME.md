@@ -59,6 +59,19 @@ Se ingresa solo con Google. Las pruebas levantan un **Google simulado** en `127.
              'dominio' => 'intellihelp.tech', 'token_url' => 'http://127.0.0.1:8766/token'],
 ```
 
+### Ingreso con ITHub
+
+`test_ithub.py` necesita una **segunda instancia** de la aplicación con la sección `ithub` (con ITHub configurado la aplicación ya no ingresa con Google, así que no puede ser la del resto de la batería), sobre la misma base de pruebas. Las pruebas levantan un **ITHub simulado** en `127.0.0.1:8768` (`REMITOS_ITHUB_PUERTO`) que firma los tokens con RS256 con una clave generada en el momento y publica la pública en `/oauth/jwks`: la aplicación valida la firma de verdad. Sin `REMITOS_ITHUB_URL` el módulo se omite y lo informa.
+
+```bash
+# config.ithub.php: la de pruebas más
+#   'app_url' => 'http://127.0.0.1:8767',
+#   'ithub' => ['client_id' => 'remitos', 'client_secret' => 'secreto-de-pruebas', 'issuer' => 'http://127.0.0.1:8768'],
+REMITOS_CONFIG=/tmp/config.ithub.php php -S 127.0.0.1:8767 -t app
+REMITOS_ITHUB_URL=http://127.0.0.1:8767 python test/correr.py ithub
+php test/unitarias/ithub.test.php   # firma, emisor, destinatario, vencimiento, nonce, aviso de cierre y salida (sin red)
+```
+
 Las pruebas de interfaz ingresan con un administrador de pruebas (`admin.pruebas@intellihelp.tech`) que se crea solo con la clave maestra del entorno.
 
 ## Otro entorno de pruebas
@@ -84,8 +97,9 @@ Las pruebas crean usuarios y documentos y los borran al terminar: no se corren c
 | `test_controles.py` | Integridad de la auditoría ante un evento alterado, freno de claves de API (429), permisos de exportación y de registro de CAE externo, CORS con origen ajeno, importación de clientes (CUIT inválido y reimportación sin duplicados), vínculo factura → remito |
 | `test_sesion.py` | Ingreso con Google de punta a punta y sus rechazos (sin usuario, otro dominio, correo sin verificar, otra aplicación, token vencido, PKCE ajeno, estado manipulado), ausencia de contraseñas y segundo factor, alta solo con correos del dominio, cookie y CSRF, otro origen, roles, datos compartidos, referencias concurrentes, invalidación de sesiones, traspaso de datos de versiones anteriores |
 | `test_cai.py` | Talonarios, numeración correlativa, autorizaciones simultáneas, inmutabilidad del autorizado, C.A.I. vencido, talonarios usados y autorización desde la aplicación |
+| `test_ithub.py` | Ingreso con ITHub de punta a punta contra un ITHub simulado: redirección con PKCE, alta con el rol del token, el rol lo decide ITHub, rechazos (rol desconocido, firma ajena, otra aplicación, otro emisor, vencido, nonce), sin acceso, salida por la sesión única, aviso de cierre (válido corta la sesión; inválido 400) y reconfirmación con la misma cuenta |
 | `test_normativa.py` | Contenido obligatorio del remito (Anexo V), talonario sin constatar, conformidad del remito digital por API y desde la página pública en celular, PDF digital con QR |
-| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, XML para ARCA, token de Google y plazo de confirmación de la sesión. Los casos de importes, IVA y CUIT (`casos-importes.json`) son los mismos en JS y PHP; Google, sesión, CBU y XML de ARCA se prueban solo en PHP |
+| `unitarias/` | Importes en formato argentino, IVA, totales, montos en letras, CUIT, XML para ARCA, token de Google y plazo de confirmación de la sesión. Los casos de importes, IVA y CUIT (`casos-importes.json`) son los mismos en JS y PHP; Google, sesión, CBU y XML de ARCA se prueban solo en PHP. `ithub.test.php`: PEM desde el JWK y validación del id_token y del aviso de cierre de ITHub |
 
 ## Agregar un caso
 

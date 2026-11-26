@@ -47,7 +47,9 @@
 
 ### Ingreso
 
-<p align="center"><img src="docs/imagenes/capturas/ingreso.png" alt="Ingreso" width="100%"></p>
+Con ITHub, la aplicación pasa directo por la sesión única; la pantalla de ingreso solo se ve con un aviso o con `?manual=1`:
+
+<p align="center"><img src="docs/imagenes/capturas/ingreso-ithub.png" alt="Ingreso con ITHub" width="100%"></p>
 
 ### Inicio
 
@@ -184,9 +186,10 @@ El certificado y la clave privada se cargan una vez por ambiente, como archivo o
 - Atajos **Ctrl+S** y **Ctrl+P** según el documento en pantalla.
 
 ### Usuarios y acceso
-- Ingreso **solo con la cuenta de Google** de Intellihelp (`@intellihelp.tech`): la aplicación es de uso interno y no tiene contraseñas ni segundo factor propios; la seguridad de la cuenta la da Google Workspace. Las operaciones sensibles se confirman con el ingreso con Google de los últimos 15 minutos.
-- Roles **operador** (documentos y clientes) y **administrador** (además usuarios, ajustes, certificado de ARCA, talonarios y panel).
-- El administrador da de alta a cada persona con su correo de Intellihelp y su rol, y la activa o desactiva.
+- Ingreso con **ITHub**, la sesión única de Intellihelp: si la persona ya entró a ITHub, abre Remitos sin ver ninguna pantalla. ITHub valida la cuenta de Google de Intellihelp y decide **quién entra y con qué rol**; salir de Remitos cierra la sesión única (todas las aplicaciones) y, cuando ITHub cierra una sesión o le quita Remitos a alguien, la sesión de Remitos se corta sola. La aplicación no tiene contraseñas ni segundo factor propios. Las operaciones sensibles se confirman con el ingreso de los últimos 15 minutos.
+- Una instalación sin ITHub configurado ingresa con la **cuenta de Google** de Intellihelp (`@intellihelp.tech`), como antes.
+- Roles **operador** (documentos y clientes) y **administrador** (además usuarios, ajustes, certificado de ARCA, talonarios y panel). Con ITHub se asignan en **ITHub → Permisos** y se aplican en cada ingreso; el usuario de Remitos se crea solo la primera vez.
+- Sin ITHub, el administrador da de alta a cada persona con su correo de Intellihelp y su rol, y la activa o desactiva.
 - La calibración de impresión queda en cada equipo, porque depende de su impresora.
 
 ### Panel de la API
@@ -248,16 +251,18 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 │   │   ├── config.js        # Papel, posición de cada campo, calibración de fábrica, datos del emisor
 │   │   ├── calculos.js      # Importes, IVA, CUIT y montos en letras (también se prueba con Node)
 │   │   ├── app.js           # Edición, vista previa, impresión, emisión, agenda y configuración
-│   │   ├── servidor.js      # API, sesión, ingreso con Google, usuarios y datos compartidos
+│   │   ├── servidor.js      # API, sesión, ingreso con ITHub o Google, usuarios y datos compartidos
 │   │   ├── dialogo.js       # Diálogo de confirmación propio (en lugar del nativo del navegador)
 │   │   ├── conformidad.js   # Página pública de conformidad del remito digital
 │   │   ├── panel.js         # Panel de la API
 │   │   └── lib/             # SheetJS y generador de QR (versión y hash en docs/dependencias.md)
 │   ├── api/
 │   │   ├── bootstrap.php    # Arranque común y manejo de errores
-│   │   ├── lib/             # http · db (migraciones) · session · users · google · auth · audit · crypto
+│   │   ├── lib/             # http · db (migraciones) · session · users · ithub · google · auth · audit · crypto
 │   │   │                    # · importes · ajustes · normativa · arca (WSAA, WSFEv1, WSFECRED, WSCDC)
-│   │   ├── google.php       # Ingreso con Google (única forma de ingresar)
+│   │   ├── ithub.php        # Ingreso con ITHub (sesión única) y vuelta desde ITHub
+│   │   ├── ithub-logout.php # Aviso de cierre de ITHub (back-channel logout)
+│   │   ├── google.php       # Ingreso con Google (sin ITHub configurado)
 │   │   ├── sesion.php       # Estado de la sesión y salida
 │   │   ├── usuarios.php     # Administración de usuarios
 │   │   ├── clientes.php     # Agenda de clientes
@@ -300,11 +305,12 @@ Aplicación de **una sola página** en HTML, CSS y JavaScript sin frameworks, co
 ## Seguridad
 
 **Usuarios y sesión**
-- **Solo ingreso con Google**, sin contraseñas propias: OpenID Connect con PKCE resuelto en el servidor, limitado al dominio `intellihelp.tech` y a usuarios dados de alta. No hay contraseñas ni secretos de segundo factor que puedan filtrarse de la base, y el secreto del cliente vive solo en `config.php`.
-- **Operaciones sensibles** (certificados de ARCA, claves de API, alta de usuarios y rol de administrador, exportación, CUIT/CBU/ambiente del emisor): exigen haber confirmado la identidad con Google en los últimos 15 minutos, con la misma cuenta de la sesión.
+- **Ingreso con ITHub** (sesión única de Intellihelp), sin contraseñas propias: OpenID Connect con PKCE resuelto en el servidor; el `id_token` se valida entero (firma RS256 con la clave pública de ITHub, emisor, destinatario, vencimiento y nonce) y el rol se toma solo de un token válido. El secreto del cliente vive solo en `config.php`. **Aviso de cierre** (back-channel logout): cuando ITHub cierra una sesión, la de Remitos con ese `sid` se corta en el pedido siguiente.
+- Sin ITHub configurado, **ingreso con Google**: OpenID Connect con PKCE resuelto en el servidor, limitado al dominio `intellihelp.tech` y a usuarios dados de alta. En ningún caso hay contraseñas ni secretos de segundo factor que puedan filtrarse de la base.
+- **Operaciones sensibles** (certificados de ARCA, claves de API, alta de usuarios y rol de administrador, exportación, CUIT/CBU/ambiente del emisor): exigen haber confirmado la identidad (con ITHub o Google) en los últimos 15 minutos, con la misma cuenta de la sesión.
 - Cookie de sesión `HttpOnly`, `Secure` y `SameSite=Strict`, limitada a la ruta de la aplicación; identificador regenerado al ingresar.
 - **Token CSRF** obligatorio en toda escritura, que además debe ser JSON y venir del propio origen (también el ingreso); vencimiento por inactividad (8 h) y absoluto (12 h).
-- **Freno de ingresos fallidos**: 20 vueltas fallidas desde Google por conexión en 15 minutos.
+- **Freno de ingresos fallidos**: 20 vueltas fallidas desde ITHub o desde Google por conexión en 15 minutos.
 - Cambiar el rol o desactivar a un usuario cierra sus sesiones en el acto. Siempre queda al menos un administrador.
 
 **Credenciales de ARCA**
@@ -356,7 +362,7 @@ php -r "\$k='ith_'.bin2hex(random_bytes(24)); echo \$k, PHP_EOL, hash('sha256',\
 # 3. Esquema de la base (también en cada despliegue posterior):
 php app/api/cli/migrar.php
 
-# 4. Primer administrador:
+# 4. Primer administrador (sin ITHub; con ITHub, el acceso y el rol se dan en ITHub → Permisos):
 php app/api/cli/usuario.php "Nombre Apellido" correo@intellihelp.tech admin
 #    después ingresa con «Ingresar con Google» usando esa cuenta
 
@@ -369,6 +375,27 @@ Después:
 2. En **Configuración → Conexión con ARCA**: CUIT, puntos de venta y el certificado.
 3. Cargar el talonario de C.A.I. desde el **Panel de la API** según el instructivo.
 
+### Ingreso con ITHub (sesión única)
+
+Con ITHub, Remitos no tiene pantalla de ingreso propia: la aplicación manda a ITHub y, si la persona ya entró ahí, pasa sin ver nada. El acceso y el rol (`admin` u `operador`) se administran en **ITHub → Permisos**.
+
+1. En **ITHub → Aplicaciones → Remitos y Comprobantes**:
+
+   | Campo | Valor |
+   | --- | --- |
+   | Roles | `admin`, `operador` (el de más jerarquía primero) |
+   | URIs de vuelta | `https://remitos.intellihelp.tech/api/ithub.php` y `https://intellihelp.tech/remitos/api/ithub.php` |
+   | URIs después de salir | `https://remitos.intellihelp.tech/` y `https://intellihelp.tech/remitos/` |
+   | Aviso de cierre | `https://remitos.intellihelp.tech/api/ithub-logout.php` |
+
+   y **Generar secreto** (se muestra una sola vez).
+
+2. En `config.php`, la sección `ithub` (ver `config.sample.php`) con `client_id` `remitos` y ese secreto.
+
+3. `php api/cli/migrar.php` (versión 7 del esquema: tabla `ithub_sesiones_cerradas`, donde el aviso de cierre anota las sesiones de ITHub que se cerraron).
+
+Sin la sección `ithub`, la aplicación sigue ingresando con Google como siempre. Para ver la pantalla de ingreso sin que redirija sola: `https://remitos.intellihelp.tech/?manual=1`.
+
 Los recursos se referencian con `?v=NNN`: al publicar cambios en CSS o JS se incrementa la versión en `index.html`, `panel.html` y `conformidad.html`. En cada despliegue: publicar `app/`, correr `php api/cli/migrar.php` y verificar las cabeceras (ver [`docs/seguridad.md`](docs/seguridad.md)).
 
 ## Pruebas
@@ -378,9 +405,10 @@ pip install -r test/requirements.txt && playwright install chromium
 python test/correr.py                         # batería de API e interfaz
 node --test test/unitarias/calculos.test.js   # unitarias de la interfaz
 php test/unitarias/importes.test.php          # unitarias del servidor
+php test/unitarias/ithub.test.php             # unitarias del ingreso con ITHub
 ```
 
-**123 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), IVA y bonificación por renglón, recibo que cancela facturas, envío por correo, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
+**132 casos** automatizados sobre la aplicación en el navegador y la API —impresión y ejemplares, reglas oficiales de emisión de ARCA (letra según la condición frente al IVA, Factura de Crédito MiPyME, recibo de cobranza), IVA y bonificación por renglón, recibo que cancela facturas, envío por correo, formularios y formatos, documentos PDF, inicio y recuperación de borradores, C.A.I. y autorizaciones simultáneas, inmutabilidad de lo autorizado, contenido obligatorio del remito, remito digital y conformidad del destinatario, usuarios, ingreso con Google (contra un Google simulado) e ingreso con ITHub (contra un ITHub simulado que firma con RS256: alta con el rol del token, rechazos, salida por la sesión única y aviso de cierre) y roles, datos compartidos, autenticación y permisos, credenciales de ARCA (incluida la firma real contra WSAA de homologación) y validación de datos— más pruebas unitarias en Node y PHP sobre los mismos casos de importes, IVA y CUIT. La integración continua las corre en cada cambio. Ver [`test/LEEME.md`](test/LEEME.md).
 
 ## Autor
 

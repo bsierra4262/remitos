@@ -18,7 +18,7 @@
 declare(strict_types=1);
 
 /** Versión del esquema que espera este código. */
-const API_SCHEMA_VERSION = 6;
+const API_SCHEMA_VERSION = 7;
 
 /** Zona horaria de la sesión de base de datos (Argentina, UTC−3 todo el año). */
 const API_DB_TIMEZONE = '-03:00';
@@ -82,6 +82,7 @@ function api_migrate(PDO $pdo): void
             4 => 'api_migration_4',
             5 => 'api_migration_5',
             6 => 'api_migration_6',
+            7 => 'api_migration_7',
         ];
         foreach ($migrations as $version => $migration) {
             if ($version > $current) {
@@ -501,4 +502,19 @@ function api_migration_6(PDO $pdo): void
         $pdo->exec('ALTER TABLE comprobantes DROP INDEX uq_num');
     }
     $pdo->exec('ALTER TABLE comprobantes ADD UNIQUE KEY uq_num (tipo, subtipo, letra, pto_vta, numero_int, cbte_tipo, ambiente)');
+}
+
+/**
+ * Noviembre de 2026, ingreso con ITHub (sesión única de Intellihelp): tabla donde
+ * api/ithub-logout.php anota las sesiones de ITHub que se cerraron (aviso por detrás,
+ * back-channel logout). session_user() la consulta en cada pedido y corta toda sesión de
+ * la aplicación abierta con ese `sid`. No toca ningún dato existente.
+ */
+function api_migration_7(PDO $pdo): void
+{
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ithub_sesiones_cerradas (
+        sid     VARCHAR(64) NOT NULL PRIMARY KEY,
+        cerrada DATETIME    NOT NULL,
+        INDEX idx_cerrada (cerrada)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
 }

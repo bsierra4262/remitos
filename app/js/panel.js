@@ -76,8 +76,10 @@
     if (res.status === 403 && d.reconfirmar_google && !clave) ofrecerConfirmarGoogle();
     return { status: res.status, d };
   }
-  /* Operación sensible fuera de los 15 minutos del ingreso: se ofrece confirmar con Google. */
+  /* Operación sensible fuera de los 15 minutos del ingreso: se ofrece confirmar la identidad
+     con ITHub (si la sesión se abrió así) o con Google. */
   let confirmandoGoogle = false;
+  let proveedor = 'Google';
   async function ofrecerConfirmarGoogle() {
     if (confirmandoGoogle) return;
     confirmandoGoogle = true;
@@ -85,10 +87,14 @@
       const ok = await confirmar({
         titulo: 'Confirmá tu identidad',
         mensaje:
-          'Por seguridad, esta operación pide confirmar con Google que sos vos. Después de confirmar, volvé a hacer la operación.',
-        aceptar: 'Confirmar con Google',
+          'Por seguridad, esta operación pide confirmar con ' +
+          proveedor +
+          ' que sos vos. Después de confirmar, volvé a hacer la operación.',
+        aceptar: 'Confirmar con ' + proveedor,
       });
-      if (ok) location.href = 'api/google.php?accion=inicio&confirmar=1&volver=panel';
+      if (ok)
+        location.href =
+          (proveedor === 'ITHub' ? 'api/ithub.php' : 'api/google.php') + '?accion=inicio&confirmar=1&volver=panel';
     } finally {
       confirmandoGoogle = false;
     }
@@ -688,17 +694,18 @@
       .then(j => {
         if (j && j.usuario && j.usuario.rol === 'admin') {
           csrf = j.csrf;
+          proveedor = j.ithub ? 'ITHub' : 'Google';
           abrirPanel();
-          // Vuelta de la confirmación con Google (?ingreso=…)
+          // Vuelta de la confirmación con ITHub o Google (?ingreso=…)
           const ingreso = new URLSearchParams(location.search).get('ingreso');
           if (ingreso) {
             history.replaceState(null, '', location.pathname);
             avisar(
               ingreso === 'confirmado'
-                ? 'Identidad confirmada con Google. Ya podés repetir la operación.'
-                : ingreso === 'google_otra_cuenta'
-                  ? 'Para confirmar tu identidad elegí en Google la misma cuenta con la que ingresaste.'
-                  : 'No se pudo confirmar la identidad con Google. Probá de nuevo.',
+                ? 'Identidad confirmada con ' + proveedor + '. Ya podés repetir la operación.'
+                : ingreso === 'google_otra_cuenta' || ingreso === 'ithub_otra_cuenta'
+                  ? 'Para confirmar tu identidad tiene que ser la misma cuenta con la que ingresaste.'
+                  : 'No se pudo confirmar la identidad con ' + proveedor + '. Probá de nuevo.',
               ingreso === 'confirmado' ? 'okmsg' : 'err'
             );
           }
